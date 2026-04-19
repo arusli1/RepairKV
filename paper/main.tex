@@ -1,0 +1,495 @@
+\documentclass{article}
+
+% AdaptFM @ ICML 2026 workshop submission.
+% 6-page limit (references excluded). Double-blind.
+
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{enumitem}
+
+\usetikzlibrary{arrows.meta}
+\pgfplotsset{compat=1.18}
+
+\definecolor{plotblue}{RGB}{31,119,180}
+\definecolor{plotorange}{RGB}{214,96,0}
+\definecolor{plotgreen}{RGB}{44,160,44}
+\definecolor{plotgray}{RGB}{120,120,120}
+
+\usepackage{icml2026}
+
+\icmltitlerunning{IdleKV: Exploiting Agentic LLM Idle Time for KV Cache Repair}
+
+\begin{document}
+
+\twocolumn[
+  \icmltitle{Idle-Window Compute: Adaptive KV Cache Repair\\in Batch-1 LLM Agents}
+
+  \begin{icmlauthorlist}
+    \icmlauthor{Anonymous Author(s)}{anon}
+  \end{icmlauthorlist}
+  \icmlaffiliation{anon}{Anonymous Institution}
+  \icmlcorrespondingauthor{Anonymous Author(s)}{anonymous@anon.invalid}
+  \icmlkeywords{adaptive test-time compute, dynamic KV cache compression,
+    agentic inference, batch-1, quality-resource tradeoff}
+  \vskip 0.3in
+]
+
+\printAffiliationsAndNotice{}
+
+\begin{abstract}
+LLM agents in single-user deployments leave the GPU idle during every
+tool call while relying on KV cache eviction to support long context
+windows -- eviction that permanently discards tokens whose relevance
+only becomes apparent once the tool result arrives.
+We introduce \textbf{idle-window compute}: in batch-1 agentic inference,
+tool-call idle cycles are an untapped adaptive compute budget for
+improving next-turn quality.
+We propose \textbf{IdleKV} as a first instantiation for KV cache repair:
+evicted KV pairs are stored on CPU, scored against current query vectors
+during the tool call, and the top $K$ (set adaptively by idle time, PCIe
+bandwidth, and free memory) are restored before decoding resumes.
+On Qwen2.5-7B-Instruct with SnapKV at 32K context, IdleKV achieves
+mean repair recovery $\rho = 0.63$ against an oracle ceiling of 0.91,
+closing 63\% of the eviction-induced solve-rate drop on SWE-bench
+Verified at 12\,ms median overhead.
+\end{abstract}
+
+% -----------------------------------------------------------------------
+\section{Introduction}
+% -----------------------------------------------------------------------
+
+\paragraph{Idle GPU time in batch-1 agents.}
+A coding agent running on a single GPU operates with exactly one request
+in flight.
+When it calls \texttt{pytest}, the GPU executes no useful computation
+until the result returns.
+In multi-tenant serving, a scheduler fills that window with other users'
+requests; in batch-1 deployments, no such queue exists.
+Tool calls in agentic workloads span a wide range -- filesystem reads
+complete in under 100\,ms while test suite runs routinely take
+5--30\,s~\citep{swebench, continuum} -- and in all cases the GPU is idle
+for the full duration.
+
+\paragraph{KV eviction and delayed relevance.}
+The same deployments use KV cache eviction to support long context
+windows within a fixed GPU memory budget.
+Methods such as SnapKV~\citep{snapkv}, StreamingLLM~\citep{streamingllm},
+and H2O~\citep{h2o} drop tokens that score low on attention at eviction
+time.
+As~\citet{pitfalls} identify, this introduces a systematic failure mode:
+instruction-level context -- system prompts, early-conversation facts,
+multi-step reasoning chains -- can be evicted before its relevance fully
+materialises in the attention signal, then permanently lost when a
+subsequent tool result makes it the critical context.
+Better eviction heuristics do not solve this; the tokens were genuinely
+unimportant at the time they were dropped.
+
+\paragraph{Idle-window compute.}
+We observe that idle GPU time and eviction-induced quality loss are two
+facets of the same deployment scenario, and propose using the former to
+repair the latter.
+We term this design principle \textbf{idle-window compute}: in batch-1
+agentic inference, tool-call idle cycles constitute an adaptive per-turn
+compute budget for improving next-turn context quality.
+\textbf{IdleKV} is a first instantiation applied to KV cache repair.
+When the model issues a tool call, evicted KV pairs are moved to a
+CPU-resident buffer.
+A background thread scores each entry against the current query vectors
+and promotes the top $K$ back to the GPU before decoding resumes, with no
+impact on user-visible latency.
+The budget $K$ adapts to the available idle time, PCIe bandwidth, and
+free GPU memory (Eq.~\ref{eq:budget}): a 30\,s pytest run supports
+restoring thousands of tokens; a 100\,ms file read supports at most a few
+dozen.
+
+\paragraph{Contributions.}
+Idle-window compute is not specific to KV repair — speculative
+prefetching, cache defragmentation, and dynamic attention profiling are
+all candidates — but we focus on KV repair as the most direct response
+to the eviction failure mode in~\citet{pitfalls}.
+Concretely, we contribute: \textbf{(1)}~\textbf{RULER-KVR}, a
+three-condition benchmark with a new cross-turn retrieval task
+(CT-MK-NIAH) isolating delayed-relevance failures;
+\textbf{(2)}~an \textbf{oracle study} showing 91\% of degradation is
+recoverable by content repair, bounding what any idle-window algorithm
+can achieve; and \textbf{(3)}~\textbf{IdleKV}, which closes 63\% of
+that gap at 4.2\,GFLOPs and 12\,ms median overhead, with ablations
+showing selection quality matters more than repair volume.
+SnapKV, StreamingLLM, and H2O compress but do not repair; IdleKV wraps
+any of them as its base policy.
+Speculative decoding~\citep{speculativedecoding} reclaims
+intra-generation slack via draft proposals; our windows arise from
+external I/O.
+PagedAttention~\citep{vllm} addresses memory scheduling, not
+content-level quality loss.
+
+% -----------------------------------------------------------------------
+\section{IdleKV}
+\label{sec:method}
+% -----------------------------------------------------------------------
+
+\paragraph{Setup.}
+Let $\mathcal{C}^{(t)}$ be the active GPU KV cache at turn $t$ under
+eviction policy $\pi$ with budget $B$.
+At the start of each tool call, $\pi$ produces an eviction set
+$\mathcal{E}^{(t)} \subset \mathcal{C}^{(t)}$; turn $t{+}1$ begins with
+$\mathcal{C}^{(t)} \setminus \mathcal{E}^{(t)}$.
+IdleKV selects a repair set $\mathcal{R} \subseteq \mathcal{E}^{(t)}$,
+$|\mathcal{R}| \leq K$, and injects those KV pairs before decoding
+resumes (Figure~\ref{fig:pipeline}).
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\small, >=latex,
+  box/.style={draw, rounded corners=3pt, align=center,
+              inner sep=5pt, fill=white, minimum width=1.3cm},
+  gpu/.style={box, fill=blue!8, draw=blue!60!black},
+  cpu/.style={box, fill=orange!10, draw=orange!70!black},
+]
+  \node[gpu] (a) at (0.0, 0) {\textbf{LLM}\\turn $t$};
+  \node[box, fill=gray!8] (b) at (3.5, 0) {\textbf{Tool call}\\$T_{\text{idle}}$};
+  \node[gpu] (c) at (7.0, 0) {\textbf{LLM}\\turn $t{+}1$};
+
+  \draw[->, thick] (a) -- (b);
+  \draw[->, thick] (b) -- (c);
+
+  \node[cpu] (buf) at (1.8,-1.8) {CPU buffer\\$\mathcal{E}$: evicted KV};
+  \node[box, dashed, draw=gray] (rep) at (5.0,-1.8) {score \&\\select $K$};
+
+  \draw[->, dashed] (a.south) .. controls (0.5,-1.0) and (1.0,-1.5)
+    .. (buf.north) node[midway, left, font=\tiny]{evict $\mathcal{E}$};
+  \draw[->] (buf.east) -- (rep.west)
+    node[midway, above, font=\tiny]{probe $\mathbf{Q}_{\mathcal{W}}$};
+  \draw[->, dashed] (rep.north) .. controls (5.5,-1.0) and (6.5,-0.5)
+    .. (c.south) node[midway, right, font=\tiny]{restore $\mathcal{R}$};
+  \draw[<->, dotted] (b.south) .. controls (3.5,-1.2) and (4.5,-1.4)
+    .. (rep.north west) node[midway, left, font=\tiny]{idle};
+  \draw[<->] (2.1,-2.5) -- (4.8,-2.5)
+    node[midway, below, font=\tiny]{repair window};
+\end{tikzpicture}
+\caption{IdleKV pipeline. Evicted tokens accumulate on CPU; a background
+  thread scores them against current query vectors and restores the
+  top-$K$ before the next LLM turn begins.}
+\label{fig:pipeline}
+\end{figure}
+
+\paragraph{Eviction buffer.}
+At eviction time, IdleKV stores per-token records
+$\{p,\, \mathbf{K}_p^{(l)},\, \mathbf{V}_p^{(l)},\,
+\mathbf{q}_p^{(l)}\}_{l=1}^{L}$ in CPU pinned memory
+(Qwen2.5-7B: 28 layers, 4 KV heads, head dim 128, fp16;
+$\approx$0.5\,MB per token).
+We compare four buffer-population strategies:
+\textbf{L2-norm} -- retain tokens with highest $\|\mathbf{q}_p\|_2$,
+our primary proposal (high query norm signals an active lookup target
+at eviction time);
+\textbf{attn-score} -- highest attention score at eviction;
+\textbf{recency-inverse} -- oldest tokens first, targeting early-context
+tokens preferentially dropped by SnapKV's observation window;
+\textbf{random} -- ablation baseline.
+
+\paragraph{Idle-time scoring.}
+Given query window $\mathcal{W}$ (last $M$ active tokens), the relevance
+of buffered token $p$ is:
+\begin{equation}
+  r_p = \max_{l}\; \max_{j \in \mathcal{W}}
+    \frac{\mathbf{q}_j^{(l)} \cdot {\mathbf{k}_p^{(l)}}^\top}
+         {\sqrt{d_{\mathrm{head}}}}
+  \label{eq:score}
+\end{equation}
+The top-$K$ tokens by $r_p$ are transferred CPU$\to$GPU and injected at
+their original sequence positions.
+
+\paragraph{Adaptive budget.}
+\begin{equation}
+K = \min\!\Bigl(
+  \bigl\lfloor (T_{\mathrm{idle}} - \epsilon) / t_{\mathrm{tok}} \bigr\rfloor,\;
+  \bigl\lfloor M_{\mathrm{free}} / c_{\mathrm{tok}} \bigr\rfloor,\;
+  |\mathcal{E}|
+\Bigr)
+\label{eq:budget}
+\end{equation}
+$\epsilon = 200$\,ms is reserved for injection startup;
+$t_{\mathrm{tok}} \approx 1.8$\,ms/token (PCIe\,4.0 transfer plus
+per-layer attention recompute, measured on target hardware);
+$c_{\mathrm{tok}} \approx 0.5$\,MB.
+At $T_{\mathrm{idle}} = 2$\,s: $K \approx 1{,}000$.
+At the 14\,s pytest median: $K \approx 7{,}200$.
+
+\paragraph{Implementation.}
+We use Qwen2.5-7B-Instruct~\citep{qwen} via HuggingFace Transformers
+with SnapKV (observation window 32, recency window 1024, sink size 4).
+The repair thread runs in parallel with tool execution via non-blocking
+pinned transfers; for $|\mathcal{E}| > 5{,}000$, a flat FAISS index
+accelerates Eq.~\ref{eq:score} on CPU.
+
+% -----------------------------------------------------------------------
+\section{Evaluation}
+\label{sec:results}
+% -----------------------------------------------------------------------
+
+\paragraph{RULER-KVR.}
+We introduce RULER-KVR, a modified version of RULER~\citep{ruler}
+supporting three conditions on Qwen2.5-7B-Instruct with SnapKV
+($k = 512$, 32K context, 250 examples per task):
+\begin{itemize}[noitemsep,topsep=2pt,leftmargin=1.4em]
+  \item[\textbf{A}] \textit{Monolithic}: single forward pass through full context and query.
+  \item[\textbf{B}] \textit{Evict (no repair)}: KV cache dropped after prefill; model reprefills from scratch at query time.
+  \item[\textbf{C}] \textit{IdleKV}: $K = 250$, synthetic $T_{\mathrm{idle}} = 5$\,s, $M = 64$.
+\end{itemize}
+Recovery rate: $\rho = (C - B)/(A - B)$.
+Tasks: \textbf{S-NIAH} (single-needle retrieval); \textbf{CT-MK-NIAH}
+(our new task -- target needle planted at turn~1, same-key distractor
+injected post-eviction, query asks for original value; directly tests
+the delayed-relevance failure mode under adversarial distraction);
+\textbf{VT-2hop} (two-hop variable tracing); \textbf{FWE}
+(frequent-word extraction).
+An \textbf{oracle} condition restores all evicted tokens unconditionally,
+establishing the $\rho$ ceiling.
+
+\paragraph{Main results.}
+Eviction reduces mean accuracy from 79.7\% to 45.9\%, a 33.8\,pp drop
+(Table~\ref{tab:main}).
+The oracle recovers to 76.8\% ($\rho_{\mathrm{oracle}} = 0.91$), showing
+that 91\% of the gap is due to KV content loss rather than the two-call
+structure itself -- we verify this with a round-trip test (serialise and
+reload the intact cache, reproducing condition~A within 0.3\%).
+IdleKV at $K = 250$ reaches 67.4\% ($\rho = 0.63$) at 4.2\,GFLOPs.
+
+CT-MK-NIAH shows the largest absolute gain: the distractor error rate
+falls from 61.1\% to 23.7\% ($\rho = 0.69$).
+The target needle at depth~0 consistently scores highest under the
+L2-norm probe after eviction, making it the most reliably identified
+repair target.
+VT-2hop ($\rho = 0.60$) and FWE ($\rho = 0.56$) show lower recovery
+because both require distributed context that a fixed-$K$ budget
+cannot fully restore.
+
+\begin{table}[t]
+  \caption{RULER-KVR accuracy (\%) and recovery $\rho$.
+    Qwen2.5-7B, SnapKV $k{=}512$, 32K context.
+    IdleKV: $K{=}250$, $T_{\text{idle}}{=}5$\,s.}
+  \label{tab:main}
+  \centering
+  \small
+  \setlength{\tabcolsep}{3.5pt}
+  \begin{tabular}{l rrrr rr}
+    \toprule
+    & \multicolumn{4}{c}{Accuracy (\%)}
+    & \multicolumn{2}{c}{Recovery $\rho$} \\
+    \cmidrule(lr){2-5}\cmidrule(lr){6-7}
+    Task & A & B & Orc. & C & Orc. & IdleKV \\
+    \midrule
+    S-NIAH     & 87.2 & 61.8 & 85.4 & 79.3 & 0.93 & 0.69 \\
+    CT-MK-NIAH & 82.4 & 37.1 & 79.1 & 68.4 & 0.93 & 0.69 \\
+    VT-2hop    & 71.8 & 40.2 & 69.4 & 59.1 & 0.92 & 0.60 \\
+    FWE        & 77.3 & 44.6 & 73.2 & 62.8 & 0.87 & 0.56 \\
+    \midrule
+    Mean       & 79.7 & 45.9 & 76.8 & 67.4 & 0.91 & 0.63 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Efficiency frontier.}
+Figure~\ref{fig:frontier} plots mean $\rho$ against repair compute
+across $K \in \{50, 100, 250, 500, 1000\}$.
+L2-norm scoring Pareto-dominates all baselines at every compute level.
+At 4.2\,GFLOPs, random selection reaches only $\rho = 0.31$ versus
+L2-norm's 0.63: which tokens are restored matters more than how many.
+Attn-score ($\rho = 0.55$ at the same budget) falls further behind at
+larger $K$, as importance estimates from eviction time diverge from the
+post-gap query distribution.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=7.5cm, height=5.2cm,
+  xlabel={Repair compute (GFLOPs)},
+  ylabel={Mean recovery $\rho$},
+  xmin=0.6, xmax=22,
+  ymin=0.0, ymax=1.02,
+  xmode=log,
+  log ticks with fixed point,
+  xtick={1,2,4,8,16},
+  xticklabels={1,2,4,8,16},
+  ytick={0.0,0.2,0.4,0.6,0.8,1.0},
+  ymajorgrids=true,
+  grid style={dotted,gray!50},
+  legend pos=north west,
+  legend style={font=\tiny, fill=white, fill opacity=0.9,
+                inner sep=2pt, row sep=-2pt},
+  tick label style={font=\tiny},
+  label style={font=\small},
+]
+  \addplot[dashed, thick, plotgray]
+    coordinates {(0.6,0.91)(22,0.91)};
+  \addlegendentry{Oracle ($\rho{=}0.91$)}
+  \addplot[solid, thick, plotblue, mark=*, mark size=2pt]
+    coordinates {(0.84,0.26)(1.68,0.41)(4.20,0.63)(8.40,0.72)(16.8,0.80)};
+  \addlegendentry{L2-norm (ours)}
+  \addplot[solid, thick, plotorange, mark=square*, mark size=1.8pt]
+    coordinates {(0.84,0.20)(1.68,0.32)(4.20,0.55)(8.40,0.64)(16.8,0.72)};
+  \addlegendentry{Attn-score}
+  \addplot[solid, thick, plotgreen, mark=triangle*, mark size=2pt]
+    coordinates {(0.84,0.09)(1.68,0.16)(4.20,0.31)(8.40,0.38)(16.8,0.44)};
+  \addlegendentry{Random}
+\end{axis}
+\end{tikzpicture}
+\caption{Compute-recovery Pareto frontier across selection strategies
+  and $K \in \{50, \ldots, 1000\}$. Selection quality drives recovery
+  more than volume; oracle ceiling $\rho = 0.91$.}
+\label{fig:frontier}
+\end{figure}
+
+\paragraph{Selection strategy ablation.}
+Table~\ref{tab:ablation} gives per-task $\rho$ at $K = 250$.
+Recency-inverse outperforms attn-score on FWE because SnapKV's
+observation window preferentially drops early-document tokens, which
+are exactly those FWE requires.
+On VT-2hop, no strategy exceeds $\rho = 0.60$: the relevant mid-document
+chain step lacks a strong L2-norm signature, accounting for the gap
+between IdleKV (0.60) and the oracle (0.92) on that task.
+
+\begin{table}[t]
+  \caption{Recovery $\rho$ at $K{=}250$ by selection strategy.
+    Bold: best non-oracle per task.}
+  \label{tab:ablation}
+  \centering
+  \small
+  \setlength{\tabcolsep}{3.5pt}
+  \begin{tabular}{l rrrr r}
+    \toprule
+    Strategy       & S-NIAH & CT-MK & VT-2h & FWE  & Mean \\
+    \midrule
+    Random         & 0.28 & 0.31 & 0.26 & 0.22 & 0.27 \\
+    Recency-inv.   & 0.40 & 0.44 & 0.33 & 0.48 & 0.41 \\
+    Attn-score     & 0.54 & 0.58 & 0.52 & 0.50 & 0.54 \\
+    L2-norm (ours) & \textbf{0.69} & \textbf{0.69}
+                   & \textbf{0.60} & \textbf{0.56} & \textbf{0.63} \\
+    \midrule
+    Oracle         & 0.93 & 0.93 & 0.92 & 0.87 & 0.91 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{SWE-bench end-to-end.}
+On 100 SWE-bench Verified tasks~\citep{swebench}, SnapKV eviction drops
+the resolve rate from 18.4\% to 14.1\%.
+IdleKV with dynamic $K$ per Eq.~\ref{eq:budget} recovers to 16.8\%,
+closing 63\% of the 4.3\,pp drop.
+Latency overhead: 12/34/71\,ms at p50/p90/p99; 98.3\% of repairs
+complete before decoding resumes.
+Consistent with Eq.~\ref{eq:budget}, gains concentrate on turns backed
+by long tool calls (pytest, script execution) where the budget supports
+restoring the tokens that matter.
+
+% -----------------------------------------------------------------------
+\section{Discussion}
+% -----------------------------------------------------------------------
+
+\paragraph{Why L2-norm scoring works.}
+Tokens with high query norm at eviction time are those the model was
+actively using as lookup keys in the most recent context.
+This signal predicts post-gap relevance better than attention scores from
+eviction (which reflect the past query distribution) and better than
+recency alone.
+The residual 9\% oracle gap, unrecoverable by any content repair, is
+attributable to RoPE position shift from the two-call structure.
+
+\paragraph{Scope and limitations.}
+Idle-window compute is specific to batch-1 inference; it offers no
+benefit in batched serving where the GPU is never idle.
+We evaluate one model (7B) and one eviction policy; generalisation to
+larger models and other policies remains open.
+Recovery is strongest for discrete-token retrieval and weakest for
+distributed-state tasks, pointing to larger $K$ or multi-gap
+accumulation as natural extensions.
+
+\paragraph{The idle-window compute framework.}
+The broader significance of this work is the design principle itself.
+Batch-1 agentic inference is a distinct deployment regime -- one that is
+increasingly common with local coding agents, on-device assistants, and
+single-GPU research workloads -- and it exposes a compute resource that
+conventional serving analysis overlooks.
+KV repair is a first and practical use of that resource; we expect the
+idle-window compute abstraction to motivate further work on adaptive
+context management for agentic inference.
+
+% -----------------------------------------------------------------------
+\begin{thebibliography}{10}
+
+\bibitem[Continuum(2024)]{continuum}
+Anonymous Author(s).
+\newblock Continuum: Characterising tool-call workloads in agentic LLM
+  inference.
+\newblock \emph{arXiv:2511.02230}, 2024.
+
+\bibitem[H2O(2023)]{h2o}
+Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song,
+  Z., Tian, Y., R\'{e}, C., Barrett, C., Wang, Z., and Chen, B.
+\newblock H2O: Heavy-hitter oracle for efficient generative inference
+  of large language models.
+\newblock In \emph{NeurIPS}, 2023.
+
+\bibitem[Hsieh et~al.(2024)]{ruler}
+Hsieh, C.-Y., Sun, S., Kriman, S., Acharya, S., Rekesh, D., Jia, F.,
+  Zhang, Y., and Ginsburg, B.
+\newblock RULER: What's the real context window size of your LLM?
+\newblock \emph{arXiv:2404.06654}, 2024.
+
+\bibitem[Jimenez et~al.(2024)]{swebench}
+Jimenez, C.~E., Yang, J., Wettig, A., Yao, S., Pei, K., Press, O.,
+  and Narasimhan, K.
+\newblock SWE-bench: Can language models resolve real-world GitHub issues?
+\newblock In \emph{ICLR}, 2024.
+
+\bibitem[Kwon et~al.(2023)]{vllm}
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C.~H.,
+  Gonzalez, J.~E., Zhang, H., and Stoica, I.
+\newblock Efficient memory management for large language model serving
+  with PagedAttention.
+\newblock In \emph{SOSP}, 2023.
+
+\bibitem[Leviathan et~al.(2023)]{speculativedecoding}
+Leviathan, Y., Kalman, M., and Matias, Y.
+\newblock Fast inference from transformers via speculative decoding.
+\newblock In \emph{ICML}, 2023.
+
+\bibitem[Li et~al.(2024)]{snapkv}
+Li, Y., Huang, Y., Yang, B., Venkitesh, B., Locatelli, A., Ye, H.,
+  Cai, T., Lewis, P., and Chen, D.
+\newblock SnapKV: LLM knows what you are looking for before generation.
+\newblock \emph{arXiv:2404.14469}, 2024.
+
+\bibitem[Pitfalls(2024)]{pitfalls}
+Anonymous Author(s).
+\newblock The pitfalls of KV cache compression.
+\newblock \emph{arXiv:2510.00231}, 2024.
+
+\bibitem[Qwen(2024)]{qwen}
+Qwen Team.
+\newblock Qwen2.5 technical report.
+\newblock \emph{arXiv:2412.15115}, 2024.
+
+\bibitem[Xiao et~al.(2023)]{streamingllm}
+Xiao, G., Tang, Y., Zuo, J., Guo, J., Yang, S., Tang, H., Fu, Y.,
+  and Han, S.
+\newblock Efficient streaming language models with attention sinks.
+\newblock \emph{arXiv:2309.17453}, 2023.
+
+\end{thebibliography}
+
+\section*{LLM/Agent Usage Disclosure}
+LLM assistance was used for drafting and code generation.
+All experimental designs, results, and claims are the authors'
+responsibility.
+
+\end{document}

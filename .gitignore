@@ -1,0 +1,32 @@
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local model weights and caches
+models/
+
+# Nested benchmark checkout and transient Python output
+benchmark/RULER/
+benchmark/__pycache__/
+
+# Generated benchmark outputs
+ruler_benchmark_initial_test/__pycache__/
+ruler_benchmark_initial_test/artifacts/
+ruler_benchmark_initial_test/logs/
+ruler_benchmark_initial_test/results/
+
+ruler_kvr_phase1/__pycache__/
+ruler_kvr_phase1/artifacts/
+ruler_kvr_phase1/logs/
+ruler_kvr_phase1/results/
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.log
+paper/*.out
+paper/*.pdf
+paper/*.synctex.gz
+paper/figures/*.pdf
+paper/figures/*.svg
