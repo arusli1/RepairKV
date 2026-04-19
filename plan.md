@@ -8,12 +8,14 @@
 
 **Proposed solution:** During the tool call idle window, recompute attention scores between the most recent query vectors and a CPU-resident buffer of evicted token KV pairs. Promote the highest-scoring evicted tokens back to the active GPU KV cache before the next LLM turn begins.
 
-**Evaluation framework:** A modified RULER benchmark (RULER-KVR) with three conditions:
-- **Condition A** — monolithic pass (standard RULER, single forward pass, no gap)
-- **Condition B** — gap, no repair (KV evicted between context delivery and query)
-- **Condition C** — gap with repair (evicted tokens selectively restored during idle window)
+**Evaluation framework:** Later repair phases use a matched-footprint RULER-KVR protocol:
+- **Condition A** — monolithic pass (standard RULER, single forward pass, no eviction)
+- **Condition B_onset** — compressed-cache baseline at base keep budget `B_base`; used in P1 to locate the onset-of-regression regime
+- **Condition B_match** — no-repair matched-footprint baseline at final active budget `B_match = B_base + K_slots`
+- **Condition C** — IdleKV repair: prefill retains `B_base`, idle-time repair injects `K_slots` buffered tokens, and the resumed cache footprint is also `B_match`
+- **Matched baselines** — `Random-K` and `Recency-K`, both filling the same `K_slots` and ending at the same `B_match` footprint
 
-Primary metric: **repair recovery rate** = `(C − B) / (A − B)`. A value of 1.0 means repair fully restores monolithic performance; 0.0 means no benefit over eviction + reprefill.
+Primary later-phase metrics are **matched-footprint recovery** = `(C − B_match) / (A − B_match)` and absolute **selection lift** = `C − B_match`. This makes the core claim "repair picks better tokens at the same GPU footprint," not "repair gets more tokens."
 
 ---
 
@@ -21,9 +23,9 @@ Primary metric: **repair recovery rate** = `(C − B) / (A − B)`. A value of 1
 
 ```
 P0            P1              P2            P3              P4              P5              P6            P7
-Baseline  →   Gap injection → KV access  → Eviction     → CPU eviction → [ORACLE     → Repair      → End-to-end
-RULER         + degradation   layer         implementation  buffer          GATE]         algorithm     evaluation
-              measurement     (infra)       + validation    + profiling     go/no-go      + ablation    (SWE-bench)
+Baseline  →   Gap injection → KV access  → Eviction     → CPU eviction → [ORACLE     → Repair      → Appendix
+RULER         + degradation   layer         implementation  buffer          GATE]         algorithm     proof-of-life
+              measurement     (infra)       + validation    + profiling     go/no-go      + ablation    (optional)
 ```
 
 **Blocking dependencies:**
@@ -32,7 +34,7 @@ RULER         + degradation   layer         implementation�
 - P4 requires P3 (needs eviction logs to know what to store in buffer)
 - P5 requires P2 + P3 + P4 (needs the full stack to run oracle)
 - P6 requires P5 passing (oracle must show recoverable signal before repair is worth building)
-- P7 requires P6 (needs the repair algorithm to be complete)
+- P7 is optional after P6 (not a main-paper gate)
 
 P2 can be developed in parallel with P1.
 
@@ -409,234 +411,221 @@ Measure wall-clock time for each operation. Run 100 trials, report p50 / p90 / p
 
 ---
 
-## Phase 5: Oracle Experiment — The Go/No-Go Gate
+## Phase 5: Oracle Experiment — Recoverability and Fixed-Footprint Headroom
 
-**Duration:** ~1 week  
-**Go/no-go decision:** Does theoretically perfect KV repair fully recover performance? If not, diagnose why before building anything else.
+**Duration:** ~1 week  
+**Go/no-go decision:** Before implementing a practical selector, answer two questions:
 
-**This is the most important experiment in the paper.**
+1. Is eviction damage recoverable at all if memory were free?
+2. At the same final GPU footprint, is there headroom beyond what the base eviction policy gets by simply keeping `K_slots` more tokens?
 
-The oracle asks: if we perfectly restored *all* evicted tokens (no selection budget, no approximation — the theoretical upper bound) during the idle window, do RULER scores return to Condition A levels? This tests whether KV content loss is the actual cause of degradation, or whether something else is responsible.
+**This is still the highest-value phase in the paper.**
 
-### What the Oracle Does
+### Shared notation
+
+- `B_base`: onset keep budget selected in P1
+- `K_slots`: repair slots feasible under the P4 latency frontier
+- `B_match = B_base + K_slots`: final active-cache footprint used for all matched comparisons
+
+### Oracle 1 — Full restore
 
 ```python
-# Oracle: during idle window, restore ALL evicted tokens
-all_evicted_positions = list(eviction_buffer.buffer.keys())  # all of them
-all_evicted_kv = eviction_buffer.to_gpu(all_evicted_positions)  # move everything to GPU
-repaired_cache = inject_kv(active_cache, all_evicted_kv, all_evicted_positions)
-# resume generation with fully repaired cache
-outputs = model(query_tokens, past_key_values=repaired_cache)
+# Full oracle: restore ALL evicted tokens
+all_evicted_positions = list(eviction_buffer.buffer.keys())
+all_evicted_kv = eviction_buffer.to_gpu(all_evicted_positions)
+full_oracle_cache = inject_kv(active_cache, all_evicted_kv, all_evicted_positions)
+outputs = model(query_tokens, past_key_values=full_oracle_cache)
 ```
 
-This ignores compute budget entirely. It's the theoretical upper bound: "what if repair were free and perfect?"
+This ignores compute and footprint limits. It answers: "is the lost content in principle enough to recover the answer?"
 
-### Three Possible Outcomes
+### Oracle 2 — Matched-footprint Oracle-K
 
-**Outcome 1 — Full recovery (oracle ≈ Condition A):**
-Degradation is entirely due to lost KV content. Your repair algorithm has a real ceiling to approach. Oracle recovery rate ≥ 90%. **→ Proceed to P6.**
+```python
+# Oracle-K: restore only K_slots tokens, chosen with task hindsight
+oracle_positions = select_hindsight_relevant_positions(
+    eviction_log=eviction_log,
+    task_metadata=task_metadata,
+    top_k=K_slots,
+)
+oracle_kv = eviction_buffer.to_gpu(oracle_positions)
+oracle_k_cache = inject_kv(active_cache, oracle_kv, oracle_positions)
+outputs = model(query_tokens, past_key_values=oracle_k_cache)
+```
 
-**Outcome 2 — Partial recovery (oracle recovers 40–80% of gap):**
-KV content loss explains most but not all degradation. Positional encoding shift or reprefill path dependence also contributes. Design P6 repair to target the recoverable portion; discuss non-recoverable portion as a limitation. **→ Modify P6 scope accordingly.**
+For RULER-KVR tasks, the generator metadata already identifies the task-relevant spans. If more relevant spans are missing than `K_slots` allows, use a dependency-aware greedy order, for example earlier broken VT hops first.
 
-**Outcome 3 — No recovery (oracle ≈ Condition B):**
-Degradation is not primarily from KV loss. The repair hypothesis needs revision. **→ Do not proceed to P6 until root cause is understood.**
+This is the ceiling that matters for P6. Compare it against `B_match`, the no-repair baseline where the base eviction policy simply runs at budget `B_base + K_slots`.
 
-### Diagnostic Tests if Oracle Fails (Outcome 3)
+### Outcome patterns
 
-Run these in sequence to identify the true source of degradation:
+**Outcome 1 — Full restore high, Oracle-K high:** lost KV content is recoverable, and there is real fixed-footprint headroom over the base policy. **→ Proceed to P6.**
 
-**Positional encoding test:**
-After gap + oracle restore, shift all position IDs in the restored cache to match the original absolute positions from the single-pass run. Does recovery improve? Tests whether RoPE position shift (caused by the two-call structure) is the culprit.
+**Outcome 2 — Full restore high, Oracle-K near `B_match`:** content is recoverable in principle, but little of that gain survives the fixed-footprint constraint. **→ Narrow P6 claims to selection efficiency.**
 
-**Reprefill path test:**
-Instead of eviction + restore, use exact KV serialization — save the complete KV cache with `save_kv`, sleep, reload with `load_kv`, continue. Does this produce Condition A scores? If yes: your eviction + restore pipeline has a bug. If no: the two-call structure itself degrades quality for a model-intrinsic reason.
+**Outcome 3 — Full restore low:** degradation is not primarily due to missing KV content. **→ Diagnose before P6.**
 
-**Attention pattern comparison:**
-Compare attention weight heatmaps (from P2's `output_attentions=True` hook) between Condition A and oracle-restored condition at the same context length. Do the attention patterns differ? In which layers? Which query positions?
+### Diagnostics if full restore fails
 
-### Oracle Results Table
+- **Positional encoding test:** after full restore, shift position IDs to match the single-pass run
+- **Serialization path test:** use `save_kv` / `load_kv` without eviction and verify condition A behavior
+- **Attention comparison:** compare condition A and full-oracle heatmaps via `output_attentions=True`
 
-Report oracle recovery rate = `(Oracle − B) / (A − B)` broken out by:
-- Task type: S-NIAH, cross-turn MK-NIAH, VT-3hop, FWE
-- Context length: 4K, 16K, 32K, 64K
-- Eviction method: SnapKV, StreamingLLM, H2O
-- k_budget at eviction: 256, 512, 1024
+### Oracle tables
 
-Key per-task hypothesis: oracle may perfectly recover retrieval tasks (S-NIAH: single needle lookup) but only partially recover aggregation tasks (FWE: global frequency counting requires distributed attention across all context). If so, this is a meaningful finding that motivates different repair strategies for different task types.
+Report two tables:
+
+- **Full-oracle recovery** = `(Oracle_full - B_base) / (A - B_base)`
+- **Matched-footprint oracle recovery** = `(Oracle_K - B_match) / (A - B_match)`
+
+Break both out by:
+
+- task type: VT-4hop, MQ-NIAH-4q, S-NIAH
+- context length: 16K, 32K
+- `B_base`: onset budgets selected in P1
+- `K_slots`: feasible repair slots from P4
 
 ### Deliverable
 
-Oracle recovery rate table across all conditions. Root-cause diagnosis if recovery is partial (positional encoding vs. attention pattern analysis). This is the paper's key theoretical contribution: it proves (or bounds) the maximum benefit achievable by KV repair. Even if P6 delivers partial repair, the oracle table justifies why closing the full gap is hard.
+Two oracle tables plus root-cause diagnosis if full restore is partial. This phase now answers both "is repair possible?" and "is there a selector problem at fixed footprint?"
 
 ---
 
-## Phase 6: Repair Algorithm Implementation and Ablation Study
+## Phase 6: Repair Algorithm Implementation and Fixed-Footprint Ablation Study
 
-**Duration:** ~3 weeks  
-**Goal:** Budget-constrained repair using recent Q vectors to score evicted tokens; full ablation study isolating each component's contribution.
+**Duration:** ~3 weeks  
+**Goal:** Build a budget-constrained repair selector whose gain survives a matched-footprint comparison. The claim is about token quality, not token count.
 
-### Algorithm: Budget-Constrained KV Repair
+### Matched-footprint protocol
 
-Given idle budget T seconds and N evicted tokens in the CPU buffer:
+For every repaired run, evaluate four systems at the same final active-cache size `B_match = B_base + K_slots`:
 
-**Step 1 — Scoring (CPU-side):**
-For each evicted token i in the buffer, compute relevance to the current context:
+- **`B_match` no-repair baseline:** run the base eviction policy directly at budget `B_match`
+- **`Random-K`:** run at `B_base`, then fill `K_slots` with random buffered tokens
+- **`Recency-K`:** run at `B_base`, then fill `K_slots` with oldest evicted tokens
+- **`IdleKV`:** run at `B_base`, then fill `K_slots` with the repair selector
 
-```
-relevance(i) = max over layers of: softmax(Q_recent · K_i^T / sqrt(head_dim))
-```
+If IdleKV wins here, it is because it chooses better tokens for the same footprint.
 
-where `Q_recent` is the query vector matrix from the last M tokens of the active (non-evicted) cache. Use approximate nearest-neighbor search (e.g., FAISS on CPU) if N > 5000.
+### Algorithm: budget-constrained KV repair
 
-**Step 2 — Selection:**
-Take top-K evicted tokens by relevance score. K is determined by the time budget:
+Given idle budget `T_idle` and an eviction buffer of size `N`:
+
+**Step 1 — Determine how many slots are feasible**
 
 ```python
-K = min(
-    floor(T_repair / t_per_token),  # time-limited
-    floor(gpu_free_memory / kv_per_token),  # memory-limited
-    len(eviction_buffer)  # buffer-limited
+K_slots = min(
+    floor(T_repair / t_per_token),          # time-limited from P4 profiling
+    floor(gpu_free_memory / kv_per_token),  # memory-limited
+    len(eviction_buffer),                   # buffer-limited
 )
 ```
 
-where `t_per_token` comes from P4 profiling.
+**Step 2 — Score evicted tokens**
 
-**Step 3 — Restoration:**
-Move selected KV pairs to GPU. Inject into active cache at their original sequence positions using `inject_kv`.
+```text
+relevance(i) = max over layers of softmax(Q_recent · K_i^T / sqrt(head_dim))
+```
 
-**Step 4 — Continue:**
-The next LLM generation turn uses the augmented cache. No additional latency from the model's perspective — repair happened during the idle window.
+where `Q_recent` comes from the last `M` active tokens.
 
-### Ablation Axes
+**Step 3 — Fill exactly `K_slots`**
 
-Each ablation changes exactly one component while holding all others at their default:
+Move the top-`K_slots` selected KV pairs to GPU and inject them at their original sequence positions. The resumed cache must end at `B_match`, not exceed it.
+
+**Step 4 — Continue**
+
+The next generation turn uses the matched-footprint augmented cache. No extra wall-clock latency beyond the tool call idle window.
+
+### Ablation axes
 
 | Ablation | Variable | Values tested | Default |
 |----------|----------|---------------|---------|
-| Selection strategy | Algorithm used for scoring evicted tokens | L2-norm, dot-product, random, recency-inverse | L2-norm Q vectors |
-| Repair budget K | Tokens promoted from buffer to active cache | 50, 100, 250, 500, 1000 | 250 |
-| Query window M | Number of recent tokens used to score evicted tokens | 32, 64, 128, 256 | 64 |
+| Selection strategy | Idle-time scorer | L2-norm, dot-product, random, recency-inverse | L2-norm Q vectors |
+| `K_slots` | Tokens filled during idle time | 50, 100, 250, 500, 1000 | 250 |
+| `B_base` | Base keep budget before repair | onset budgets from P1 | chosen onset budget |
+| Query window `M` | Recent tokens used to score evicted tokens | 32, 64, 128, 256 | 64 |
 | Eviction base | Which eviction algorithm was used | SnapKV, StreamingLLM, H2O | SnapKV |
 | Layer selection | Whether to repair all layers or only high-attention layers | All layers, top-8 layers, top-4 layers | All layers |
-| Buffer strategy | What gets stored in eviction buffer | L2-norm Q, original attn score, random, recency-inverse | L2-norm Q |
 
-### Compute-Efficiency Frontier — The Main System Result
+### Main plots
 
-For each ablation configuration, compute:
-- **X axis:** Repair compute cost in FLOPs = `K × M × head_dim × n_layers × 2`
-- **Y axis:** RULER recovery rate = `(C − B) / (A − B)`
+For each configuration:
 
-Plot the Pareto frontier. Compare against:
-- Oracle (theoretical ceiling)
-- Random selection repair (selection-agnostic baseline)
-- No repair (Condition B)
+- **X axis:** repair compute cost in FLOPs = `K_slots × M × head_dim × n_layers × 2`
+- **Y1:** matched-footprint recovery = `(C - B_match) / (A - B_match)`
+- **Y2:** absolute selection lift = `C - B_match`
 
-Each eviction method (SnapKV, StreamingLLM, H2O) gets its own frontier curve.
+Compare against:
 
-**Secondary plot:** Recovery rate vs. tool call duration T (x-axis in seconds). Connect the system result directly to the real tool call duration distribution from SWE-bench traces — pytest calls at 15s give far more repair budget than `cat` calls at 0.1s.
+- `B_match`
+- `Random-K`
+- `Recency-K`
+- `Oracle-K`
 
-### Per-Task Analysis
+**Secondary plot:** matched-footprint recovery vs. tool call duration `T_idle`, using the P4 feasibility frontier to map duration to feasible `K_slots`.
 
-Report recovery rate separately for each RULER-KVR task:
+### Per-task analysis
 
-- **S-NIAH:** Expected high recovery — single needle is a discrete token, easy to locate in buffer
-- **Cross-turn MK-NIAH:** Tests whether repair prevents recency-bias distractor errors specifically
-- **VT-3hop (split-chain):** Hardest — requires restoring distributed chain state, not just discrete token
-- **Streaming FWE (mid-stream gap):** Tests whether aggregation state (frequency counts) is restorable
+Report matched-footprint recovery separately for each RULER-KVR task. The main claim is that gain should be highest when the answer depends on a small number of localized spans, and lowest when the task needs broad distributed context.
 
-Key paper claim: recovery rate should be task-type-dependent in a mechanistically predictable way.
+### Multi-gap robustness
 
-### Depth × Repair Interaction
-
-Cross-tabulate: recovery rate vs. needle depth (5%, 25%, 50%, 75%, 95%). Hypothesis: repair should most benefit needles at depth 5–25% because these are the tokens most likely to be evicted by SnapKV (far from the observation window, not recent, potentially not in the attention sink). Needles at depth 90–95% likely survive eviction regardless (recency window) and show minimal repair benefit.
-
-### Multi-Gap Robustness
-
-Test sequences with multiple tool calls: 3, 5, 10 gaps. Key question: does each repair introduce accumulated noise that compounds over subsequent gaps, or does recovery rate stay stable? Run at 32K context with 10 gaps at T_idle = 5s each.
+Test sequences with multiple tool calls: 3, 5, 10 gaps. The question is whether matched-footprint repair remains useful across repeated gaps or whether selector noise compounds.
 
 ### Deliverable
 
-`src/repair/` — full repair algorithm with all ablation hooks. Main results tables (Tables 2–4 in paper): recovery rate × task × eviction method × budget. Compute-efficiency frontier plots (Figures 3–5). Multi-gap robustness curves.
+`src/repair/` plus matched-footprint ablation tables: `B_match` vs. `Random-K` vs. `Recency-K` vs. `IdleKV` vs. `Oracle-K`. Pareto frontier plots and multi-gap robustness curves.
 
 ---
 
-## Phase 7: End-to-End Evaluation on Real Agentic Workloads
+## Phase 7: Optional Appendix Proof-of-Life on Agentic Benchmarks
 
-**Duration:** ~2 weeks  
-**Goal:** Validate the system on real SWE-bench traces with real tool calls and real idle windows.
+**Duration:** ~1 week  
+**Goal:** Sanity-check transfer to an end-to-end agent loop without making the main paper depend on a noisy 7B coding benchmark.
 
-### SWE-bench Integration
+Default decision: **do not use Qwen2.5-7B SWE-bench Verified resolve rate as a main-text claim or gate.** The base solve rate is too low for small deltas to be interpretable.
 
-Run Qwen-7B on mini-swe-agent (100-task subset of SWE-bench Verified — use the same 100 tasks consistently for reproducibility). Instrument the agent loop as follows:
+### Default branch — appendix-only SWE-bench proof-of-life
 
-```python
-for turn in agent_loop:
-    # LLM generates action
-    response = llm.generate(context, kv_cache=active_cache)
-    action = parse_tool_call(response)
-    
-    # Tool call starts: evict KV cache, start repair in background thread
-    evicted_tokens = eviction_policy.evict(active_cache, budget=k_budget)
-    eviction_buffer.push_all(evicted_tokens)
-    
-    tool_start = time.time()
-    repair_thread = Thread(target=repair_worker, args=(eviction_buffer, active_cache))
-    repair_thread.start()
-    
-    # Execute actual tool call (real latency)
-    tool_result = execute_tool(action)
-    tool_duration = time.time() - tool_start
-    
-    # Repair completes within tool call window
-    repair_thread.join(timeout=tool_duration * 0.9)
-    
-    # Resume with repaired cache
-    active_cache = repaired_cache
-    context = append(context, tool_result)
-```
+If SWE-bench is run at 7B at all:
 
-**Measure:** Resolve rate (% of SWE-bench tasks correctly patched) with vs. without repair. Even 1–2% improvement on SWE-bench represents a meaningful applied result.
+- keep it in the appendix
+- use a fixed task subset and identical tool environment each run
+- run multiple seeds or repeated samples
+- report raw resolve counts plus 95% Wilson or bootstrap intervals
 
-### Real Tool Call Duration Distribution
+Interpret only large effects. Do not use sub-point resolve-rate changes as evidence for the repair mechanism.
 
-From Continuum (arXiv:2511.02230) and our analysis: SWE-bench tool calls are bimodal. Use actual measured durations from SWE-bench traces to set realistic repair budgets:
+### Preferred 7B-friendly applied branch
 
-| Tool type | Median duration | p90 duration | Typical repair budget |
-|-----------|----------------|--------------|----------------------|
-| cat, ls, head | 0.08–0.12s | 0.3s | ~40ms (token transfer only) |
-| grep, find | 0.4–0.5s | 2.0s | ~200ms, K≈50 tokens |
-| git | 0.7s | 2.5s | ~500ms, K≈100 tokens |
-| python (script) | 2.5s | 12s | ~2.3s, K≈400 tokens |
-| pytest | 14s | 60s | ~13.8s, K≈2000 tokens |
-| pip install | 18s | 90s | full oracle feasible |
+If an applied result is still needed after P6, switch to a lower-noise benchmark where the 7B baseline is comfortably above zero and tool calls still create idle windows. Candidates include:
 
-Report: expected recovery rate weighted by the real SWE-bench tool call duration distribution. This answers "what recovery do you actually get in practice?" not just best-case.
+- `tau-bench`
+- a curated SWE-bench Lite subset
+- a controlled long-context multi-turn tool benchmark derived from RULER-KVR traces
 
-### Latency Overhead Measurement
+Only move SWE-bench back into the main text if the applied evaluation is rerun on a larger model with a materially higher base success rate.
 
-Verify that repair does not add wall-clock latency to the agent from the user's perspective. Measure:
-- P50/P90/P99 of additional latency at tool call resume (repair thread must finish before model resumes)
-- Cases where repair thread did not finish in time: how often, and what was the fallback behavior?
-- GPU memory overhead of maintaining the eviction buffer alongside the active model
+### What P7 should measure if it is run
 
-### MCP Tool Call Extension
+Use the same matched-footprint comparison suite from P6:
 
-Run a small experiment with real MCP tool calls (Gmail search, Google Drive fetch) using the MCP infrastructure from earlier discussion. These have 200ms–2s latency. With the P4 profiling table, determine what K is feasible at 200ms budget and test whether repair at that K helps on RULER-KVR cross-turn MK-NIAH (the task most analogous to real assistant workflows).
+- `B_match`
+- `Random-K`
+- `Recency-K`
+- `IdleKV`
 
-### Failure Case Analysis
+Measure:
 
-For SWE-bench tasks where repair did not improve the outcome, collect:
-- What was the actual tool call duration (repair budget)?
-- What was the eviction k_budget?
-- Were the relevant tokens present in the eviction buffer?
-- Was the failure a repair miss (tokens were there but not selected) or a buffer miss (tokens were never stored)?
-
-This produces the paper's limitations section and motivates future work.
+- task success with confidence intervals
+- tool duration distribution and resulting `K_slots`
+- additional resume latency
+- failure taxonomy: buffer miss vs. selector miss
 
 ### Deliverable
 
-SWE-bench resolve rate table: baseline (no eviction) vs. SnapKV alone vs. SnapKV + repair. Latency overhead profile (p50/p90/p99). Real-world compute-efficiency curve weighted by actual tool call duration distribution. Failure case taxonomy. This is the paper's Section 5 (Applied Evaluation).
+Optional appendix-only proof-of-life figure or table. Not a main-paper gate.
 
 ---
 
@@ -645,19 +634,19 @@ SWE-bench resolve rate table: baseline (no eviction) vs. SnapKV alone vs. SnapKV
 | Phase | Duration | Key deliverable | Gate condition |
 |-------|----------|-----------------|----------------|
 | P0 | ~1 week | `results/baseline_ruler.json` | Scores within ±2% of paper before proceeding |
-| P1 | ~1 week | Degradation curves (Condition B) | Degradation > 3% at 32K confirms problem exists |
+| P1 | ~1 week | Degradation curves (Condition B) | Highest budget stays near A while onset budget shows a clear attributable drop |
 | P2 | ~1 week | `src/kv_utils.py` + attention heatmaps | Round-trip identity test must pass |
 | P3 | ~2 weeks | `src/eviction/` + Pitfalls reproductions | Must reproduce at least 2 Pitfalls failure modes |
 | P4 | ~1 week | `src/eviction_buffer.py` + latency table | Profiling shows K≥100 feasible in 2s budget |
-| P5 | ~1 week | Oracle recovery rate table | Oracle recovery ≥ 40% to justify P6 |
-| P6 | ~3 weeks | `src/repair/` + full ablation tables | Recovery rate > random baseline on ≥3 task types |
-| P7 | ~2 weeks | SWE-bench resolve rate + latency overhead | End-to-end improvement ≥ 0.5% resolve rate |
+| P5 | ~1 week | Full-oracle + Oracle-K tables | Full restore shows recoverability and Oracle-K beats `B_match` on primary tasks |
+| P6 | ~3 weeks | `src/repair/` + matched-footprint ablations | IdleKV beats `B_match`, `Random-K`, and `Recency-K` on primary tasks |
+| P7 | ~1 week | Optional appendix proof-of-life | No gate |
 
-**Total estimated duration:** ~13 weeks
+**Total estimated duration:** ~12 weeks plus optional appendix work
 
-**Critical path:** P0 → P1 → P3 → P4 → P5 → P6 → P7 (P2 can overlap with P1)
+**Critical path:** P0 → P1 → P3 → P4 → P5 → P6 (P2 can overlap with P1)
 
-**Highest-risk phase:** P5 (oracle gate). If oracle does not recover performance, the core hypothesis requires revision and P6–P7 cannot proceed as planned.
+**Highest-risk phase:** P5. If full restore does not recover performance, or Oracle-K does not beat `B_match`, the core repair story weakens substantially.
 
 ---
 
@@ -690,17 +679,26 @@ class KVRepairAlgorithm:
 
 ## Appendix: Evaluation Metric Definitions
 
-**Repair recovery rate:** `(C − B) / (A − B)`
+**Matched-footprint recovery:** `(C − B_match) / (A − B_match)`
 - A = Condition A score (monolithic pass, P0 baseline)
-- B = Condition B score (gap, no repair)
-- C = Condition C score (gap with repair)
-- Interpretation: 1.0 = full recovery to monolithic; 0.0 = repair provides no benefit; negative = repair hurts
+- `B_match` = no-repair baseline at final matched footprint `B_base + K_slots`
+- C = IdleKV score at the same final matched footprint
+- Interpretation: 1.0 = IdleKV closes the remaining gap at fixed footprint; 0.0 = no gain over the matched no-repair baseline
 
-**Oracle recovery rate:** `(Oracle − B) / (A − B)`
-- Oracle = score when ALL evicted tokens are restored with no budget constraint
-- Sets the theoretical ceiling for any repair algorithm
+**Selection lift:** `C − B_match`
+- Absolute gain from choosing better `K_slots` at the same GPU footprint
 
-**Compute efficiency:** `recovery_rate / repair_FLOPs`
-- Used to compare selection strategies at equal compute budgets
+**Full-oracle recovery:** `(Oracle_full − B_base) / (A − B_base)`
+- `Oracle_full` = score when all evicted tokens are restored with no footprint limit
+- Measures whether lost content is recoverable at all
 
-**Repair budget K:** Number of evicted tokens promoted from CPU buffer to active GPU cache during the idle window. Determined by: `K = min(floor(T_repair / t_per_token), gpu_memory_headroom / kv_per_token)`
+**Matched Oracle-K recovery:** `(Oracle_K − B_match) / (A − B_match)`
+- `Oracle_K` = task-hindsight upper bound with only `K_slots` restored
+- Sets the fixed-footprint ceiling for any selector
+
+**Compute efficiency:** `selection_lift / repair_FLOPs`
+- Used to compare selectors at equal compute budgets under the matched-footprint protocol
+
+**Repair slots `K_slots`:** Number of buffered tokens promoted during the idle window. Determined by: `K_slots = min(floor(T_repair / t_per_token), gpu_memory_headroom / kv_per_token)`
+- `t_per_token` from P4 profiling
+- Determines maximum fixed-footprint headroom available during each idle window
