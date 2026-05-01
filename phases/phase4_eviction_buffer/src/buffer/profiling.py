@@ -145,13 +145,13 @@ def profile_injection_attention_overhead(
     device = base_cache.device
     query_ids = query_ids.to(device)
 
-    _ = resume_forward(model, query_ids, base_cache, num_logits_to_keep=1)
+    _ = resume_forward(model, query_ids, base_cache, logits_to_keep=1)
     _synchronize_if_cuda(device)
     baseline_times_s: list[float] = []
     for _ in range(int(n_trials)):
         _synchronize_if_cuda(device)
         t0 = time.perf_counter()
-        _ = resume_forward(model, query_ids, base_cache, num_logits_to_keep=1)
+        _ = resume_forward(model, query_ids, base_cache, logits_to_keep=1)
         _synchronize_if_cuda(device)
         baseline_times_s.append(time.perf_counter() - t0)
     baseline_p50_ms = float(np.percentile(baseline_times_s, 50) * 1000.0)
@@ -165,13 +165,13 @@ def profile_injection_attention_overhead(
         restored = repair_buffer.to_gpu(all_entries[:actual_k], device=str(device))
         extended_cache = inject_kv(base_cache, restored, restored.positions)
 
-        _ = resume_forward(model, query_ids, extended_cache, num_logits_to_keep=1)
+        _ = resume_forward(model, query_ids, extended_cache, logits_to_keep=1)
         _synchronize_if_cuda(device)
         times_s: list[float] = []
         for _ in range(int(n_trials)):
             _synchronize_if_cuda(device)
             t0 = time.perf_counter()
-            _ = resume_forward(model, query_ids, extended_cache, num_logits_to_keep=1)
+            _ = resume_forward(model, query_ids, extended_cache, logits_to_keep=1)
             _synchronize_if_cuda(device)
             times_s.append(time.perf_counter() - t0)
 

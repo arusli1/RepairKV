@@ -201,7 +201,7 @@ class QueryAwareSnapKV(SnapKV):
         }
         with torch.no_grad():
             try:
-                return tracked_cache, self.model(**kwargs, num_logits_to_keep=1)
+                return tracked_cache, self.model(**kwargs, logits_to_keep=1)
             except TypeError:
                 try:
                     return tracked_cache, self.model(**kwargs)

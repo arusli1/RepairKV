@@ -18,6 +18,7 @@ phases/*/logs/
 phases/*/results/
 
 # LaTeX build artifacts
+paper/aux/
 paper/*.aux
 paper/*.fdb_latexmk
 paper/*.fls

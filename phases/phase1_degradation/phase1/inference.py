@@ -10,7 +10,6 @@ import torch
 from transformers import DynamicCache
 
 from .evaluation import classify_error, matched_outputs, sample_score
-from .eviction import EvictionTraceRecorder, build_press
 from .models import PredictionRecord, SpanSurvival, TaskExample
 from .prompting import char_span_to_token_positions, render_context_plan
 
@@ -104,7 +103,7 @@ def generate_answer(
         position_ids=position_ids,
         cache_position=cache_position,
         use_cache=True,
-        num_logits_to_keep=1,
+        logits_to_keep=1,
     )
     position_ids = position_ids[:, -1:] + 1
     cache_position = cache_position[-1:] + 1
@@ -232,6 +231,8 @@ def run_example(
     if condition == "condition_b":
         # Condition B is the compressed path: attach a recorder and a kvpress
         # compression policy so we can later explain which tokens were kept.
+        from .eviction import EvictionTraceRecorder, build_press
+
         assert budget is not None
         assert trace_path is not None
         recorder = EvictionTraceRecorder(

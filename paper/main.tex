@@ -1,7 +1,6 @@
 \documentclass{article}
 
-% AdaptFM @ ICML 2026 workshop submission.
-% 6-page limit (references excluded). Double-blind.
+% Internal ICML-workshop draft.
 
 \usepackage{microtype}
 \usepackage{graphicx}
@@ -9,435 +8,457 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{hyperref}
+\usepackage{enumitem}
 \usepackage{xcolor}
 \usepackage{tikz}
-\usepackage{pgfplots}
-\usepackage{enumitem}
 
-\usetikzlibrary{arrows.meta}
-\pgfplotsset{compat=1.18}
-
-\definecolor{plotblue}{RGB}{31,119,180}
-\definecolor{plotorange}{RGB}{214,96,0}
-\definecolor{plotgreen}{RGB}{44,160,44}
-\definecolor{plotgray}{RGB}{120,120,120}
+\usetikzlibrary{arrows.meta,positioning}
+\newcommand{\idlekv}{\textsc{IdleKV}}
+\newcommand{\bbase}{\ensuremath{B_{\mathrm{base}}}}
+\newcommand{\bmatch}{\ensuremath{B_{\mathrm{match}}}}
+\newcommand{\oraclek}{\ensuremath{\mathrm{Oracle}\mbox{-}K}}
 
 \usepackage{icml2026}
 
-\icmltitlerunning{IdleKV: Exploiting Agentic LLM Idle Time for KV Cache Repair}
+\icmltitlerunning{IdleKV: Refreshing Stale KV Caches}
 
 \begin{document}
 
 \twocolumn[
-  \icmltitle{Idle-Window Compute: Adaptive KV Cache Repair\\in Batch-1 LLM Agents}
+  \icmltitle{IdleKV: Repairing Stale KV Caches Between Turns}
 
   \begin{icmlauthorlist}
-    \icmlauthor{Anonymous Author(s)}{anon}
+    \icmlauthor{Shreyan Paliwal}{equal,harvard}
+    \icmlauthor{Andrew Rusli}{equal,harvard}
   \end{icmlauthorlist}
-  \icmlaffiliation{anon}{Anonymous Institution}
-  \icmlcorrespondingauthor{Anonymous Author(s)}{anonymous@anon.invalid}
-  \icmlkeywords{adaptive test-time compute, dynamic KV cache compression,
-    agentic inference, batch-1, quality-resource tradeoff}
+  \icmlaffiliation{equal}{Equal contribution}
+  \icmlaffiliation{harvard}{Harvard College, Cambridge, MA, USA}
+  \icmlcorrespondingauthor{Shreyan Paliwal}{shreyanpaliwal@college.harvard.edu}
+  \icmlkeywords{adaptive inference, KV cache repair, long-context agents,
+    tool calling, runtime systems}
   \vskip 0.3in
 ]
 
-\printAffiliationsAndNotice{}
+\printAffiliationsAndNotice{\icmlEqualContribution}
 
 \begin{abstract}
-LLM agents in single-user deployments leave the GPU idle during every
-tool call while relying on KV cache eviction to support long context
-windows -- eviction that permanently discards tokens whose relevance
-only becomes apparent once the tool result arrives.
-We introduce \textbf{idle-window compute}: in batch-1 agentic inference,
-tool-call idle cycles are an untapped adaptive compute budget for
-improving next-turn quality.
-We propose \textbf{IdleKV} as a first instantiation for KV cache repair:
-evicted KV pairs are stored on CPU, scored against current query vectors
-during the tool call, and the top $K$ (set adaptively by idle time, PCIe
-bandwidth, and free memory) are restored before decoding resumes.
-On Qwen2.5-7B-Instruct with SnapKV at 32K context, IdleKV achieves
-mean repair recovery $\rho = 0.63$ against an oracle ceiling of 0.91,
-closing 63\% of the eviction-induced solve-rate drop on SWE-bench
-Verified at 12\,ms median overhead.
+Tool-using agents create idle gaps between turns, but long-context
+inference systems usually compress KV caches before the next turn is
+known.
+That can leave a stale active cache: tokens that looked unimportant at
+turn $N$ may become critical once a tool call returns or a follow-up
+query is revealed.
+We frame cross-turn KV cache repair as a runtime-systems and
+benchmarking problem for adaptive inference.
+To study it, we introduce \idlekv{}, a minimal idle-window repair
+mechanism together with a matched-footprint protocol for testing whether
+newly revealed turn-$(N{+}1)$ information can improve a compressed cache
+at fixed final active decode-time footprint.
+On a Qwen2.5-7B-Instruct prototype at 32K context, end-to-end repair
+stays below 50\,ms through $K=500$ on the target hardware; this draft
+reports that feasibility result and the protocol for the pending quality
+study.
 \end{abstract}
 
 % -----------------------------------------------------------------------
 \section{Introduction}
 % -----------------------------------------------------------------------
 
-\paragraph{Idle GPU time in batch-1 agents.}
-A coding agent running on a single GPU operates with exactly one request
-in flight.
-When it calls \texttt{pytest}, the GPU executes no useful computation
-until the result returns.
-In multi-tenant serving, a scheduler fills that window with other users'
-requests; in batch-1 deployments, no such queue exists.
-Tool calls in agentic workloads span a wide range -- filesystem reads
-complete in under 100\,ms while test suite runs routinely take
-5--30\,s~\citep{swebench, continuum} -- and in all cases the GPU is idle
-for the full duration.
+\paragraph{Motivation.}
+Adaptive inference is increasingly shaped by deployment constraints, and
+tool-using agents make that pressure especially clear.
+In batch-1 settings, decoding is interleaved with file reads, tests,
+retrieval, remote APIs, and other external actions that pause
+generation for milliseconds to seconds.
+Those pauses are usually treated as dead time.
+We argue that they expose a valuable new adaptation point: the idle
+interval between turns.
+We study a specific cross-turn case: revising a compressed cache after
+new turn information arrives but before decoding resumes.
 
-\paragraph{KV eviction and delayed relevance.}
-The same deployments use KV cache eviction to support long context
-windows within a fixed GPU memory budget.
-Methods such as SnapKV~\citep{snapkv}, StreamingLLM~\citep{streamingllm},
-and H2O~\citep{h2o} drop tokens that score low on attention at eviction
-time.
-As~\citet{pitfalls} identify, this introduces a systematic failure mode:
-instruction-level context -- system prompts, early-conversation facts,
-multi-step reasoning chains -- can be evicted before its relevance fully
-materialises in the attention signal, then permanently lost when a
-subsequent tool result makes it the critical context.
-Better eviction heuristics do not solve this; the tokens were genuinely
-unimportant at the time they were dropped.
+\paragraph{Adjacent work.}
+On the systems side, PagedAttention/vLLM improves KV-memory efficiency
+during serving~\citep{vllm}, while InferCept preserves paused requests
+to avoid recomputing prefixes when augmented generation
+resumes~\citep{infercept}.
+On the efficient-decoding side, SnapKV, StreamingLLM, and H$_2$O
+compress the cache under a fixed budget, while query-aware methods such
+as QUEST emphasize that token criticality depends on the
+query~\citep{snapkv,streamingllm,h2o,quest}.
+These methods address adjacent parts of the problem, but not the
+cross-turn case studied here.
+Serving systems preserve interrupted state efficiently, while
+query-aware compression still chooses the active cache before the next
+turn is known.
+By contrast, \idlekv{} starts from an already compressed paused state,
+does not rerun selection over the full prefix, and revises memory only
+within the idle-window latency budget before decoding resumes.
 
-\paragraph{Idle-window compute.}
-We observe that idle GPU time and eviction-induced quality loss are two
-facets of the same deployment scenario, and propose using the former to
-repair the latter.
-We term this design principle \textbf{idle-window compute}: in batch-1
-agentic inference, tool-call idle cycles constitute an adaptive per-turn
-compute budget for improving next-turn context quality.
-\textbf{IdleKV} is a first instantiation applied to KV cache repair.
-When the model issues a tool call, evicted KV pairs are moved to a
-CPU-resident buffer.
-A background thread scores each entry against the current query vectors
-and promotes the top $K$ back to the GPU before decoding resumes, with no
-impact on user-visible latency.
-The budget $K$ adapts to the available idle time, PCIe bandwidth, and
-free GPU memory (Eq.~\ref{eq:budget}): a 30\,s pytest run supports
-restoring thousands of tokens; a 100\,ms file read supports at most a few
-dozen.
+\paragraph{Problem setting.}
+For long-context agents, relevance over a fixed context can shift across
+turns.
+A tool result or follow-up question can make earlier context newly
+important, and recent analysis shows that KV compression can sharply
+degrade instructions and facts that later become
+important~\citep{pitfalls}.
+The core failure is therefore temporal: the cache is allocated using the
+wrong relevance signal for the next turn.
+In practical terms, the system keeps what looked important last turn
+instead of what will matter once the tool call returns.
+Current benchmarks also leave this regime under-specified.
+Single-turn long-context tasks can show compression loss, and serving
+benchmarks can show pause/resume efficiency, but neither isolates
+whether future-turn information can improve a compressed cache at fixed
+final active decode-time footprint.
+A useful benchmark for this setting needs explicit turn boundaries, a
+hidden future query, shared pre-turn history, and matched-footprint
+controls.
 
-\paragraph{Contributions.}
-Idle-window compute is not specific to KV repair — speculative
-prefetching, cache defragmentation, and dynamic attention profiling are
-all candidates — but we focus on KV repair as the most direct response
-to the eviction failure mode in~\citet{pitfalls}.
-Concretely, we contribute: \textbf{(1)}~\textbf{RULER-KVR}, a
-three-condition benchmark with a new cross-turn retrieval task
-(CT-MK-NIAH) isolating delayed-relevance failures;
-\textbf{(2)}~an \textbf{oracle study} showing 91\% of degradation is
-recoverable by content repair, bounding what any idle-window algorithm
-can achieve; and \textbf{(3)}~\textbf{IdleKV}, which closes 63\% of
-that gap at 4.2\,GFLOPs and 12\,ms median overhead, with ablations
-showing selection quality matters more than repair volume.
-SnapKV, StreamingLLM, and H2O compress but do not repair; IdleKV wraps
-any of them as its base policy.
-Speculative decoding~\citep{speculativedecoding} reclaims
-intra-generation slack via draft proposals; our windows arise from
-external I/O.
-PagedAttention~\citep{vllm} addresses memory scheduling, not
-content-level quality loss.
+\paragraph{Approach and scope.}
+\idlekv{} targets this gap with dynamic KV cache repair.
+After turn $N$, the runtime compresses the evictable context portion to a
+base budget, buffers evicted KV on CPU, waits for the tool call, and
+during the idle window scores the buffer against the now-known
+turn-$(N{+}1)$ query before restoring up to $K$ context tokens.
+The adaptation happens in the active KV allocation itself, not in model
+depth, routing, or weight choice.
+This is state-revising pre-resume repair: unlike pause/resume serving,
+it intentionally mutates memory before resumption; unlike within-turn
+query-aware compression, it starts from a paused compressed state and
+does not rerun full-prefix selection once $Q_2$ is revealed.
+The practical question is whether tool-call time can be used to improve
+the \emph{final} cache seen by the next turn at the same final active
+decode-time footprint.
+Concretely, the draft contributes:
+\begin{itemize}[leftmargin=1.4em,noitemsep,topsep=2pt]
+  \item a matched-footprint protocol for cross-turn relevance shift that
+  isolates better cache selection from simply keeping more tokens; and
+  \item a simple idle-window repair path with prototype latency
+  measurements on one model, one eviction policy, and one hardware
+  stack.
+\end{itemize}
+The paper does not yet claim matched-footprint turn-$(N{+}1)$ quality
+gains.
 
 % -----------------------------------------------------------------------
-\section{IdleKV}
+\section{Protocol}
 \label{sec:method}
 % -----------------------------------------------------------------------
 
-\paragraph{Setup.}
-Let $\mathcal{C}^{(t)}$ be the active GPU KV cache at turn $t$ under
-eviction policy $\pi$ with budget $B$.
-At the start of each tool call, $\pi$ produces an eviction set
-$\mathcal{E}^{(t)} \subset \mathcal{C}^{(t)}$; turn $t{+}1$ begins with
-$\mathcal{C}^{(t)} \setminus \mathcal{E}^{(t)}$.
-IdleKV selects a repair set $\mathcal{R} \subseteq \mathcal{E}^{(t)}$,
-$|\mathcal{R}| \leq K$, and injects those KV pairs before decoding
-resumes (Figure~\ref{fig:pipeline}).
+\paragraph{Overview.}
+The key systems assumption is simple: a paused request need not preserve
+its memory state exactly.
+If the next turn is already known, the idle interval before resumption
+can be used to improve the active cache that the next decode phase will
+see.
+We study the smallest such mechanism: repair buffered evictions without
+rerunning a full query-aware compressor over the entire prefix.
+
+\paragraph{Two-turn protocol.}
+The protocol is simple.
+The model first processes a long context and answers $Q_1$ from the full
+cache.
+After that answer, the runtime compresses only the evictable context
+portion to a base budget $\bbase$, while preserving the exact $Q_1$
+prompt and generated-answer tail.
+During the subsequent tool-call idle window, the turn-$(N{+}1)$ query
+$Q_2$ becomes known.
+\idlekv{} encodes $Q_2$ against the active post-$Q_1$ cache, scores the
+evicted context tokens against that signal, restores $K$ buffered
+context tokens, and answers $Q_2$ from the repaired cache.
+The protocol does not rerun full-prefix compression after $Q_2$ is
+revealed.
 
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}[font=\small, >=latex,
   box/.style={draw, rounded corners=3pt, align=center,
-              inner sep=5pt, fill=white, minimum width=1.3cm},
+              inner sep=3.5pt, minimum width=1.55cm},
   gpu/.style={box, fill=blue!8, draw=blue!60!black},
-  cpu/.style={box, fill=orange!10, draw=orange!70!black},
-]
-  \node[gpu] (a) at (0.0, 0) {\textbf{LLM}\\turn $t$};
-  \node[box, fill=gray!8] (b) at (3.5, 0) {\textbf{Tool call}\\$T_{\text{idle}}$};
-  \node[gpu] (c) at (7.0, 0) {\textbf{LLM}\\turn $t{+}1$};
+  cpu/.style={box, fill=orange!10, draw=orange!70!black}]
+  \node[gpu] (turnn) at (0,0) {\textbf{Turn $N$}\\prefill + $Q_1$};
+  \node[box, fill=gray!8] (idle) at (3.25,0) {\textbf{Tool call}\\idle window};
+  \node[gpu] (turnn1) at (6.5,0) {\textbf{Turn $N{+}1$}\\answer $Q_2$};
 
-  \draw[->, thick] (a) -- (b);
-  \draw[->, thick] (b) -- (c);
+  \node[cpu] (buf) at (1.7,-1.8) {CPU buffer\\evicted KV};
+  \node[box, draw=gray, dashed] (score) at (4.85,-1.8) {score vs $Q_2$\\restore $K$ tokens};
 
-  \node[cpu] (buf) at (1.8,-1.8) {CPU buffer\\$\mathcal{E}$: evicted KV};
-  \node[box, dashed, draw=gray] (rep) at (5.0,-1.8) {score \&\\select $K$};
-
-  \draw[->, dashed] (a.south) .. controls (0.5,-1.0) and (1.0,-1.5)
-    .. (buf.north) node[midway, left, font=\tiny]{evict $\mathcal{E}$};
-  \draw[->] (buf.east) -- (rep.west)
-    node[midway, above, font=\tiny]{probe $\mathbf{Q}_{\mathcal{W}}$};
-  \draw[->, dashed] (rep.north) .. controls (5.5,-1.0) and (6.5,-0.5)
-    .. (c.south) node[midway, right, font=\tiny]{restore $\mathcal{R}$};
-  \draw[<->, dotted] (b.south) .. controls (3.5,-1.2) and (4.5,-1.4)
-    .. (rep.north west) node[midway, left, font=\tiny]{idle};
-  \draw[<->] (2.1,-2.5) -- (4.8,-2.5)
-    node[midway, below, font=\tiny]{repair window};
+  \draw[->, thick] (turnn) -- (idle);
+  \draw[->, thick] (idle) -- (turnn1);
+  \draw[->, dashed] (turnn.south) .. controls (0.5,-1.0) and (1.0,-1.3) .. (buf.north)
+    node[midway, left, font=\tiny]{evict to $\bbase$};
+  \draw[->] (buf.east) -- (score.west)
+    node[midway, above, font=\tiny]{$Q_2$-aware scoring};
+  \draw[->, dashed] (score.north) .. controls (5.45,-1.0) and (6.05,-0.5) .. (turnn1.south)
+    node[midway, right, font=\tiny]{restore $K$};
 \end{tikzpicture}
-\caption{IdleKV pipeline. Evicted tokens accumulate on CPU; a background
-  thread scores them against current query vectors and restores the
-  top-$K$ before the next LLM turn begins.}
+\caption{\idlekv{} uses the tool-call gap between turns to rescore
+buffered KV and restore $K$ context tokens before answering $Q_2$.}
 \label{fig:pipeline}
 \end{figure}
 
-\paragraph{Eviction buffer.}
-At eviction time, IdleKV stores per-token records
-$\{p,\, \mathbf{K}_p^{(l)},\, \mathbf{V}_p^{(l)},\,
-\mathbf{q}_p^{(l)}\}_{l=1}^{L}$ in CPU pinned memory
-(Qwen2.5-7B: 28 layers, 4 KV heads, head dim 128, fp16;
-$\approx$0.5\,MB per token).
-We compare four buffer-population strategies:
-\textbf{L2-norm} -- retain tokens with highest $\|\mathbf{q}_p\|_2$,
-our primary proposal (high query norm signals an active lookup target
-at eviction time);
-\textbf{attn-score} -- highest attention score at eviction;
-\textbf{recency-inverse} -- oldest tokens first, targeting early-context
-tokens preferentially dropped by SnapKV's observation window;
-\textbf{random} -- ablation baseline.
+\paragraph{Repair unit.}
+Our prototype restores short query-scored local bursts rather than
+isolated single tokens.
+Here $K$ always denotes a restored-context-token budget, not an anchor
+count.
+Candidate anchor positions in the evicted buffer are ranked by the
+future-query signal; accepted bursts are merged on overlap; and
+restoration stops once $K$ context tokens have been reactivated.
+For split-query retrieval tasks, this is the right unit of repair: the
+query often contains a key-bearing anchor while the answer depends on
+nearby value tokens.
 
-\paragraph{Idle-time scoring.}
-Given query window $\mathcal{W}$ (last $M$ active tokens), the relevance
-of buffered token $p$ is:
+\paragraph{Evaluation principle.}
+All main claims are made against a no-repair baseline with the same
+final active decode-time footprint.
+Let $\bmatch$ denote the no-repair condition that applies the base
+eviction policy with context budget $\bbase + K$ while preserving the
+same $Q_1$ prompt and answer tail.
+Because every compared run shares the same preserved tail and the same
+active-token budget, the active cache footprint seen by $Q_2$ is
+matched across $\bmatch$, \idlekv{}, and $\oraclek$, although the
+selected context tokens differ by design.
+Total retained CPU+GPU state is not matched, because \idlekv{} also
+keeps an auxiliary CPU buffer of evicted KV.
+We report:
 \begin{equation}
-  r_p = \max_{l}\; \max_{j \in \mathcal{W}}
-    \frac{\mathbf{q}_j^{(l)} \cdot {\mathbf{k}_p^{(l)}}^\top}
-         {\sqrt{d_{\mathrm{head}}}}
-  \label{eq:score}
+  \mathrm{lift} =
+  \mathrm{Score}(\mathrm{IdleKV}) - \mathrm{Score}(B_{\mathrm{match}})
 \end{equation}
-The top-$K$ tokens by $r_p$ are transferred CPU$\to$GPU and injected at
-their original sequence positions.
-
-\paragraph{Adaptive budget.}
+and
 \begin{equation}
-K = \min\!\Bigl(
-  \bigl\lfloor (T_{\mathrm{idle}} - \epsilon) / t_{\mathrm{tok}} \bigr\rfloor,\;
-  \bigl\lfloor M_{\mathrm{free}} / c_{\mathrm{tok}} \bigr\rfloor,\;
-  |\mathcal{E}|
-\Bigr)
-\label{eq:budget}
+  \mathrm{recovery} =
+  \frac{\mathrm{Score}(\mathrm{IdleKV})-\mathrm{Score}(B_{\mathrm{match}})}
+       {\mathrm{Score}(\mathrm{Oracle}\mbox{-}K)-\mathrm{Score}(B_{\mathrm{match}})}.
 \end{equation}
-$\epsilon = 200$\,ms is reserved for injection startup;
-$t_{\mathrm{tok}} \approx 1.8$\,ms/token (PCIe\,4.0 transfer plus
-per-layer attention recompute, measured on target hardware);
-$c_{\mathrm{tok}} \approx 0.5$\,MB.
-At $T_{\mathrm{idle}} = 2$\,s: $K \approx 1{,}000$.
-At the 14\,s pytest median: $K \approx 7{,}200$.
-
-\paragraph{Implementation.}
-We use Qwen2.5-7B-Instruct~\citep{qwen} via HuggingFace Transformers
-with SnapKV (observation window 32, recency window 1024, sink size 4).
-The repair thread runs in parallel with tool execution via non-blocking
-pinned transfers; for $|\mathcal{E}| > 5{,}000$, a flat FAISS index
-accelerates Eq.~\ref{eq:score} on CPU.
+Here $\mathrm{Score}$ is the mean fraction of the two $Q_2$ needles
+recovered correctly per example, averaged over the fixed evaluation set
+shared across all conditions for that setting.
+The numerator measures whether repair selects a better final cache than
+matched no-repair retention; the denominator measures how much
+recoverable headroom remains in the regime.
+We report $\mathrm{recovery}$ only when
+$\mathrm{Score}(\mathrm{Oracle}\mbox{-}K) >
+\mathrm{Score}(B_{\mathrm{match}})$.
+$\oraclek$ obeys the same $K$-token budget and the same burst-packing
+rule as \idlekv{}, but ranks anchors using gold $Q_2$ needle locations
+from the synthetic task metadata.
+The protocol therefore tests whether newly revealed turn-$(N{+}1)$
+information can improve a compressed cache relative to matched
+no-repair retention.
 
 % -----------------------------------------------------------------------
-\section{Evaluation}
+\section{Setup}
+\label{sec:setup}
+% -----------------------------------------------------------------------
+
+\paragraph{Primary setting.}
+The main text focuses on one primary benchmark slice rather than a broad
+matrix.
+We use Qwen2.5-7B-Instruct~\citep{qwen} at 32K rendered context on a
+single RTX PRO 6000 Blackwell GPU, with SnapKV~\citep{snapkv} as the
+base eviction policy.
+The task is a split-query version of \texttt{MQ-NIAH-4q} derived from
+RULER~\citep{ruler}: one shared long context contains four needles,
+$Q_1$ asks for needles 1 and 4, and $Q_2$ asks for needles 2 and 3.
+This balanced split keeps two answers per turn while removing the
+always-recency-kept tail needle from $Q_2$.
+The resulting positive-control slice keeps future relevance hidden and
+avoids giving the matched no-repair baseline half the answer for free.
+
+\paragraph{Configuration.}
+The planned primary study avoids recency-saturated settings, where
+small budgets are dominated by recent tokens and query-aware scoring
+cannot change the kept set.
+We therefore use context-only SnapKV with a fixed context recency
+reserve and evaluate:
+\begin{itemize}[leftmargin=1.4em,noitemsep,topsep=2pt]
+  \item context-only SnapKV with fixed recency reserve
+  $R_{\mathrm{ctx}}=128$;
+  \item base budget $\bbase=512$;
+  \item concise split prompts that request the values only,
+  comma-separated, with a short answer prefix and fixed
+  $24$-token decode budget per split turn;
+  \item pilot repair budgets $K \in \{100, 250, 500\}$, with the
+  expectation that the main table will report the smallest informative
+  subset; and
+  \item one shared $Q_1$ transcript across all conditions and a fixed
+  100-example evaluation set per setting.
+\end{itemize}
+The turn-$N$ eviction signal is the exact generated $Q_1$ answer tail,
+not a generic last-$32$-token cache suffix.
+
+\paragraph{Condition semantics.}
+We first generate one full-cache turn-$N$ transcript comprising the
+shared context, $Q_1$, and the model-generated $Q_1$ answer tail.
+Every condition reuses that exact transcript when answering $Q_2$.
+$A$ keeps the full context active during $Q_2$ and is therefore the
+full-cache ceiling under the fixed transcript.
+$B$ compresses only the evictable context portion to $\bbase$.
+$\bmatch$ applies the same base eviction policy at context budget
+$\bbase + K$ and performs no repair.
+Random-$K$ and Oldest-$K$ start from $B$ and restore the same $K$-token
+budget from the same evicted buffer without future-query scoring.
+\idlekv{} repairs $B$ during the idle gap, and $\oraclek$ applies the
+same burst-packing rule using gold $Q_2$ needle locations from the
+synthetic task metadata.
+
+\paragraph{Scope.}
+The paper keeps the main text to one task family, one model, and one
+eviction policy.
+That is enough to answer the first question cleanly: once the future
+query is revealed, can idle-time repair produce a better final cache
+than matched no-repair retention?
+This study estimates conditional turn-$(N{+}1)$ quality given a fixed,
+full-cache-generated turn-$N$ transcript; it does not measure end-to-end
+two-turn agent quality.
+The main benchmark slice is a positive control chosen to keep future
+relevance hidden, remove trivial recency wins from $Q_2$, and keep
+eviction choices nontrivial, not to estimate average gains across agent
+workloads.
+It also does not yet compare against alternative post-$Q_2$ refresh
+mechanisms that use the same idle window.
+
+% -----------------------------------------------------------------------
+\section{Feasibility}
 \label{sec:results}
 % -----------------------------------------------------------------------
 
-\paragraph{RULER-KVR.}
-We introduce RULER-KVR, a modified version of RULER~\citep{ruler}
-supporting three conditions on Qwen2.5-7B-Instruct with SnapKV
-($k = 512$, 32K context, 250 examples per task):
-\begin{itemize}[noitemsep,topsep=2pt,leftmargin=1.4em]
-  \item[\textbf{A}] \textit{Monolithic}: single forward pass through full context and query.
-  \item[\textbf{B}] \textit{Evict (no repair)}: KV cache dropped after prefill; model reprefills from scratch at query time.
-  \item[\textbf{C}] \textit{IdleKV}: $K = 250$, synthetic $T_{\mathrm{idle}} = 5$\,s, $M = 64$.
-\end{itemize}
-Recovery rate: $\rho = (C - B)/(A - B)$.
-Tasks: \textbf{S-NIAH} (single-needle retrieval); \textbf{CT-MK-NIAH}
-(our new task -- target needle planted at turn~1, same-key distractor
-injected post-eviction, query asks for original value; directly tests
-the delayed-relevance failure mode under adversarial distraction);
-\textbf{VT-2hop} (two-hop variable tracing); \textbf{FWE}
-(frequent-word extraction).
-An \textbf{oracle} condition restores all evicted tokens unconditionally,
-establishing the $\rho$ ceiling.
+\paragraph{Current evidence.}
+The current draft reports measured repair feasibility only.
+The central quality question for the protocol remains the next
+measurement: at fixed final active decode-time footprint, does
+\idlekv{} improve turn-$(N{+}1)$ score over $\bmatch$?
 
-\paragraph{Main results.}
-Eviction reduces mean accuracy from 79.7\% to 45.9\%, a 33.8\,pp drop
-(Table~\ref{tab:main}).
-The oracle recovers to 76.8\% ($\rho_{\mathrm{oracle}} = 0.91$), showing
-that 91\% of the gap is due to KV content loss rather than the two-call
-structure itself -- we verify this with a round-trip test (serialise and
-reload the intact cache, reproducing condition~A within 0.3\%).
-IdleKV at $K = 250$ reaches 67.4\% ($\rho = 0.63$) at 4.2\,GFLOPs.
-
-CT-MK-NIAH shows the largest absolute gain: the distractor error rate
-falls from 61.1\% to 23.7\% ($\rho = 0.69$).
-The target needle at depth~0 consistently scores highest under the
-L2-norm probe after eviction, making it the most reliably identified
-repair target.
-VT-2hop ($\rho = 0.60$) and FWE ($\rho = 0.56$) show lower recovery
-because both require distributed context that a fixed-$K$ budget
-cannot fully restore.
+\paragraph{Measured feasibility.}
+Table~\ref{tab:latency} reports the current measured overheads on the
+target hardware for the prototype repair path.
 
 \begin{table}[t]
-  \caption{RULER-KVR accuracy (\%) and recovery $\rho$.
-    Qwen2.5-7B, SnapKV $k{=}512$, 32K context.
-    IdleKV: $K{=}250$, $T_{\text{idle}}{=}5$\,s.}
-  \label{tab:main}
+  \caption{Measured repair overhead on the target hardware.}
+  \label{tab:latency}
   \centering
   \small
-  \setlength{\tabcolsep}{3.5pt}
-  \begin{tabular}{l rrrr rr}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{l c c c}
     \toprule
-    & \multicolumn{4}{c}{Accuracy (\%)}
-    & \multicolumn{2}{c}{Recovery $\rho$} \\
-    \cmidrule(lr){2-5}\cmidrule(lr){6-7}
-    Task & A & B & Orc. & C & Orc. & IdleKV \\
+    $K$ & transfer p50 & total repair p50 & total repair p99 \\
     \midrule
-    S-NIAH     & 87.2 & 61.8 & 85.4 & 79.3 & 0.93 & 0.69 \\
-    CT-MK-NIAH & 82.4 & 37.1 & 79.1 & 68.4 & 0.93 & 0.69 \\
-    VT-2hop    & 71.8 & 40.2 & 69.4 & 59.1 & 0.92 & 0.60 \\
-    FWE        & 77.3 & 44.6 & 73.2 & 62.8 & 0.87 & 0.56 \\
-    \midrule
-    Mean       & 79.7 & 45.9 & 76.8 & 67.4 & 0.91 & 0.63 \\
+    100 & 2.68\,ms  & 35.00\,ms & 37.34\,ms \\
+    250 & 6.09\,ms  & 38.89\,ms & 40.44\,ms \\
+    500 & 12.58\,ms & 46.94\,ms & 53.47\,ms \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\paragraph{Efficiency frontier.}
-Figure~\ref{fig:frontier} plots mean $\rho$ against repair compute
-across $K \in \{50, 100, 250, 500, 1000\}$.
-L2-norm scoring Pareto-dominates all baselines at every compute level.
-At 4.2\,GFLOPs, random selection reaches only $\rho = 0.31$ versus
-L2-norm's 0.63: which tokens are restored matters more than how many.
-Attn-score ($\rho = 0.55$ at the same budget) falls further behind at
-larger $K$, as importance estimates from eviction time diverge from the
-post-gap query distribution.
+Measured end-to-end repair stays below 50\,ms through $K=500$.
+Separately, transfer p50 already rises smoothly to 25.86\,ms at
+$K=1000$, which suggests room to extend the full end-to-end study to
+larger repair budgets.
+On the current prototype stack, the measured repair path stays well
+below one tenth of a second.
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-  width=7.5cm, height=5.2cm,
-  xlabel={Repair compute (GFLOPs)},
-  ylabel={Mean recovery $\rho$},
-  xmin=0.6, xmax=22,
-  ymin=0.0, ymax=1.02,
-  xmode=log,
-  log ticks with fixed point,
-  xtick={1,2,4,8,16},
-  xticklabels={1,2,4,8,16},
-  ytick={0.0,0.2,0.4,0.6,0.8,1.0},
-  ymajorgrids=true,
-  grid style={dotted,gray!50},
-  legend pos=north west,
-  legend style={font=\tiny, fill=white, fill opacity=0.9,
-                inner sep=2pt, row sep=-2pt},
-  tick label style={font=\tiny},
-  label style={font=\small},
-]
-  \addplot[dashed, thick, plotgray]
-    coordinates {(0.6,0.91)(22,0.91)};
-  \addlegendentry{Oracle ($\rho{=}0.91$)}
-  \addplot[solid, thick, plotblue, mark=*, mark size=2pt]
-    coordinates {(0.84,0.26)(1.68,0.41)(4.20,0.63)(8.40,0.72)(16.8,0.80)};
-  \addlegendentry{L2-norm (ours)}
-  \addplot[solid, thick, plotorange, mark=square*, mark size=1.8pt]
-    coordinates {(0.84,0.20)(1.68,0.32)(4.20,0.55)(8.40,0.64)(16.8,0.72)};
-  \addlegendentry{Attn-score}
-  \addplot[solid, thick, plotgreen, mark=triangle*, mark size=2pt]
-    coordinates {(0.84,0.09)(1.68,0.16)(4.20,0.31)(8.40,0.38)(16.8,0.44)};
-  \addlegendentry{Random}
-\end{axis}
-\end{tikzpicture}
-\caption{Compute-recovery Pareto frontier across selection strategies
-  and $K \in \{50, \ldots, 1000\}$. Selection quality drives recovery
-  more than volume; oracle ceiling $\rho = 0.91$.}
-\label{fig:frontier}
-\end{figure}
-
-\paragraph{Selection strategy ablation.}
-Table~\ref{tab:ablation} gives per-task $\rho$ at $K = 250$.
-Recency-inverse outperforms attn-score on FWE because SnapKV's
-observation window preferentially drops early-document tokens, which
-are exactly those FWE requires.
-On VT-2hop, no strategy exceeds $\rho = 0.60$: the relevant mid-document
-chain step lacks a strong L2-norm signature, accounting for the gap
-between IdleKV (0.60) and the oracle (0.92) on that task.
-
-\begin{table}[t]
-  \caption{Recovery $\rho$ at $K{=}250$ by selection strategy.
-    Bold: best non-oracle per task.}
-  \label{tab:ablation}
-  \centering
-  \small
-  \setlength{\tabcolsep}{3.5pt}
-  \begin{tabular}{l rrrr r}
-    \toprule
-    Strategy       & S-NIAH & CT-MK & VT-2h & FWE  & Mean \\
-    \midrule
-    Random         & 0.28 & 0.31 & 0.26 & 0.22 & 0.27 \\
-    Recency-inv.   & 0.40 & 0.44 & 0.33 & 0.48 & 0.41 \\
-    Attn-score     & 0.54 & 0.58 & 0.52 & 0.50 & 0.54 \\
-    L2-norm (ours) & \textbf{0.69} & \textbf{0.69}
-                   & \textbf{0.60} & \textbf{0.56} & \textbf{0.63} \\
-    \midrule
-    Oracle         & 0.93 & 0.93 & 0.92 & 0.87 & 0.91 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\paragraph{SWE-bench end-to-end.}
-On 100 SWE-bench Verified tasks~\citep{swebench}, SnapKV eviction drops
-the resolve rate from 18.4\% to 14.1\%.
-IdleKV with dynamic $K$ per Eq.~\ref{eq:budget} recovers to 16.8\%,
-closing 63\% of the 4.3\,pp drop.
-Latency overhead: 12/34/71\,ms at p50/p90/p99; 98.3\% of repairs
-complete before decoding resumes.
-Consistent with Eq.~\ref{eq:budget}, gains concentrate on turns backed
-by long tool calls (pytest, script execution) where the budget supports
-restoring the tokens that matter.
+\paragraph{Planned matched-footprint study.}
+The next empirical step is the quality comparison itself.
+The primary outcome is \emph{lift} over $\bmatch$ on turn-$(N{+}1)$
+score.
+\emph{Recovery} is secondary and is only reported when $\oraclek$
+exceeds $\bmatch$.
+Evidence for the mechanism would be a pattern in which \idlekv{}
+exceeds $\bmatch$, Random-$K$, and Oldest-$K$, while $\oraclek$
+remains above \idlekv{} whenever recoverable headroom exists.
+A null or reversed result in a regime with positive oracle headroom
+would point either to a weak repair signal or to a mismatched benchmark
+slice.
 
 % -----------------------------------------------------------------------
 \section{Discussion}
+\label{sec:discussion}
 % -----------------------------------------------------------------------
 
-\paragraph{Why L2-norm scoring works.}
-Tokens with high query norm at eviction time are those the model was
-actively using as lookup keys in the most recent context.
-This signal predicts post-gap relevance better than attention scores from
-eviction (which reflect the past query distribution) and better than
-recency alone.
-The residual 9\% oracle gap, unrecoverable by any content repair, is
-attributable to RoPE position shift from the two-call structure.
+\paragraph{Position in adaptive inference.}
+This paper is best read as a runtime-systems and benchmarking
+contribution for adaptive inference.
+Within that landscape, flexible architectures and routing change the
+model path; test-time compute changes how much computation to spend;
+compression and optimization reduce model or token cost; and efficient
+decoding adapts attention or cache retention within a turn.
+\idlekv{} points to a complementary question: once a request is paused
+and compressed, can the runtime use the idle gap to revise memory before
+the next turn begins?
+That question matters most for agent workloads, because external actions
+create exactly the pause in which such revision can happen.
 
-\paragraph{Scope and limitations.}
-Idle-window compute is specific to batch-1 inference; it offers no
-benefit in batched serving where the GPU is never idle.
-We evaluate one model (7B) and one eviction policy; generalisation to
-larger models and other policies remains open.
-Recovery is strongest for discrete-token retrieval and weakest for
-distributed-state tasks, pointing to larger $K$ or multi-gap
-accumulation as natural extensions.
+\paragraph{Relation to serving systems.}
+\idlekv{} is complementary to serving systems such as vLLM and
+InferCept.
+Those systems decide how to preserve, schedule, and resume interrupted
+requests efficiently~\citep{vllm,infercept}; \idlekv{} asks what useful
+quality-improving work can be done \emph{during} the interruption before
+decoding resumes.
+It is therefore state-revising pre-resume repair, not state-preserving
+pause/resume serving.
+It is also distinct from within-turn query-aware eviction: the request
+has already been compressed, full-prefix recomputation is disallowed,
+and the runtime operates under an idle-window latency budget.
 
-\paragraph{The idle-window compute framework.}
-The broader significance of this work is the design principle itself.
-Batch-1 agentic inference is a distinct deployment regime -- one that is
-increasingly common with local coding agents, on-device assistants, and
-single-GPU research workloads -- and it exposes a compute resource that
-conventional serving analysis overlooks.
-KV repair is a first and practical use of that resource; we expect the
-idle-window compute abstraction to motivate further work on adaptive
-context management for agentic inference.
+\paragraph{When repair should help.}
+Repair should help when new turn information changes relevance, the base
+eviction policy still has real choice beyond recency, and the hindsight
+ceiling leaves nontrivial headroom over $\bmatch$.
+It should help less when the future turn adds little new information,
+the keep budget is recency-saturated, or the idle gap is shorter than
+the repair overhead.
+These criteria matter both for benchmark design and for interpreting
+null results.
+
+\paragraph{Limitations and next steps.}
+The study is intentionally conditional and favorable: one model, one
+eviction policy, one synthetic split-query family, fixed
+full-cache-generated turn-$N$ transcripts, and no alternative post-$Q_2$
+refresh baselines yet.
+That makes the mechanism legible, but it is not evidence about
+end-to-end two-turn agent quality or average gains across workloads.
+The immediate next steps are measured matched-footprint quality on the
+primary slice, sham-query and low-headroom controls, a milder contiguous
+split of the same task family as a robustness check, comparisons against
+other post-$Q_2$ refresh mechanisms, and broader agent-style tasks in
+which tool outputs, retrieved documents, or intermediate plans shift
+relevance across multiple turns.
+More broadly, the field still needs benchmarks with explicit idle
+intervals, hidden future queries, matched no-repair controls, hindsight
+ceilings, and latency measurements tied to real interruption windows.
+If those studies continue to show gains, then idle-window memory
+maintenance becomes a plausible systems primitive for long-context
+agents.
+
+% -----------------------------------------------------------------------
+\section{Conclusion}
+\label{sec:conclusion}
+% -----------------------------------------------------------------------
+
+Tool-call stalls in agent workflows can be treated as part of the
+inference budget rather than as dead time.
+\idlekv{} contributes a concrete way to spend that budget: revise a
+compressed cache before the next turn under a matched final active
+decode-time footprint.
+The current draft establishes feasibility of the repair path on one
+prototype stack and defines a protocol for measuring quality gains once
+the full matched-footprint study is complete.
+More broadly, long-context agent systems may need to be judged not only
+by how efficiently they decode, but by how well they maintain memory
+between turns.
 
 % -----------------------------------------------------------------------
 \begin{thebibliography}{10}
 
-\bibitem[Continuum(2024)]{continuum}
-Anonymous Author(s).
-\newblock Continuum: Characterising tool-call workloads in agentic LLM
-  inference.
-\newblock \emph{arXiv:2511.02230}, 2024.
-
-\bibitem[H2O(2023)]{h2o}
-Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song,
-  Z., Tian, Y., R\'{e}, C., Barrett, C., Wang, Z., and Chen, B.
-\newblock H2O: Heavy-hitter oracle for efficient generative inference
-  of large language models.
-\newblock In \emph{NeurIPS}, 2023.
+\bibitem[Abhyankar et~al.(2024)]{infercept}
+Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and Zhang, Y.
+\newblock InferCept: Efficient intercept support for augmented large
+  language model inference.
+\newblock In \emph{Proceedings of the 41st International Conference on
+  Machine Learning (ICML)}, 2024.
 
 \bibitem[Hsieh et~al.(2024)]{ruler}
 Hsieh, C.-Y., Sun, S., Kriman, S., Acharya, S., Rekesh, D., Jia, F.,
@@ -445,23 +466,13 @@ Hsieh, C.-Y., Sun, S., Kriman, S., Acharya, S., Rekesh, D., Jia, F.,
 \newblock RULER: What's the real context window size of your LLM?
 \newblock \emph{arXiv:2404.06654}, 2024.
 
-\bibitem[Jimenez et~al.(2024)]{swebench}
-Jimenez, C.~E., Yang, J., Wettig, A., Yao, S., Pei, K., Press, O.,
-  and Narasimhan, K.
-\newblock SWE-bench: Can language models resolve real-world GitHub issues?
-\newblock In \emph{ICLR}, 2024.
-
 \bibitem[Kwon et~al.(2023)]{vllm}
-Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C.~H.,
-  Gonzalez, J.~E., Zhang, H., and Stoica, I.
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C. H.,
+  Gonzalez, J. E., Zhang, H., and Stoica, I.
 \newblock Efficient memory management for large language model serving
   with PagedAttention.
-\newblock In \emph{SOSP}, 2023.
-
-\bibitem[Leviathan et~al.(2023)]{speculativedecoding}
-Leviathan, Y., Kalman, M., and Matias, Y.
-\newblock Fast inference from transformers via speculative decoding.
-\newblock In \emph{ICML}, 2023.
+\newblock In \emph{Proceedings of the 29th ACM Symposium on Operating
+  Systems Principles (SOSP)}, 2023.
 
 \bibitem[Li et~al.(2024)]{snapkv}
 Li, Y., Huang, Y., Yang, B., Venkitesh, B., Locatelli, A., Ye, H.,
@@ -469,27 +480,38 @@ Li, Y., Huang, Y., Yang, B., Venkitesh, B., Locatelli, A., Ye, H.,
 \newblock SnapKV: LLM knows what you are looking for before generation.
 \newblock \emph{arXiv:2404.14469}, 2024.
 
-\bibitem[Pitfalls(2024)]{pitfalls}
-Anonymous Author(s).
+\bibitem[Chen et~al.(2025)]{pitfalls}
+Chen, A., Geh, R., Grover, A., Van den Broeck, G., and Israel, D.
 \newblock The pitfalls of KV cache compression.
-\newblock \emph{arXiv:2510.00231}, 2024.
+\newblock \emph{arXiv:2510.00231}, 2025.
 
 \bibitem[Qwen(2024)]{qwen}
 Qwen Team.
 \newblock Qwen2.5 technical report.
 \newblock \emph{arXiv:2412.15115}, 2024.
 
-\bibitem[Xiao et~al.(2023)]{streamingllm}
+\bibitem[Tang et~al.(2024)]{quest}
+Tang, J., Zhao, Y., Zhu, K., Xiao, G., Kasikci, B., and Han, S.
+\newblock QUEST: Query-aware sparsity for efficient long-context LLM
+  inference.
+\newblock In \emph{Proceedings of the 41st International Conference on
+  Machine Learning (ICML)}, 2024.
+
+\bibitem[Xiao et~al.(2024)]{streamingllm}
 Xiao, G., Tang, Y., Zuo, J., Guo, J., Yang, S., Tang, H., Fu, Y.,
   and Han, S.
 \newblock Efficient streaming language models with attention sinks.
-\newblock \emph{arXiv:2309.17453}, 2023.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2024.
+
+\bibitem[Zhang et~al.(2023)]{h2o}
+Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song, Z.,
+  Tian, Y., R{\'e}, C., Barrett, C., Wang, Z., and Chen, B.
+\newblock H$_2$O: Heavy-hitter oracle for efficient generative inference
+  of large language models.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2023.
 
 \end{thebibliography}
-
-\section*{LLM/Agent Usage Disclosure}
-LLM assistance was used for drafting and code generation.
-All experimental designs, results, and claims are the authors'
-responsibility.
 
 \end{document}

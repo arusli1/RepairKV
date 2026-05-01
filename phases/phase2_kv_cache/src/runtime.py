@@ -150,7 +150,7 @@ def resume_forward(
     *,
     logical_position_base: int | None = None,
     dense_cache_position_base: int | None = None,
-    num_logits_to_keep: int = 1,
+    logits_to_keep: int = 1,
 ):
     """Resume a forward pass from an existing cache with explicit positions."""
     device = model_device(model)
@@ -170,7 +170,7 @@ def resume_forward(
             position_ids=position_ids,
             cache_position=cache_position,
             use_cache=True,
-            num_logits_to_keep=num_logits_to_keep,
+            logits_to_keep=logits_to_keep,
         )
     return outputs
 
@@ -213,7 +213,7 @@ def generate_from_cache(
             position_ids=position_ids,
             cache_position=cache_position,
             use_cache=True,
-            num_logits_to_keep=1,
+            logits_to_keep=1,
         )
         next_token = outputs.logits[0, -1].argmax()
         generated.append(next_token)

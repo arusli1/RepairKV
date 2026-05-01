@@ -91,10 +91,10 @@ class RoutingToyModel(nn.Module):
         use_cache: bool = True,
         position_ids=None,
         cache_position=None,
-        num_logits_to_keep=None,
+        logits_to_keep=None,
         **_: object,
     ):
-        del use_cache, position_ids, cache_position, num_logits_to_keep
+        del use_cache, position_ids, cache_position, logits_to_keep
         query_ids = input_ids if input_ids.ndim == 2 else input_ids.unsqueeze(0)
         cache = to_tuple_cache(past_key_values)
         layers = []

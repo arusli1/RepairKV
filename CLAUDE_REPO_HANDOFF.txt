@@ -1,0 +1,520 @@
+IdleKV Repo Handoff for Claude
+Generated: 2026-04-23 UTC
+
+Purpose of this file
+- This is a single-file handoff for another model/operator.
+- It is meant to capture the important content of the repo as if someone had already read the structure, docs, key code, and canonical results.
+- It is not a literal dump of every source file. It is the fastest accurate orientation layer for the current repo.
+
+Current git state
+- Repo root: /home/ubuntu/IdleKV
+- Current branch: main
+- Current HEAD at time of writing: 13dc27d
+- Recent commits:
+  - 13dc27d Implement and profile phase 4 eviction buffer
+  - c40aad7 Reorganize repo through phase 3
+  - ff8d4dc Revise repair plan around matched-footprint evaluation
+  - 3b95b05 Add RULER benchmarking assets and ignore generated outputs
+  - 2bbcd57 Add AGENT.md
+- Worktree state when this file was written: intended to be clean after the Phase 4 checkpoint commit. If it is not clean when you read this, that happened after this handoff was created.
+
+High-level project summary
+- Project name: IdleKV
+- Core idea: use GPU idle time during tool calls in batch-1 LLM agents to repair KV-cache damage caused by eviction.
+- Motivation:
+  - tool calls often take 2 to 60 seconds
+  - during that time the GPU is often idle
+  - long-context eviction methods like SnapKV and StreamingLLM save memory by dropping tokens
+  - dropped tokens can later become relevant again
+  - IdleKV keeps evicted token KV on CPU, re-scores them during idle time, and restores the best ones before the next turn
+- Intended claim:
+  - not "repair gets more tokens"
+  - but "repair picks better tokens at the same final GPU footprint"
+
+Core research framing
+- The repo currently follows the matched-footprint framing from instructions.md:
+  - Condition A: monolithic pass, no eviction
+  - Condition B_onset: compressed-cache baseline at base keep budget B_base
+  - Condition B_match: no-repair matched-footprint baseline at B_match = B_base + K_slots
+  - Condition C: IdleKV repair, prefill at B_base and restore K_slots during idle time so final footprint is B_match
+  - Matched baselines: Random-K and Recency-K at the same final footprint
+- Primary later metrics:
+  - matched-footprint recovery = (C - B_match) / (A - B_match)
+  - selection lift = C - B_match
+
+Repo layout
+- AGENT.md
+  - short repo-local guidance and implementation rules
+- README.md
+  - top-level repo overview and clean repo guide
+- instructions.md
+  - current working research spec and phase plan
+- plan.md
+  - earlier development plan variant
+- docs/
+  - phase notes, project status, results retention
+- paper/
+  - current paper draft and figures
+- ruler/
+  - vendored upstream RULER checkout
+- models/
+  - local model weights, especially Qwen2.5-7B-Instruct
+- phases/
+  - actual project code, split by phase
+- saved_results/
+  - tracked small summary artifacts that serve as the repo's memory layer
+- .venv/
+  - local Python environment used for Phases 2 to 4
+
+Important top-level docs
+- README.md
+  - current top-level status
+- docs/project-status.md
+  - concise current phase readout and canonical saved summaries
+- docs/results-retention.md
+  - explains what to keep vs what can be regenerated
+- docs/phases/phase0.md through docs/phases/phase4.md
+  - short human-readable phase notes
+- AGENT.md
+  - says to keep non-boilerplate code modular and segmented
+
+Important environment facts
+- Local model:
+  - models/Qwen2.5-7B-Instruct
+- Local GPU used in live checks:
+  - NVIDIA RTX PRO 6000 Blackwell Server Edition
+  - about 101.97 GB VRAM
+- Local Python env:
+  - use .venv/bin/python
+- Important package/runtime notes:
+  - Phase 2 to 4 code was run in the local .venv
+  - torch in .venv: 2.10.0+cu128
+  - transformers in .venv: 5.2.0
+- Actual local Qwen geometry on this machine:
+  - num_hidden_layers = 28
+  - num_attention_heads = 28
+  - num_key_value_heads = 4
+  - head_dim = 128
+  - cache runtime type is DynamicCache
+- Important mismatch:
+  - older docs and some historical plan text still mention 32 layers / 32 KV heads
+  - the actual local implementation and profiling code use the real local geometry above
+
+Top-level repo interpretation
+- This repo is currently "minimum viable through Phase 4", not paper-final.
+- Phases 0 to 3 were treated as smoke-standard setup phases.
+- Phase 4 is now implemented and has a first real profiling run.
+- Phases 5 and 6 have not been implemented yet.
+
+Canonical saved results
+- Phase 0:
+  - saved_results/phase0/baseline_ruler.json
+  - saved_results/phase0/degradation_curve.csv
+- Phase 1:
+  - saved_results/phase1/vt4hop_permute_aggregate_summary.json
+  - saved_results/phase1/mq_niah_4q_smoke_summary.json
+- Phase 2:
+  - saved_results/phase2/phase2_summary.json
+  - saved_results/phase2/phase2_run_report.md
+- Phase 3:
+  - saved_results/phase3/phase3_suite_summary.json
+  - saved_results/phase3/phase3_live_smoke.json
+  - saved_results/phase3/phase3_pilot10_summary.json
+  - saved_results/phase3/phase3_full100_summary.json
+  - saved_results/phase3/phase3_pilot_then_full.log
+  - saved_results/phase3/phase3_pilot_then_full.status
+- Phase 4:
+  - saved_results/phase4/transfer_latency.json
+  - saved_results/phase4/scoring_latency.json
+  - saved_results/phase4/attention_overhead.json
+  - saved_results/phase4/end_to_end_repair.json
+  - saved_results/phase4/feasibility_frontier.json
+  - saved_results/phase4/selection_quality.json
+  - saved_results/phase4/run_metadata.json
+
+Phase-by-phase summary
+
+Phase 0: Baseline RULER validation
+- Purpose:
+  - establish that the base long-context setup is sane before eviction/repair work
+- Main code:
+  - phases/phase0_baseline/
+- Canonical artifact:
+  - saved_results/phase0/baseline_ruler.json
+- Key result summary:
+  - S-NIAH at 4K and 32K passes
+  - VT-2hop and FWE baseline outputs exist
+  - Example values from baseline_ruler.json:
+    - 4K:
+      - S-NIAH aggregate about 99.87
+      - vt_2hop 100.0
+      - fwe 80.33
+    - 32K:
+      - S-NIAH still passes the acceptance floor
+- Interpretation:
+  - Phase 0 is complete enough and acts as the control/reference layer
+
+Phase 1: Degradation harness
+- Purpose:
+  - show that compressed continuation under SnapKV degrades behavior enough to motivate repair
+- Main code:
+  - phases/phase1_degradation/
+- Main tasks currently treated as the Phase 1 pair:
+  - VT-4hop-permute
+  - MQ-NIAH-4q
+- Canonical artifacts:
+  - saved_results/phase1/vt4hop_permute_aggregate_summary.json
+  - saved_results/phase1/mq_niah_4q_smoke_summary.json
+- Current state:
+  - "done enough for smoke"
+  - not yet polished into final paper tables
+- Key VT-4hop-permute aggregate numbers from the saved 5x average:
+  - k32768 mean accuracy = 0.712
+  - k16384 mean accuracy = 0.646
+  - k8192 mean accuracy = 0.584
+  - k4096 mean accuracy = 0.586
+  - the broader curve is noisy and not cleanly monotone
+- MQ-NIAH-4q saved artifact:
+  - only a tiny smoke artifact exists in saved_results/phase1/mq_niah_4q_smoke_summary.json
+  - it is useful as memory, not as a strong final result
+- Interpretation:
+  - P1 has enough signal to support continuing the repo development
+  - it is not yet the paper-grade final onset-regime study
+
+Phase 2: KV cache access layer
+- Purpose:
+  - build and validate the low-level cache API used by later phases
+- Main code:
+  - phases/phase2_kv_cache/src/kv_utils.py
+  - phases/phase2_kv_cache/src/runtime.py
+  - phases/phase2_kv_cache/scripts/run_phase2_suite.py
+- Important data structure:
+  - PositionTrackedCache in phases/phase2_kv_cache/src/kv_utils.py
+- Core API:
+  - save_kv
+  - load_kv
+  - slice_kv
+  - merge_kv
+  - inject_kv
+- Key canonical artifact:
+  - saved_results/phase2/phase2_summary.json
+- Key results:
+  - round-trip:
+    - max_abs_logit_diff = 0.0
+    - pass = true
+  - selective injection:
+    - access code = 99273
+    - degraded text = 1234567
+    - restored text matches reference
+    - reference_vs_restored_max_abs_logit_diff = 0.0
+  - tests:
+    - 7 tests run
+    - successful = true
+  - transfer latency:
+    - restore p50 at 1000 tokens = about 1.145 ms
+    - restore p50 at 5000 tokens = about 5.311 ms
+  - attention heatmaps:
+    - generated at 4K and 8K
+- Interpretation:
+  - Phase 2 is solid
+  - this is infrastructure that later phases can trust
+
+Phase 3: Eviction implementation and smoke validation
+- Purpose:
+  - implement eviction policies and collect eviction traces/logs
+- Main code:
+  - phases/phase3_eviction/src/eviction/base.py
+  - phases/phase3_eviction/src/eviction/snapkv.py
+  - phases/phase3_eviction/src/eviction/streaming_llm.py
+  - phases/phase3_eviction/src/runtime.py
+  - phases/phase3_eviction/src/benchmark.py
+  - phases/phase3_eviction/src/eviction/logging.py
+- Policies currently present:
+  - SnapKV
+  - QueryAwareSnapKV
+  - StreamingLLM
+- Important artifact roots:
+  - phases/phase3_eviction/results/phase3_eviction_logs/
+  - phases/phase3_eviction/results/phase3_raw_examples/
+  - saved_results/phase3/*
+- Important data products from Phase 3:
+  - per-example eviction JSON logs
+  - per-example q-vector sidecars as *_qvecs.pt
+  - raw example records with correctness labels and richer metadata
+- Important caveat:
+  - correctness is in the raw-example files, not in the eviction log JSON files
+  - the raw-example records still contain stale pre-rename absolute paths pointing to the old phase_3_eviction_algorithm_validation path
+  - Phase 4 contains path-normalization logic for that
+- Smoke summary:
+  - suite tests: 9 tests, 0 failures
+  - pilot and full smoke benchmark completed
+- Key full100 results at 32K from saved_results/phase3/phase3_full100_summary.json:
+  - MQ-NIAH-4q:
+    - FullKV mean_score_percent = 76.25
+    - snapkv k512 = 25.0
+    - query_aware_snapkv k512 = 25.0
+    - streaming_llm k512 = 25.0
+    - snapkv k512 survival rate = 0.25
+  - S-NIAH:
+    - FullKV = 100.0
+    - snapkv k512 = 0.0
+    - query_aware_snapkv k512 = 0.0
+    - streaming_llm k512 = 0.0
+    - snapkv k512 survival rate = 0.0
+  - VT-4hop:
+    - FullKV = 100.0
+    - snapkv k512 = 100.0
+    - query_aware_snapkv k512 = 100.0
+    - streaming_llm k512 = 100.0
+    - snapkv k512 survival rate = 0.4
+- Interpretation:
+  - P3 is good enough for infrastructure and trace generation
+  - MQ-NIAH shows useful degradation
+  - S-NIAH collapses under compression in this smoke setup
+  - VT-4hop is too easy in the current smoke setup, so it is weak for selector-quality science
+
+What Phase 3 traces actually are
+- Eviction logs live under phases/phase3_eviction/results/phase3_eviction_logs
+- Each example log JSON stores:
+  - kept_positions
+  - evicted_positions
+  - task_relevant_positions
+  - task_relevant_survived
+  - task_relevant_survival_fraction
+  - importance_scores
+  - obs_window_q_vecs_shape
+  - metadata like method and budget
+- Each example also has a matching *_qvecs.pt file
+- Raw example records under phase3_raw_examples store:
+  - method
+  - k_budget
+  - correct or score_fraction
+  - error_type
+  - task_relevant_survived
+  - first_broken_hop
+  - paths back to the eviction log and q-vector artifacts
+
+Phase 4: CPU eviction buffer and profiling
+- Purpose:
+  - build the CPU-side eviction buffer
+  - profile exact scoring, transfer, attention overhead, and end-to-end repair
+  - determine the feasibility frontier for repair budget K
+- Main code:
+  - phases/phase4_eviction_buffer/src/buffer/eviction_buffer.py
+  - phases/phase4_eviction_buffer/src/buffer/profiling.py
+  - phases/phase4_eviction_buffer/src/buffer/feasibility.py
+  - phases/phase4_eviction_buffer/src/buffer/runtime.py
+  - phases/phase4_eviction_buffer/src/buffer/quality.py
+  - phases/phase4_eviction_buffer/scripts/run_phase4_profiling.py
+  - phases/phase4_eviction_buffer/tests/
+- Key implementation details:
+  - EvictionBuffer stores one token per entry with per-layer KV on CPU pinned memory
+  - selection strategies:
+    - l2_norm
+    - dot_product
+    - random
+    - recency_inverse
+  - exact CPU scoring is used; no ANN / FAISS / stochastic retrieval is implemented
+  - recent_q_vecs are extracted from the active compressed cache via extract_recent_q_vecs
+  - end-to-end repair uses inject_kv from Phase 2
+  - live profiling uses resume_forward from Phase 2 so cache_position and position_ids are handled correctly
+- Important live fixture builder:
+  - build_snapkv_live_fixture in phases/phase4_eviction_buffer/src/buffer/runtime.py
+- Important diagnostic:
+  - quality.py does not pretend the current VT smoke set is a meaningful selector benchmark
+  - it explicitly reports insufficient_failures for the current VT-4hop/snapkv/k512 slice
+- Test coverage:
+  - 6 unit tests passed during the Phase 4 implementation/run pass
+- Full Phase 4 run:
+  - run via scripts/run_phase4_profiling.py
+  - output artifacts live in phases/phase4_eviction_buffer/results/phase4_profiling/
+  - small copies live in saved_results/phase4/
+- Live fixture used in the first full run:
+  - context_tokens = 32768
+  - k_budget = 4096
+  - evicted_tokens = 28672
+  - query_tokens = 20
+  - obs_window_size = 32
+- Key transfer results:
+  - K=50 p50 about 1.32 ms
+  - K=100 p50 about 2.68 ms
+  - K=250 p50 about 6.09 ms
+  - K=500 p50 about 12.58 ms
+  - K=1000 p50 about 25.86 ms
+  - K=2000 p50 about 55.15 ms, p90 about 58.98 ms
+- Key scoring results:
+  - l2_norm at N=1000 p50 about 2.77 ms
+  - dot_product at N=1000 p50 about 4.00 ms
+- Key attention overhead result:
+  - baseline resumed 20-token query p50 about 25.59 ms
+  - K=1000 restored tokens add about 1.81 ms p50 overhead to the next resumed forward pass
+- Key end-to-end repair result:
+  - K=50 p50 about 33.61 ms
+  - K=100 p50 about 35.00 ms
+  - K=250 p50 about 38.89 ms
+  - K=500 p50 about 46.94 ms
+- Key feasibility frontier result:
+  - the frontier saturates at K=2000 for all listed tool-call durations because the sweep only went up to 2000 and 2000 still fits all tested budgets
+  - this means the system is faster than the current measurement ceiling, not that 2000 is the true maximum
+- Key selection-quality result:
+  - status = insufficient_failures
+  - reason = the requested VT-4hop / snapkv / k512 slice has no incorrect examples, so selector quality cannot be measured from that slice
+- Interpretation:
+  - Phase 4 MVP is successful
+  - exact warm-buffer rescoring is feasible on this hardware
+  - no stochastic retrieval is required yet for the current scale
+  - if the paper needs a more informative frontier, the next easy extension is to sweep transfer above 2000 restored tokens
+
+Important code paths by function
+
+Phase 2
+- phases/phase2_kv_cache/src/kv_utils.py
+  - PositionTrackedCache
+  - save_kv
+  - load_kv
+  - slice_kv
+  - merge_kv
+  - inject_kv
+  - to_dynamic_cache
+  - to_tuple_cache
+- phases/phase2_kv_cache/src/runtime.py
+  - load_model
+  - load_tokenizer
+  - prefill_cache
+  - resume_forward
+  - generate_from_cache
+  - build_fact_retrieval_case
+
+Phase 3
+- phases/phase3_eviction/src/eviction/base.py
+  - EvictionPolicy
+  - EvictionResult
+  - _finalize_result
+- phases/phase3_eviction/src/eviction/snapkv.py
+  - SnapKV
+  - QueryAwareSnapKV
+- phases/phase3_eviction/src/eviction/streaming_llm.py
+  - StreamingLLM
+- phases/phase3_eviction/src/eviction/logging.py
+  - log_eviction
+- phases/phase3_eviction/src/benchmark.py
+  - benchmark flow and raw example row writing
+- phases/phase3_eviction/src/runtime.py
+  - build_position_tracked_cache
+  - run_live_smoke
+
+Phase 4
+- phases/phase4_eviction_buffer/src/buffer/eviction_buffer.py
+  - BufferEntry
+  - EvictionBuffer
+  - extract_recent_q_vecs
+- phases/phase4_eviction_buffer/src/buffer/profiling.py
+  - profile_cpu_to_gpu_transfer
+  - profile_buffer_scoring
+  - profile_injection_attention_overhead
+  - profile_end_to_end_repair
+  - build_buffer_from_logs
+  - build_buffer_from_log_artifact
+- phases/phase4_eviction_buffer/src/buffer/runtime.py
+  - LiveRepairFixture
+  - build_snapkv_live_fixture
+- phases/phase4_eviction_buffer/src/buffer/quality.py
+  - normalize_phase3_artifact_path
+  - evaluate_selection_quality
+- phases/phase4_eviction_buffer/src/buffer/feasibility.py
+  - compute_feasibility_frontier
+  - format_frontier_table
+- phases/phase4_eviction_buffer/scripts/run_phase4_profiling.py
+  - main Phase 4 runner
+
+How to run important things
+
+Phase 2
+- source .venv/bin/activate
+- python phases/phase2_kv_cache/scripts/run_phase2_suite.py
+
+Phase 3 suite
+- source .venv/bin/activate
+- python phases/phase3_eviction/scripts/run_phase3_suite.py
+
+Phase 4 tests
+- .venv/bin/python -m unittest discover -s phases/phase4_eviction_buffer/tests -v
+
+Phase 4 profiling
+- .venv/bin/python phases/phase4_eviction_buffer/scripts/run_phase4_profiling.py
+- smoke mode:
+  - .venv/bin/python phases/phase4_eviction_buffer/scripts/run_phase4_profiling.py --smoke
+
+Important caveats and gotchas
+- Actual geometry mismatch:
+  - many older docs mention 32 layers / 32 KV heads
+  - actual local environment is 28 layers / 4 KV heads / head_dim 128
+  - trust the code and phase2_summary.json over old prose
+- Current Phase 4 README is stale:
+  - phases/phase4_eviction_buffer/README.md still says scaffold-only and not-yet-run
+  - this is outdated relative to the actual code and saved Phase 4 results
+  - trust docs/phases/phase4.md, docs/project-status.md, saved_results/phase4, and the Phase 4 code over that README
+- Phase 3 raw-example records still point to old pre-rename absolute paths
+  - use the normalization helper in phase4 quality.py or rebuild paths relative to the current repo
+- Current Phase 3 VT smoke data is not good selector-quality data
+  - VT-4hop at snapkv/k512 has no failures in the saved smoke slice
+- StreamingLLM q-vectors are placeholder zeros
+  - do not use StreamingLLM for claims about q-vector usefulness
+- Current Phase 4 frontier saturates at K=2000
+  - because the sweep stopped there
+  - not because 2000 is the true system limit
+- Current practical systems interpretation:
+  - exact CPU scan over the warm eviction buffer is cheap enough that there is no need to add stochastic retrieval yet
+
+Current conceptual position of the repo
+- The repo is now at:
+  - P0 complete enough
+  - P1 smoke-complete enough
+  - P2 complete and trustworthy
+  - P3 smoke-complete enough for traces/infrastructure
+  - P4 MVP complete with a real run
+- The next research phase should be P5, not more open-ended Phase 3 cleanup
+- The likely next steps are:
+  - optional Phase 4 extension to larger K sweep if a nicer frontier figure is needed
+  - Phase 5 oracle recoverability / matched-footprint headroom
+  - Phase 6 actual repair algorithm and robust runs
+
+Likely immediate next steps
+- If you want one more systems pass before P5:
+  - extend Phase 4 transfer and end-to-end sweep above 2000 restored tokens
+  - maybe include 4000, 8000, 12000 if memory permits
+- If you want to move the project forward directly:
+  - start Phase 5 oracle experiments
+  - use the current Phase 4 result as evidence that exact warm-buffer repair is computationally feasible
+- For final paper-grade results later:
+  - rerun onset-regime Phase 1 cleanly
+  - likely refresh Phase 3 traces on the final task setup
+  - rerun Phase 4 on the frozen implementation
+  - run P5 and P6 robustly
+
+What to trust most
+- For current repo state:
+  - README.md
+  - docs/project-status.md
+  - docs/phases/phase0.md through phase4.md
+  - saved_results/*
+- For exact implementation details:
+  - phases/phase2_kv_cache/src/kv_utils.py
+  - phases/phase2_kv_cache/src/runtime.py
+  - phases/phase3_eviction/src/eviction/*
+  - phases/phase4_eviction_buffer/src/buffer/*
+- For current scientific interpretation:
+  - instructions.md
+  - this handoff file
+
+Short bottom line
+- IdleKV is a repo about repairing KV-cache damage during tool-call idle time.
+- The repo has been reorganized cleanly into phases.
+- Phase 2 is the trusted infra layer.
+- Phase 3 provides the eviction machinery and traces.
+- Phase 4 is now real, not just scaffold:
+  - exact warm-buffer scan works
+  - transfer/scoring costs are low at the tested scale
+  - end-to-end repair is comfortably sub-second and actually tens of milliseconds for tested K
+  - the current frontier saturates only because the tested K range stops at 2000
+- The next real phase should be P5 oracle work, unless you specifically want a wider P4 frontier sweep first.
