@@ -11,8 +11,10 @@
 \usepackage{enumitem}
 \usepackage{xcolor}
 \usepackage{tikz}
+\usepackage{pgfplots}
 
 \usetikzlibrary{arrows.meta,positioning}
+\pgfplotsset{compat=1.18}
 \newcommand{\idlekv}{\textsc{IdleKV}}
 \newcommand{\bbase}{\ensuremath{B_{\mathrm{base}}}}
 \newcommand{\bmatch}{\ensuremath{B_{\mathrm{match}}}}
@@ -46,18 +48,20 @@ Tool-using agents create idle gaps between turns, but long-context
 inference systems usually compress KV caches before the next turn is
 known.
 That can leave a stale active cache: tokens that looked unimportant at
-turn $N$ may become critical once a tool call returns or a follow-up
-query is revealed.
-We frame cross-turn KV cache repair as a runtime-systems and
-benchmarking problem for adaptive inference.
-To study it, we introduce \idlekv{}, a minimal idle-window repair
-mechanism together with a matched-footprint protocol for testing whether
-newly revealed turn-$(N{+}1)$ information can improve a compressed cache
-at fixed final active decode-time footprint.
-On a Qwen2.5-7B-Instruct prototype at 32K context, end-to-end repair
-stays below 50\,ms through $K=500$ on the target hardware; this draft
-reports that feasibility result and the protocol for the pending quality
-study.
+turn $N$ may become critical once a follow-up query is revealed.
+We study this as a matched-footprint adaptive-inference problem and
+introduce \idlekv{}, a minimal idle-window mechanism that buffers evicted
+KV on CPU, scores it against the now-known turn-$(N{+}1)$ query, and
+restores up to $K$ context tokens before decoding resumes.
+On a Qwen2.5-7B-Instruct prototype at 32K context, a calibrated
+nonzero-baseline regime on a pooled split-query MQ-NIAH-4q suite keeps
+matched no-repair performance near $0.10$, while \idlekv{} rises from
+$0.342$ at $K=8$ to $0.685$ at $K=64$; random and oldest-token repairs
+stay near baseline, and oracle repair reaches $1.0$ by $K=48$.
+The prototype transfer-and-restore path stays below $50$\,ms p50 through
+$K=500$ on the target hardware, suggesting that idle-window cache
+maintenance is a practical and promising adaptive-inference primitive
+for long-context agents.
 \end{abstract}
 
 % -----------------------------------------------------------------------
@@ -129,16 +133,19 @@ does not rerun full-prefix selection once $Q_2$ is revealed.
 The practical question is whether tool-call time can be used to improve
 the \emph{final} cache seen by the next turn at the same final active
 decode-time footprint.
-Concretely, the draft contributes:
+Concretely, the paper contributes:
 \begin{itemize}[leftmargin=1.4em,noitemsep,topsep=2pt]
   \item a matched-footprint protocol for cross-turn relevance shift that
   isolates better cache selection from simply keeping more tokens; and
+  \item a calibrated nonzero-baseline result on a pooled split-query
+  MQ-NIAH-4q suite where \idlekv{} substantially exceeds matched
+  no-repair retention and simple restore controls; and
   \item a simple idle-window repair path with prototype latency
   measurements on one model, one eviction policy, and one hardware
   stack.
 \end{itemize}
-The paper does not yet claim matched-footprint turn-$(N{+}1)$ quality
-gains.
+The paper still makes a narrow claim: one model, one eviction policy,
+one synthetic task family, and one calibrated regime.
 
 % -----------------------------------------------------------------------
 \section{Protocol}
@@ -259,32 +266,37 @@ matrix.
 We use Qwen2.5-7B-Instruct~\citep{qwen} at 32K rendered context on a
 single RTX PRO 6000 Blackwell GPU, with SnapKV~\citep{snapkv} as the
 base eviction policy.
-The task is a split-query version of \texttt{MQ-NIAH-4q} derived from
-RULER~\citep{ruler}: one shared long context contains four needles,
-$Q_1$ asks for needles 1 and 4, and $Q_2$ asks for needles 2 and 3.
-This balanced split keeps two answers per turn while removing the
-always-recency-kept tail needle from $Q_2$.
-The resulting positive-control slice keeps future relevance hidden and
-avoids giving the matched no-repair baseline half the answer for free.
+The task family is a split-query version of \texttt{MQ-NIAH-4q} derived
+from RULER~\citep{ruler}.
+We treat three balanced $2|2$ set partitions as one pooled clean suite:
+`14$\rightarrow$23', `24$\rightarrow$13', and `34$\rightarrow$12'.
+These are the distinct balanced partitions whose $Q_2$ side excludes the
+tail-anchored fourth needle, which would otherwise leak a recency freebie
+into the no-repair baseline.
+Within-turn order is not treated as a separate condition, so
+`34$\rightarrow$12' and `43$\rightarrow$21' are equivalent up to prompt
+permutation under the values-only scoring format.
+Splits such as `12$\rightarrow$34' are left to diagnostics, because they
+make the matched no-repair baseline easier for reasons unrelated to the
+future-query mechanism.
 
 \paragraph{Configuration.}
-The planned primary study avoids recency-saturated settings, where
-small budgets are dominated by recent tokens and query-aware scoring
-cannot change the kept set.
+The main study avoids both recency-saturated settings and the all-zero
+baseline regime found at much smaller budgets.
 We therefore use context-only SnapKV with a fixed context recency
-reserve and evaluate:
+reserve and report the calibrated family-level regime:
 \begin{itemize}[leftmargin=1.4em,noitemsep,topsep=2pt]
   \item context-only SnapKV with fixed recency reserve
   $R_{\mathrm{ctx}}=128$;
-  \item base budget $\bbase=512$;
+  \item base budget $\bbase=12288$;
   \item concise split prompts that request the values only,
   comma-separated, with a short answer prefix and fixed
   $24$-token decode budget per split turn;
-  \item pilot repair budgets $K \in \{100, 250, 500\}$, with the
-  expectation that the main table will report the smallest informative
-  subset; and
+  \item repair budgets $K \in \{8,16,32,48,64\}$ chosen by a small
+  calibration sweep to keep the left edge non-dead and the right edge
+  below oracle saturation; and
   \item one shared $Q_1$ transcript across all conditions and a fixed
-  100-example evaluation set per setting.
+  100-example evaluation set per split.
 \end{itemize}
 The turn-$N$ eviction signal is the exact generated $Q_1$ answer tail,
 not a generic last-$32$-token cache suffix.
@@ -313,23 +325,97 @@ than matched no-repair retention?
 This study estimates conditional turn-$(N{+}1)$ quality given a fixed,
 full-cache-generated turn-$N$ transcript; it does not measure end-to-end
 two-turn agent quality.
-The main benchmark slice is a positive control chosen to keep future
-relevance hidden, remove trivial recency wins from $Q_2$, and keep
-eviction choices nontrivial, not to estimate average gains across agent
-workloads.
-It also does not yet compare against alternative post-$Q_2$ refresh
-mechanisms that use the same idle window.
+The main benchmark slice is a positive-control suite chosen to keep
+future relevance hidden, remove trivial recency wins from $Q_2$, and
+keep eviction choices nontrivial, not to estimate average gains across
+agent workloads.
+It also does not yet compare against stronger learned or
+future-query-aware alternative refresh mechanisms that use the same idle
+window, or against a second task family calibrated to the same
+acceptance rule.
 
 % -----------------------------------------------------------------------
-\section{Feasibility}
+\section{Results}
 \label{sec:results}
 % -----------------------------------------------------------------------
 
-\paragraph{Current evidence.}
-The current draft reports measured repair feasibility only.
-The central quality question for the protocol remains the next
-measurement: at fixed final active decode-time footprint, does
-\idlekv{} improve turn-$(N{+}1)$ score over $\bmatch$?
+\paragraph{Main matched-footprint result.}
+Figure~\ref{fig:main-frontier} reports the pooled clean-suite frontier
+for the completed main run at $\bbase=12288$.
+In this calibrated nonzero-baseline regime, the compressed base score is
+$0.093$ and the matched no-repair baseline stays near $0.10$ across the
+entire $K$ sweep.
+\idlekv{} rises from $0.342$ at $K=8$ to $0.685$ at $K=64$, while
+Random-$K$ and Oldest-$K$ stay near $\bmatch$.
+Oracle repair remains above \idlekv{} throughout, reaching $0.927$ at
+$K=32$ and $1.0$ by $K=48$, so the regime still contains real headroom.
+Selection lift over $\bmatch$ grows from $0.24$ at $K=8$ to $0.585$ at
+$K=64$, and \idlekv{} exceeds $\bmatch$ on $92.3\%$ of examples at the
+right edge of the sweep.
+
+\begin{figure}[t]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      width=\columnwidth,
+      height=0.68\columnwidth,
+      xmin=8, xmax=64,
+      ymin=0, ymax=1.05,
+      xtick={8,16,32,48,64},
+      xlabel={Restore budget $K$},
+      ylabel={Mean turn-2 score},
+      legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west},
+      grid=major,
+      line width=0.9pt,
+    ]
+      \addplot[black, dashed] coordinates {(8,1.0) (64,1.0)};
+      \addlegendentry{$A$}
+      \addplot[gray!70!black, mark=square*] table [x=k, y=b_match, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
+      \addlegendentry{$B_{\mathrm{match}}$}
+      \addplot[blue!70!black, mark=*] table [x=k, y=idlekv, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
+      \addlegendentry{\idlekv{}}
+      \addplot[teal!70!black, mark=triangle*] table [x=k, y=random_k, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
+      \addlegendentry{Random-$K$}
+      \addplot[orange!90!black, mark=diamond*] table [x=k, y=oldest_k, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
+      \addlegendentry{Oldest-$K$}
+      \addplot[red!75!black, mark=otimes*] table [x=k, y=oracle_k, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
+      \addlegendentry{\oraclek{}}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Pooled clean-suite frontier at $\bbase=12288$.
+  Matched no-repair retention stays near $0.10$, simple restore controls
+  remain near baseline, and \idlekv{} approaches the oracle curve as
+  $K$ grows.}
+  \label{fig:main-frontier}
+\end{figure}
+
+\paragraph{Split heterogeneity.}
+The pooled result hides a real spread in difficulty across the three
+clean splits.
+Table~\ref{tab:split-endpoints} shows the right edge of the frontier.
+`14$\rightarrow$23' is easy once repair has enough budget, and
+`24$\rightarrow$13' is moderate.
+`34$\rightarrow$12' is the hard split: both $B$ and $\bmatch$ stay at
+zero there, but oracle repair still reaches $1.0$, which indicates that
+the benchmark is valid while the current selector leaves substantial
+headroom on the hardest slice.
+
+\begin{table}[t]
+  \caption{Per-split frontier endpoints at $K=64$.}
+  \label{tab:split-endpoints}
+  \centering
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{l c c c c}
+    \toprule
+    split & $B$ & $\bmatch$ & \idlekv{} & \oraclek{} \\
+    \midrule
+    $14 \rightarrow 23$ & 0.160 & 0.175 & 1.000 & 1.000 \\
+    $24 \rightarrow 13$ & 0.120 & 0.125 & 0.540 & 1.000 \\
+    $34 \rightarrow 12$ & 0.000 & 0.000 & 0.515 & 1.000 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 \paragraph{Measured feasibility.}
 Table~\ref{tab:latency} reports the current measured overheads on the
@@ -352,25 +438,14 @@ target hardware for the prototype repair path.
   \end{tabular}
 \end{table}
 
-Measured end-to-end repair stays below 50\,ms through $K=500$.
-Separately, transfer p50 already rises smoothly to 25.86\,ms at
-$K=1000$, which suggests room to extend the full end-to-end study to
-larger repair budgets.
-On the current prototype stack, the measured repair path stays well
-below one tenth of a second.
-
-\paragraph{Planned matched-footprint study.}
-The next empirical step is the quality comparison itself.
-The primary outcome is \emph{lift} over $\bmatch$ on turn-$(N{+}1)$
-score.
-\emph{Recovery} is secondary and is only reported when $\oraclek$
-exceeds $\bmatch$.
-Evidence for the mechanism would be a pattern in which \idlekv{}
-exceeds $\bmatch$, Random-$K$, and Oldest-$K$, while $\oraclek$
-remains above \idlekv{} whenever recoverable headroom exists.
-A null or reversed result in a regime with positive oracle headroom
-would point either to a weak repair signal or to a mismatched benchmark
-slice.
+Measured transfer-plus-restore p50 stays below 50\,ms through $K=500$.
+On the main quality run, the restore-only part of \idlekv{} averages
+$22.2$\,ms at $K=8$ and about $17$--$18$\,ms from $K=16$ through
+$K=64$, while the exact CPU-side evicted-pool scoring pass averages
+about $226$\,ms per example.
+The prototype is therefore still scoring-dominated rather than
+transfer-dominated, but the end-to-end overhead remains small relative
+to many real tool-call delays.
 
 % -----------------------------------------------------------------------
 \section{Discussion}
@@ -416,16 +491,28 @@ null results.
 \paragraph{Limitations and next steps.}
 The study is intentionally conditional and favorable: one model, one
 eviction policy, one synthetic split-query family, fixed
-full-cache-generated turn-$N$ transcripts, and no alternative post-$Q_2$
-refresh baselines yet.
+full-cache-generated turn-$N$ transcripts, and no stronger learned or
+future-query-aware alternative post-$Q_2$ refresh baselines yet.
 That makes the mechanism legible, but it is not evidence about
 end-to-end two-turn agent quality or average gains across workloads.
-The immediate next steps are measured matched-footprint quality on the
-primary slice, sham-query and low-headroom controls, a milder contiguous
-split of the same task family as a robustness check, comparisons against
-other post-$Q_2$ refresh mechanisms, and broader agent-style tasks in
-which tool outputs, retrieved documents, or intermediate plans shift
-relevance across multiple turns.
+The current selector is also still leaving clear headroom on the harder
+clean splits.
+In this prototype, ``improving the selector'' means better choosing
+which evicted bursts to reactivate once $Q_2$ is known: for example,
+adaptive burst widths, stronger scoring of value-bearing neighbors,
+active-cache-aware marginal gain estimates, or multi-anchor packing
+rules that avoid spending budget on partially redundant restorations.
+The immediate next steps are therefore broader evidence on additional
+families calibrated to the same acceptance rule, explicit diagnostic
+tail-leaky splits such as $12\rightarrow34$, and stronger post-$Q_2$
+selection policies on the existing benchmark before moving to noisier
+agent-style tasks.
+One preflight caveat is that a task-matched mismatched-query control did
+not separate reliably on this templated NIAH family, likely because even
+wrong queries recover generic key/value bursts; we therefore emphasize
+matched-footprint and simple-restore controls in the main text and treat
+wrong-query controls as a benchmark-design issue to revisit on broader
+tasks.
 More broadly, the field still needs benchmarks with explicit idle
 intervals, hidden future queries, matched no-repair controls, hindsight
 ceilings, and latency measurements tied to real interruption windows.
@@ -443,9 +530,13 @@ inference budget rather than as dead time.
 \idlekv{} contributes a concrete way to spend that budget: revise a
 compressed cache before the next turn under a matched final active
 decode-time footprint.
-The current draft establishes feasibility of the repair path on one
-prototype stack and defines a protocol for measuring quality gains once
-the full matched-footprint study is complete.
+On the primary pooled split-query benchmark, the completed main run
+shows that idle-window repair can substantially outperform matched
+no-repair retention while random and oldest-token restores stay near
+baseline.
+The remaining work is to broaden that evidence across families and to
+close the gap between the current selector and the available oracle
+headroom.
 More broadly, long-context agent systems may need to be judged not only
 by how efficiently they decode, but by how well they maintain memory
 between turns.

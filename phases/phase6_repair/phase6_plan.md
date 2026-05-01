@@ -49,6 +49,13 @@ Use one benchmark family for the main paper experiment:
 
 These three splits are one experiment, not three separate benchmark claims.
 
+What counts as a distinct split:
+
+- the unit is the `Q1 | Q2` set partition, not the within-turn ordering
+- `34 -> 12` and `43 -> 21` are equivalent under the concise values-only answer format
+- by contrast, `12 -> 34`, `13 -> 24`, and `23 -> 14` are distinct because `Q2` includes the
+  tail-anchored fourth needle and therefore changes the baseline regime
+
 Main reporting:
 
 - pool across the clean split suite for the main graph/table
@@ -63,6 +70,15 @@ Why these splits:
 - they remove the obvious tail-recency freebie from Q2
 - they are already implemented and validated
 
+Diagnostic splits, not in the main aggregate:
+
+- `12 -> 34`
+- `13 -> 24`
+- `23 -> 14`
+
+These are useful later to show why the clean suite is the main causal benchmark, but they should
+not define the main paper figure because `Q2` gets a structural recency advantage.
+
 ## 3. Conditions
 
 Every condition uses the same:
@@ -72,7 +88,7 @@ Every condition uses the same:
 - generated `Q1` transcript
 - same `Q2`
 
-Conditions:
+Locked main conditions:
 
 - `A`
   - full cache, no compression
@@ -82,15 +98,18 @@ Conditions:
   - no repair, but keep `B_base + K` context positions from the start
 - `IdleKV(K)`
   - start from `B`, then restore `K` positions using the true `Q2`
-- `WrongQ-K(K)`
-  - same as `IdleKV(K)`, but rank using a task-matched mismatched query
-  - diagnostic only; not part of the main long run if it fails to separate in preflight
 - `Random-K(K)`
   - restore `K` random evicted positions
 - `Oldest-K(K)`
   - restore `K` oldest evicted positions
 - `Oracle-K(K)`
   - hindsight best `K`
+
+Additional diagnostic only:
+
+- `WrongQ-K(K)`
+  - same as `IdleKV(K)`, but rank using a task-matched mismatched query
+  - this was kept only for preflight because it did not separate reliably on this benchmark family
 
 Primary metric:
 
@@ -143,6 +162,47 @@ Interpretation:
 - `Oracle-K` stays above `IdleKV`, so the regime is not saturated
 - this meets the paper target and is the selected main regime
 
+### 4.3 Full Main Run Completed
+
+Artifact:
+
+- `phases/phase6_repair/results/full/clean_suite_b12288_r128_n100_k8-16-32-48-64_ca-b-bmatch-idlekv-randomk-oldestk-oraclek.json`
+
+Runtime:
+
+- `elapsed_s = 2510.56` (`41.8 min`)
+
+Pooled clean-suite result:
+
+| K | `B` | `B_match` | `Random-K` | `Oldest-K` | `IdleKV` | `Oracle-K` |
+|---|---:|---:|---:|---:|---:|---:|
+| 8  | 0.0933 | 0.1017 | 0.0983 | 0.0883 | 0.3417 | 0.4067 |
+| 16 | 0.0933 | 0.0983 | 0.0983 | 0.0850 | 0.4167 | 0.5233 |
+| 32 | 0.0933 | 0.0950 | 0.1017 | 0.0833 | 0.6067 | 0.9267 |
+| 48 | 0.0933 | 0.0967 | 0.0983 | 0.0867 | 0.6683 | 1.0000 |
+| 64 | 0.0933 | 0.1000 | 0.1000 | 0.0833 | 0.6850 | 1.0000 |
+
+Interpretation:
+
+- the main regime achieved the paper target: both `B` and `B_match` are nonzero
+- `IdleKV` is clearly above `B_match` at every `K`
+- `Random-K` and `Oldest-K` stay near the matched baseline
+- `Oracle-K` remains above `IdleKV`, so the selector still leaves headroom
+
+Per-split endpoint at `K=64`:
+
+| split | `B` | `B_match` | `IdleKV` | `Oracle-K` |
+|---|---:|---:|---:|---:|
+| `14 -> 23` | 0.1600 | 0.1750 | 1.0000 | 1.0000 |
+| `24 -> 13` | 0.1200 | 0.1250 | 0.5400 | 1.0000 |
+| `34 -> 12` | 0.0000 | 0.0000 | 0.5150 | 1.0000 |
+
+This heterogeneity is useful, not a bug:
+
+- the pooled result gives the main figure
+- the split breakdown shows that the mechanism works, but the current selector is weak on the
+  hardest clean split
+
 ## 5. Frozen Shared Setup
 
 Hold these fixed during calibration and the full run:
@@ -190,7 +250,7 @@ This is the paper experiment:
 
 - benchmark: pooled clean split suite
 - choose **one** calibrated `B_base`
-- run **all** conditions on that benchmark
+- run the locked main conditions on that benchmark
 
 This should produce:
 
@@ -262,9 +322,9 @@ Decision:
 - exclude it from the main long run
 - center the main causal comparison on `B_match`, `Random-K`, `Oldest-K`, and `Oracle-K`
 
-## 10. Full Run
+## 10. Locked Main Result
 
-Run one full main experiment with the selected regime:
+The main experiment is now complete with the selected regime:
 
 - task: `clean_suite`
 - `n = 100`
@@ -283,6 +343,8 @@ Main figure:
 - pooled clean-suite frontier:
   - `B_match`
   - `IdleKV`
+  - `Random-K`
+  - `Oldest-K`
   - `Oracle-K`
 
 Main table:
@@ -294,48 +356,20 @@ Main table:
 Appendix:
 
 - per-split curves
-- `Random-K`
-- `Oldest-K`
 - overlap metrics
 - latency
 
-## 11. GPU Queue
+## 11. Status
 
-### 11.1 Selected Calibration Result
+Phase 6 is complete.
 
-Chosen artifact:
+Locked conclusion:
 
-```bash
-./.venv/bin/python phases/phase6_repair/scripts/run_phase6.py \
-  --stage smoke \
-  --task clean_suite \
-  --num-samples 8 \
-  --k 8 16 32 48 64 \
-  --conditions A B B_match IdleKV Oracle-K \
-  --base-context-budget 12288
-```
+- the paper should now be centered on one main matched-footprint result
+- use the pooled 3-split `mq_niah_4q` suite as the main figure
+- use `B_base = 12288` as the locked nonzero-baseline regime
+- keep the old `B=512` result only as a sharp existence-proof reference
 
-### 11.2 Full Main Run
+All broader-evidence runs now move to:
 
-Chosen full command:
-
-```bash
-./.venv/bin/python phases/phase6_repair/scripts/run_phase6.py \
-  --stage full \
-  --task clean_suite \
-  --num-samples 100 \
-  --k 8 16 32 48 64 \
-  --conditions A B B_match IdleKV Random-K Oldest-K Oracle-K \
-  --base-context-budget 12288
-```
-
-## Decision
-
-The paper should now be centered on **one** main experiment:
-
-- pooled clean split suite
-- one calibrated nonzero-baseline `B_base`
-- one full run with all baselines and controls
-
-The old `B=512` result remains useful as a sharp existence-proof reference, but it is no longer the
-main paper figure.
+- `phases/phase7_broader_evidence/phase7_handoff.md`
