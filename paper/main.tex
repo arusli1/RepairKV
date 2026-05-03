@@ -545,10 +545,11 @@ The exact scorer used in the quality curves is a research diagnostic,
 not a deployable implementation: at $K=96$, p50 is $6.08$--$7.62$\,s
 across MQ-NIAH-2Q/4Q/6Q/8Q and is dominated by scoring.
 The $Q_2$-appended-state proxy reduces paired 4Q/6Q p50 to
-$0.83$/$0.71$\,s while still beating $\bmatch$ in paired $n{=}100$
-probes.
+$0.83$/$0.71$\,s while remaining above $\bmatch$ in preliminary paired
+fixed-$K$ probes; controlled Random/Oldest/Gold comparisons are
+reported separately.
 The systems question is whether a scalable score/select/promote path can
-fit inside realistic idle windows, not whether the current exact scorer
+fit inside seconds-scale pause budgets, not whether the current exact scorer
 is deployable.
 
 \paragraph{Capacity envelope.}
@@ -575,7 +576,8 @@ Across $K\in\{96,512,1024,5000\}$, the length-64 p95 curve changes by
 at most $6.1$\,ms, so candidate-store size is the dominant scaling axis.
 At $K=5000$, p95 grows from $50.0$\,ms at 32K candidates to $1.20$\,s
 at 1M and $4.64$\,s at 4M; the 4M endpoint corresponds to about
-240\,GB of offloaded Qwen-shaped BF16 KV.
+240\,GB of full offloaded Qwen-shaped BF16 KV, while the selector
+streams the key half.
 These values sit within the seconds-scale regime reported for
 web-agent API/environment waits and coding-agent OS/tool
 execution~\citep{agent_efficiency,agentcgroup}.

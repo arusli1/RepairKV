@@ -258,11 +258,15 @@ Purpose:
   across three splits; 6Q has not started.
 - Progress at 2026-05-03 20:33 UTC: 4Q is active, around example `56/100`
   across three splits; 6Q has not started.
+- Progress at 2026-05-03 20:44 UTC: 4Q has completed; 6Q is active, around
+  example `10/100` across four splits. Early 6Q partial means still separate
+  proxy IdleKV from matched, Random-K, and Oldest-K, but the final CSV and
+  evaluator remain the decision point.
 
 Promotion decision after completion:
 
 - If it passes the controlled proxy evaluator, use it as the primary
-  deployment-facing quality/latency bridge.
+  scalable-scorer quality/latency bridge for this benchmark.
 - If it fails because content-agnostic controls close the gap, demote proxy
   scoring and keep exact scoring as mechanistic evidence only.
 
