@@ -67,6 +67,11 @@ style contract unless the venue instructions change.
   repository links. The ICML style may keep hidden author metadata in
   `\icmlauthor`/`\icmlaffiliation`, but it must not render in the review
   PDF.
+- AdaptFM says authors are encouraged to disclose significant use of
+  generative AI tools and remain responsible for accuracy, originality, and
+  scientific integrity. Do not add a visible disclosure automatically; treat it
+  as an author decision and ensure any disclosure preserves double-blind
+  review.
 - For camera-ready, turn on the accepted style option and include author
   names/affiliations. The intended metadata is Andrew Rusli, Harvard
   College; Shreyan Paliwal, Harvard College and Opt32. Acknowledgments and
