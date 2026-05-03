@@ -6,9 +6,9 @@ failure, or file change can shift which earlier context matters. IdleKV studies
 whether a runtime can use the pause before decoding resumes to adapt the active
 GPU KV cache to that new relevance signal.
 
-The prototype keeps evicted KV rows in an off-device store, scores them after
-the next-turn signal is known, and promotes a restore budget `K` back into the
-active cache. All main comparisons use a matched resumed active-cache budget:
+The prototype keeps evicted KV rows in a host-memory warm store, scores them
+after the next-turn signal is known, and promotes a restore budget `K` back into
+the active cache. All main comparisons use a matched resumed active-cache budget:
 IdleKV is compared against no-repair and content-agnostic restore controls with
 the same number of active context KV rows.
 
@@ -110,7 +110,9 @@ open questions are:
 - whether additional non-saturated cross-model runs can justify anything
   beyond a cautious portability statement;
 - whether a real agentic or trace-scheduled benchmark can replace some
-  synthetic evidence;
+  synthetic evidence; a CPU-tested RepoDelta generator now exists for a
+  future real-repository relevance-shift smoke, but it is not paper evidence
+  until a GPU smoke passes the written gate;
 - whether additional selector or retention-policy variants add enough signal to
   replace, rather than merely append, existing figures.
 

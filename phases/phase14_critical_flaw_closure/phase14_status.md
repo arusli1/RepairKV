@@ -1,6 +1,6 @@
 # Phase 14 Status
 
-Last updated: 2026-05-03 21:08 UTC.
+Last updated: 2026-05-03 21:48 UTC.
 
 ## Implemented
 
@@ -108,6 +108,18 @@ Last updated: 2026-05-03 21:08 UTC.
   real-repository, tool-event relevance-shift diagnostic to address the
   remaining "synthetic-only" reviewer gap without overclaiming end-to-end agent
   success.
+- Added the CPU-tested RepoDelta generator scaffold for that diagnostic:
+  it builds Q1/Q2 exact-span retrieval examples from real repository files,
+  inserts a tool-event-like Q2 relevance signal without leaking the answer, and
+  maps Q2 file spans through the same prompt renderer used by the repair
+  pipeline. This is code readiness only; it is not paper evidence until a GPU
+  smoke passes the written gate.
+- Incorporated the latest AdaptFM/KV-systems reviewer audits: the abstract now
+  keeps the explicit "not end-to-end agent gains" caveat, keywords include
+  test-time adaptation and cross-turn relevance shift, measured claims say
+  host-memory warm tier where appropriate, and related work now includes
+  fine-grained KV retrieval/loading systems as adjacent within-inference
+  methods.
 
 ## Validation
 
@@ -176,6 +188,13 @@ Last updated: 2026-05-03 21:08 UTC.
 - `.venv/bin/python -m pytest phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py -q`
   - `14 passed` after aligning the 6Q proxy retained-gain gate with the
     written Phase 14 plan.
+- `.venv/bin/python -m py_compile phases/phase14_critical_flaw_closure/src/repodelta.py`
+- `.venv/bin/python -m pytest phases/phase13_iteration_framework/tests/test_paper_language.py phases/phase14_critical_flaw_closure/tests/test_repodelta.py -q`
+  - `5 passed`; the RepoDelta tests cover identifier extraction, distinct Q1/Q2
+    files, no Q2-answer leakage in the tool event, and rendered token-span
+    mapping.
+- Rebuilt `paper/main.pdf` after the AdaptFM keyword/abstract edits; log scan
+  found no undefined citations, undefined references, or overfull boxes.
 
 ## Paper Economy Audit
 
@@ -203,6 +222,9 @@ The reviewer holes that remain material are:
   proxy path preserves quality under Random-K/Oldest-K/Gold-K controls.
 - Trace-scheduled evaluation: the paper cites web/coding-agent wait evidence,
   but it still lacks a real wait-distribution scheduler experiment.
+- Real-content relevance shift: RepoDelta now has CPU-tested generation and
+  span-mapping code, but still needs a full-context ability smoke before any
+  locked run or paper claim.
 - Broader generality: current Llama and retention-rule evidence are targeted
   breadth checks, not enough for a broad model-family or named-policy claim.
 - Algorithmic headroom: Refresh-buffered and Gold-K show that IdleKV is a
@@ -307,6 +329,8 @@ Purpose:
   evaluator remain the decision point.
 - Progress at 2026-05-03 20:50 UTC: 6Q is active, around example `15/100`
   across four splits; the rough monitor ETA is about 58 minutes.
+- Progress at 2026-05-03 21:39 UTC: 6Q is active, around example `67/100`
+  across four splits; the rough monitor ETA is about 26 minutes.
 
 Promotion decision after completion:
 

@@ -40,8 +40,8 @@
   \icmlaffiliation{harvard}{Harvard College, Cambridge, MA, USA}
   \icmlaffiliation{opt32}{Opt32}
   \icmlcorrespondingauthor{Shreyan Paliwal}{shreyanpaliwal@college.harvard.edu}
-  \icmlkeywords{resource-adaptive inference, KV cache repair,
-    long-context agents, dynamic KV cache compression, runtime systems}
+  \icmlkeywords{resource-adaptive inference, test-time adaptation,
+    KV cache repair, cross-turn relevance shift, long-context agents}
   \vskip 0.3in
 ]
 
@@ -58,7 +58,7 @@ weights are fixed but the runtime revises which past context remains
 active under a memory budget.
 We evaluate repair against no-repair under the same number of active
 context KV rows and introduce \idlekv{}, a pre-resume KV promotion
-operator that retains evicted KV in an off-device tier, scores it after
+operator that retains evicted KV in a host-memory warm tier, scores it after
 the turn-$(N{+}1)$ query $Q_2$ is known, and restores up to $K$ context
 tokens before decoding resumes.
 On Qwen2.5-7B-Instruct at 32K context, calibrated split-query
@@ -69,11 +69,11 @@ stay near the matched baseline.
 A fixed five-turn revisit diagnostic further shows repeated repair
 across relevance shifts, with non-initial-turn gain $0.542$ over matched
 no-repair at $K=80$ and paired bootstrap interval $[0.458,0.620]$.
-Together, the matched-budget frontier, repeated-shift diagnostic, and
-retention-rule checks identify pre-resume KV repair as a useful
+Together, the matched active-cache frontier, repeated-shift diagnostic, and
+retention-rule checks support pre-resume KV repair as a useful
 cache-state adaptation operator for runtimes with active GPU and
-off-device KV tiers; faster approximate scoring remains necessary for
-deployment.
+host-memory warm KV tiers, but do not yet establish end-to-end agent gains;
+faster approximate scoring remains necessary for deployment.
 \end{abstract}
 
 % -----------------------------------------------------------------------
@@ -97,8 +97,8 @@ Those pauses are usually treated as dead time, and cache compression is
 usually treated as a one-shot active-cache decision.
 We argue that the idle interval between turns exposes a test-time
 adaptation point: state can be compressed to the active budget, retained
-in an off-device tier, and promoted back into the active cache when new
-turn information changes the distribution of relevant context.
+in a host-memory warm tier, and promoted back into the active cache when
+new turn information changes the distribution of relevant context.
 This problem is not limited to question answering: any next-turn text,
 tool result, test failure, or user correction can change which past
 context should remain active.
@@ -132,8 +132,7 @@ claim is broader than query answering.
 \idlekv{} is a test-time adaptation operator for tiered KV state,
 conditioned on the newly available next-turn signal.
 After turn $N$, the runtime compresses the evictable context portion to a
-base active budget and retains evicted rows in a host-memory off-device
-store.
+base active budget and retains evicted rows in a host-memory warm store.
 When the turn-$(N{+}1)$ signal arrives, \idlekv{} scores that store and
 promotes up to $K$ context-token rows back into the active GPU cache
 before decoding resumes.
@@ -146,7 +145,7 @@ compressed state and does not rerun full-prefix selection after $Q_2$ is
 revealed.
 We contribute:
 \begin{itemize}[leftmargin=1.4em,noitemsep,topsep=2pt]
-  \item a matched resumed-cache-budget protocol for cross-turn
+  \item a matched resumed active-cache-budget protocol for cross-turn
   relevance shift that isolates better cache selection from simply
   keeping more active tokens;
   \item calibrated evidence on pooled split-query multi-query
@@ -199,10 +198,12 @@ memory-management mechanisms~\citep{longbench,inftybench,ruler,scbench}.
 SCBench makes the KV-cache lifecycle itself a benchmark target, and
 ShadowKV shows that sparse KV reconstruction and offload can improve
 long-context serving throughput~\citep{scbench,shadowkv}.
+Fine-grained KV retrieval systems dynamically fetch query-relevant rows
+from larger stores during active inference~\citep{fier,pariskv}.
 These works motivate dynamic KV state, but they address adjacent stages:
 serving systems preserve, route, or reload interrupted state, while
-within-request query-aware methods choose which KV pages or tokens to
-load during active inference.
+within-request query-aware and retrieval methods choose which KV pages or
+tokens to load during active inference.
 By contrast, \idlekv{} starts from an already compressed paused state,
 does not rerun full-prefix selection after $Q_2$ is revealed, and
 revises the active cache before decoding resumes under a matched
@@ -269,7 +270,7 @@ tiering, and retention contention are left to systems evaluation.
 \end{tikzpicture}
 \caption{\idlekv{} uses the tool-call gap between turns to rescore an
 offloaded host-memory KV tier and restore $K$ context tokens before
-answering $Q_2$ under a matched resumed-cache budget.}
+answering $Q_2$ under a matched resumed active-cache budget.}
 \label{fig:pipeline}
 \end{figure}
 
@@ -307,8 +308,8 @@ Let $\bmatch$ denote the no-repair condition that applies the base
 eviction policy with context budget $\bbase + K$ while preserving the
 same $Q_1$ prompt and answer tail.
 \idlekv{} instead decodes from $\bbase+K$ active context rows by starting
-from $\bbase$ retained rows and promoting $K$ rows from the off-device
-store; the extra store bytes, scorer time, and transfer time are reported
+from $\bbase$ retained rows and promoting $K$ rows from the host-memory
+warm store; the extra store bytes, scorer time, and transfer time are reported
 separately rather than hidden in the matched active-cache budget.
 The main restore-budget frontier reports raw answer score so readers can
 compare absolute quality across task difficulty levels.
@@ -677,8 +678,8 @@ the same matched-budget controls.
 Pauses between agent turns can be treated as part of the inference budget
 rather than as dead time.
 \idlekv{} studies one concrete way to spend that budget: promote
-off-device KV back into the active GPU cache before the next turn under
-a matched resumed-cache budget.
+host-memory KV back into the active GPU cache before the next turn under
+a matched resumed active-cache budget.
 On calibrated pooled split-query MQ-NIAH-4Q/6Q/8Q panels, the final
 exact evaluations show that idle-window repair can substantially
 outperform matched no-repair retention while random and oldest-token
@@ -695,7 +696,7 @@ inference state that determines which historical context the next decode
 can directly use.
 
 % -----------------------------------------------------------------------
-\begin{thebibliography}{29}
+\begin{thebibliography}{31}
 
 \bibitem[Abhyankar et~al.(2024)]{infercept}
 Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and Zhang, Y.
@@ -798,6 +799,12 @@ Qwen Team.
 \newblock Qwen2.5 technical report.
 \newblock \emph{arXiv:2412.15115}, 2024.
 
+\bibitem[Qi et~al.(2026)]{pariskv}
+Qi, Y., Chen, X., Jiang, H., Wang, Q., Peng, B., and Palpanas, T.
+\newblock ParisKV: Fast and drift-robust KV-cache retrieval for
+  long-context LLMs.
+\newblock \emph{arXiv:2602.07721}, 2026.
+
 \bibitem[Sun et~al.(2025)]{shadowkv}
 Sun, H., Chang, L.-W., Bao, W., Zheng, S., Zheng, N., Liu, X., Dong,
   H., Chi, Y., and Chen, B.
@@ -811,6 +818,14 @@ Tang, J., Zhao, Y., Zhu, K., Xiao, G., Kasikci, B., and Han, S.
   inference.
 \newblock In \emph{Proceedings of the 41st International Conference on
   Machine Learning (ICML)}, 2024.
+
+\bibitem[Wang et~al.(2025)]{fier}
+Wang, D., Liu, Z., Wang, S., Ren, Y., Deng, J., Hu, J., Chen, T., and
+  Yang, H.
+\newblock FIER: Fine-grained and efficient KV cache retrieval for
+  long-context LLM inference.
+\newblock In \emph{Proceedings of the Conference on Empirical Methods in
+  Natural Language Processing (EMNLP)}, 2025.
 
 \bibitem[Xiao et~al.(2024)]{streamingllm}
 Xiao, G., Tang, Y., Zuo, J., Guo, J., Yang, S., Tang, H., Fu, Y.,
