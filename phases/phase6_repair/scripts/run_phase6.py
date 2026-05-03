@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Run the Phase 6 two-turn matched-footprint IdleKV experiment."""
+"""Run the two-turn matched active-cache-budget IdleKV experiment.
+
+Legacy CLI defaults preserve the earlier proxy/hindsight path.
+Current exact-mode runs should pass explicit
+``--query-scoring-mode exact_q --oracle-mode gold_spans`` flags.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +18,12 @@ for root in (PHASE_ROOT, REPO_ROOT):
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-from phases.phase6_repair.src.runner import STAGE_DEFAULTS, build_config, run_experiment  # noqa: E402
+from phases.phase6_repair.src.runner import (  # noqa: E402
+    DEFAULT_WRONG_QUERY_DONOR_OFFSET,
+    STAGE_DEFAULTS,
+    build_config,
+    run_experiment,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,10 +33,46 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int, default=None)
     parser.add_argument("--context-length", type=int, default=32_768)
     parser.add_argument("--dataset-seed-offset", type=int, default=0)
+    parser.add_argument(
+        "--model-dir",
+        type=Path,
+        default=None,
+        help="Local model directory. Defaults to the Phase 2 Qwen2.5-7B-Instruct path.",
+    )
     parser.add_argument("--k", nargs="+", type=int, default=None)
     parser.add_argument("--conditions", nargs="+", default=None)
     parser.add_argument("--base-context-budget", type=int, default=512)
     parser.add_argument("--recency-window", type=int, default=128)
+    parser.add_argument(
+        "--initial-compressor",
+        choices=("snapkv", "streaming_llm", "h2o"),
+        default="snapkv",
+        help="First-stage post-Q1 context compressor used before idle repair.",
+    )
+    parser.add_argument(
+        "--query-scoring-mode",
+        choices=("proxy", "exact_q"),
+        default="proxy",
+        help="Repair scorer mode. Legacy default is proxy; current exact-mode runs should pass exact_q explicitly.",
+    )
+    parser.add_argument(
+        "--oracle-mode",
+        choices=("burst_hindsight", "gold_spans"),
+        default="burst_hindsight",
+        help="Hindsight-reference path. Legacy default is burst_hindsight; current exact-mode runs should pass gold_spans explicitly.",
+    )
+    parser.add_argument(
+        "--wrong-query-mode",
+        choices=("phantom_key", "donor_q2"),
+        default="phantom_key",
+        help="WrongQ-K scorer query. donor_q2 uses another example's true Q2 query as the specificity control.",
+    )
+    parser.add_argument(
+        "--wrong-query-donor-offset",
+        type=int,
+        default=DEFAULT_WRONG_QUERY_DONOR_OFFSET,
+        help="Example-index offset used when --wrong-query-mode donor_q2 is selected.",
+    )
     return parser.parse_args()
 
 
@@ -42,6 +88,12 @@ def main() -> int:
         conditions=args.conditions,
         base_context_budget=args.base_context_budget,
         recency_window=args.recency_window,
+        query_scoring_mode=args.query_scoring_mode,
+        oracle_mode=args.oracle_mode,
+        wrong_query_mode=args.wrong_query_mode,
+        wrong_query_donor_offset=args.wrong_query_donor_offset,
+        model_dir=args.model_dir if args.model_dir is not None else None,
+        initial_compressor=args.initial_compressor,
     )
     payload = run_experiment(config)
     print(payload["artifact_path"])

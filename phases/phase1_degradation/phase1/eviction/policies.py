@@ -85,7 +85,7 @@ class BudgetedLoggingPress(BasePress):
 
         # Apply the token selection to the cached keys/values.
         if self.rerotate_keys:
-            # StreamingLLM-style policies need key rerotation because keeping a
+            # Sink-plus-recent retention needs key rerotation because keeping a
             # non-contiguous subset changes the RoPE-relative geometry.
             keys = KeyRerotationPress.rerotate_keys(module, kept_indices, keys)
         else:
@@ -160,7 +160,7 @@ class BudgetedSnapKVPress(BudgetedLoggingPress):
 
 @dataclass
 class BudgetedStreamingLLMPress(BudgetedLoggingPress):
-    """StreamingLLM-style keep policy: preserve sink tokens plus a recent tail."""
+    """Sink-plus-recent retention policy inspired by StreamingLLM."""
 
     n_sink: int = 4
 

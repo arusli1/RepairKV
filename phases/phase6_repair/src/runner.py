@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import itertools
+import shutil
 import time
 from pathlib import Path
 import re
@@ -13,35 +15,75 @@ import torch
 
 from phases.phase1_degradation.phase1.evaluation import sample_score
 from phases.phase2_kv_cache.src.kv_utils import PositionTrackedCache, inject_kv, slice_kv
+from phases.phase2_kv_cache.src.runtime import MODEL_DIR as DEFAULT_MODEL_DIR
 from phases.phase2_kv_cache.src.runtime import load_model, load_tokenizer
 from phases.phase3_eviction.src.runtime import build_position_tracked_cache, write_json
 
 from .protocol import (
     CLEAN_SPLIT_SPECS,
+    MQ_NIAH_2Q_CLEAN_SPLIT_SPEC,
+    MQ_NIAH_3Q_CLEAN_SPLIT_SPEC,
+    MQ_NIAH_6Q_CLEAN_SPLIT_SPECS,
+    MQ_NIAH_8Q_CLEAN_SPLIT_SPECS,
     SPLIT_SPECS_BY_NAME,
     TAIL_LEAKY_SPLIT_SPECS,
     SplitTaskSpec,
     build_mismatched_question_ids,
     build_base_example,
     build_split_prepared_from_base_example,
+    compute_q2_exact_query_rows,
     build_turn_n_keep_plan,
     compute_q2_query_rows,
     generate_turn,
     materialize_context_partition,
+    relevant_position_groups_for_spans,
     relevant_positions_for_spans,
 )
 from .selectors import (
+    contrastive_position_scores,
     score_evicted_positions,
+    select_coverage_aware_positions,
     select_idlekv_positions,
+    select_mmr_positions,
     select_oldest_positions,
     select_oracle_positions,
     select_random_positions,
+    select_refresh_positions,
 )
 
 PHASE_ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = PHASE_ROOT / "results"
 SCHEMA_VERSION = "phase6-two-turn-v1"
-ALLOWED_CONDITIONS = ("A", "B", "B_match", "IdleKV", "WrongQ-K", "Random-K", "Oldest-K", "Oracle-K")
+ALLOWED_CONDITIONS = (
+    "A",
+    "B",
+    "B_match",
+    "IdleKV",
+    "IdleKV-Coverage",
+    "IdleKV-MMR",
+    "WrongQ-K",
+    "StaleQ-K",
+    "ContrastiveQ-K",
+    "Refresh-K",
+    "Random-K",
+    "Oldest-K",
+    "Oracle-K",
+)
+ALLOWED_QUERY_SCORING_MODES = ("proxy", "exact_q")
+ALLOWED_ORACLE_MODES = ("burst_hindsight", "gold_spans")
+ALLOWED_WRONG_QUERY_MODES = ("phantom_key", "donor_q2")
+ALLOWED_INITIAL_COMPRESSORS = ("snapkv", "streaming_llm", "h2o")
+DEFAULT_WRONG_QUERY_DONOR_OFFSET = 100_000
+Q2_SCORE_CONDITIONS = frozenset(
+    (
+        "IdleKV",
+        "IdleKV-Coverage",
+        "IdleKV-MMR",
+        "ContrastiveQ-K",
+        "Refresh-K",
+        "Oracle-K",
+    )
+)
 
 STAGE_DEFAULTS: dict[str, dict[str, Any]] = {
     "smoke": {
@@ -64,6 +106,10 @@ STAGE_DEFAULTS: dict[str, dict[str, Any]] = {
 TASK_ALIASES: dict[str, tuple[SplitTaskSpec, ...]] = {
     "clean_suite": CLEAN_SPLIT_SPECS,
     "diagnostic_suite": TAIL_LEAKY_SPLIT_SPECS,
+    "mq_niah_2q_clean_suite": (MQ_NIAH_2Q_CLEAN_SPLIT_SPEC,),
+    "mq_niah_3q_clean_suite": (MQ_NIAH_3Q_CLEAN_SPLIT_SPEC,),
+    "mq_niah_6q_clean_suite": MQ_NIAH_6Q_CLEAN_SPLIT_SPECS,
+    "mq_niah_8q_clean_suite": MQ_NIAH_8Q_CLEAN_SPLIT_SPECS,
 }
 
 
@@ -85,6 +131,12 @@ class Phase6Config:
     pooling: str = "max"
     burst_left: int = 2
     burst_right: int = 20
+    query_scoring_mode: str = "proxy"
+    oracle_mode: str = "burst_hindsight"
+    wrong_query_mode: str = "phantom_key"
+    wrong_query_donor_offset: int = DEFAULT_WRONG_QUERY_DONOR_OFFSET
+    model_dir: str = str(DEFAULT_MODEL_DIR)
+    initial_compressor: str = "snapkv"
 
 
 def ensure_results_dirs(stage: str) -> Path:
@@ -96,6 +148,10 @@ def ensure_results_dirs(stage: str) -> Path:
 def _condition_label(conditions: Iterable[str]) -> str:
     parts = [re.sub(r"[^a-z0-9]+", "", str(condition).lower()) for condition in conditions]
     return "-".join(part for part in parts if part)
+
+
+def _needs_q2_candidate_scores(conditions: Iterable[str]) -> bool:
+    return bool(Q2_SCORE_CONDITIONS.intersection(str(condition) for condition in conditions))
 
 
 def _normalize_stage(stage: str) -> str:
@@ -126,6 +182,12 @@ def build_config(
     conditions: Iterable[str] | None = None,
     base_context_budget: int = 512,
     recency_window: int = 128,
+    query_scoring_mode: str = "proxy",
+    oracle_mode: str = "burst_hindsight",
+    wrong_query_mode: str = "phantom_key",
+    wrong_query_donor_offset: int = DEFAULT_WRONG_QUERY_DONOR_OFFSET,
+    model_dir: str | Path | None = DEFAULT_MODEL_DIR,
+    initial_compressor: str = "snapkv",
 ) -> Phase6Config:
     """Construct one run config with stage defaults unless overridden."""
     normalized_stage = _normalize_stage(stage)
@@ -147,6 +209,23 @@ def build_config(
         raise ValueError("base_context_budget must be positive.")
     if int(recency_window) < 0:
         raise ValueError("recency_window must be non-negative.")
+    normalized_query_scoring_mode = str(query_scoring_mode).strip().lower()
+    if normalized_query_scoring_mode not in ALLOWED_QUERY_SCORING_MODES:
+        raise ValueError(f"Unsupported query_scoring_mode: {query_scoring_mode!r}.")
+    normalized_oracle_mode = str(oracle_mode).strip().lower()
+    if normalized_oracle_mode not in ALLOWED_ORACLE_MODES:
+        raise ValueError(f"Unsupported oracle_mode: {oracle_mode!r}.")
+    normalized_wrong_query_mode = str(wrong_query_mode).strip().lower()
+    if normalized_wrong_query_mode not in ALLOWED_WRONG_QUERY_MODES:
+        raise ValueError(f"Unsupported wrong_query_mode: {wrong_query_mode!r}.")
+    normalized_initial_compressor = str(initial_compressor).strip().lower()
+    if normalized_initial_compressor not in ALLOWED_INITIAL_COMPRESSORS:
+        raise ValueError(f"Unsupported initial_compressor: {initial_compressor!r}.")
+    if int(wrong_query_donor_offset) <= 0:
+        raise ValueError("wrong_query_donor_offset must be positive.")
+    normalized_model_dir = Path(model_dir or DEFAULT_MODEL_DIR).expanduser()
+    if not normalized_model_dir.exists():
+        raise ValueError(f"model_dir does not exist: {normalized_model_dir}.")
     return Phase6Config(
         stage=normalized_stage,
         task=str(task).strip(),
@@ -158,6 +237,12 @@ def build_config(
         conditions=normalized_conditions,
         base_context_budget=int(base_context_budget),
         recency_window=int(recency_window),
+        query_scoring_mode=normalized_query_scoring_mode,
+        oracle_mode=normalized_oracle_mode,
+        wrong_query_mode=normalized_wrong_query_mode,
+        wrong_query_donor_offset=int(wrong_query_donor_offset),
+        model_dir=str(normalized_model_dir),
+        initial_compressor=normalized_initial_compressor,
     )
 
 
@@ -175,12 +260,21 @@ def _pct(values: Iterable[bool]) -> float:
     return float(sum(values) / len(values)) if values else 0.0
 
 
-def _selected_overlap_fraction(selected_positions: Iterable[int], relevant_positions: Iterable[int]) -> float:
+def _overlap_fraction(selected_positions: Iterable[int], relevant_positions: Iterable[int]) -> float:
     selected = {int(position) for position in selected_positions}
     relevant = {int(position) for position in relevant_positions}
     if not relevant:
         return 0.0
     return float(len(selected & relevant) / len(relevant))
+
+
+def _jaccard_fraction(left_positions: Iterable[int], right_positions: Iterable[int]) -> float:
+    left = {int(position) for position in left_positions}
+    right = {int(position) for position in right_positions}
+    union = left | right
+    if not union:
+        return 1.0
+    return float(len(left & right) / len(union))
 
 
 def _sync_if_cuda(device: torch.device) -> None:
@@ -200,6 +294,47 @@ def _slice_fragment_by_positions(evicted_cache: PositionTrackedCache, positions:
     if not isinstance(fragment, PositionTrackedCache):
         raise RuntimeError("Phase 2 slice_kv did not preserve position tracking for the repair fragment.")
     return fragment
+
+
+def _slice_by_original_positions(cache: PositionTrackedCache, positions: Iterable[int]) -> PositionTrackedCache:
+    """Slice a tracked cache by original position labels rather than dense indices."""
+    position_to_dense = {int(position): dense_index for dense_index, position in enumerate(cache.positions)}
+    dense_indices = [position_to_dense[int(position)] for position in positions if int(position) in position_to_dense]
+    fragment = slice_kv(cache, dense_indices)
+    if not isinstance(fragment, PositionTrackedCache):
+        raise RuntimeError("Phase 2 slice_kv did not preserve position tracking.")
+    return fragment
+
+
+def _score_context_positions(
+    *,
+    query_rows: torch.Tensor,
+    full_post_q1_cache: PositionTrackedCache,
+    context_len: int,
+    tail_positions: Iterable[int],
+    pooling: str,
+) -> dict[int, float]:
+    """Score all original context positions for the Refresh-buffered comparator."""
+    context_cache = _slice_by_original_positions(full_post_q1_cache, range(int(context_len)))
+    tail_cache = _slice_by_original_positions(full_post_q1_cache, tail_positions)
+    return score_evicted_positions(
+        query_rows=query_rows,
+        evicted_cache=context_cache,
+        active_cache=tail_cache if len(tail_cache) > 0 else None,
+        pooling=pooling,
+    )
+
+
+def _materialize_context_positions(
+    *,
+    full_post_q1_cache: PositionTrackedCache,
+    context_positions: Iterable[int],
+    tail_positions: Iterable[int],
+) -> PositionTrackedCache:
+    """Materialize an active cache from selected context rows plus the Q1 tail."""
+    selected_positions = list(sorted(dict.fromkeys(int(position) for position in context_positions)))
+    selected_positions.extend(int(position) for position in tail_positions)
+    return _slice_by_original_positions(full_post_q1_cache, selected_positions)
 
 
 def _restore_positions(
@@ -252,6 +387,161 @@ def _run_condition(
     return generated.text, score, generation_s
 
 
+def _run_selected_position_condition(
+    *,
+    model,
+    tokenizer,
+    prepared,
+    active_cache: PositionTrackedCache,
+    evicted_cache: PositionTrackedCache,
+    base_positions: Iterable[int],
+    selected_positions: list[int],
+    relevant_positions: tuple[int, ...],
+    selection_s: float,
+    field_prefix: str,
+) -> dict[str, Any]:
+    repaired_cache, restore_timing = _restore_positions(
+        active_cache=active_cache,
+        evicted_cache=evicted_cache,
+        selected_positions=selected_positions,
+    )
+    output, score, generation_s = _run_condition(
+        model=model,
+        tokenizer=tokenizer,
+        prepared=prepared,
+        cache=repaired_cache,
+    )
+    active_positions = tuple(sorted(set(int(position) for position in base_positions) | set(selected_positions)))
+    return {
+        f"{field_prefix}_score": round(score, 6),
+        f"{field_prefix}_output": output,
+        f"{field_prefix}_generation_s": round(generation_s, 6),
+        f"{field_prefix}_selection_s": round(selection_s, 6),
+        f"{field_prefix}_transfer_ms": round(restore_timing["transfer_ms"], 6),
+        f"{field_prefix}_inject_ms": round(restore_timing["inject_ms"], 6),
+        f"{field_prefix}_restored_count": int(restore_timing["restored_count"]),
+        f"{field_prefix}_selected_positions": selected_positions,
+        f"{field_prefix}_overlap_fraction": round(
+            _overlap_fraction(selected_positions, relevant_positions),
+            6,
+        ),
+        f"{field_prefix}_selected_overlap_fraction": round(
+            _overlap_fraction(selected_positions, relevant_positions),
+            6,
+        ),
+        f"{field_prefix}_active_overlap_fraction": round(
+            _overlap_fraction(active_positions, relevant_positions),
+            6,
+        ),
+    }
+
+
+def _build_gold_span_oracle_candidates(
+    *,
+    model,
+    tokenizer,
+    prepared,
+    active_cache: PositionTrackedCache,
+    evicted_cache: PositionTrackedCache,
+    relevant_position_groups: Iterable[Iterable[int]],
+    q2_scores: dict[int, float],
+    turn_n_scores: dict[int, float],
+    base_output: str,
+    base_score: float,
+    base_generation_s: float,
+) -> list[dict[str, Any]]:
+    """Enumerate and score all gold-span group subsets once for one split.
+
+    The returned candidates represent an ``up to K`` oracle over the benchmark's
+    gold span groups under actual Q2 generation, not just a token-ranking proxy.
+    """
+    evicted_available = {int(position) for position in evicted_cache.positions}
+    filtered_groups: list[tuple[int, ...]] = []
+    seen_groups: set[tuple[int, ...]] = set()
+    for group in relevant_position_groups:
+        filtered = tuple(sorted(int(position) for position in group if int(position) in evicted_available))
+        if filtered and filtered not in seen_groups:
+            filtered_groups.append(filtered)
+            seen_groups.add(filtered)
+
+    candidates: list[dict[str, Any]] = [
+        {
+            "positions": (),
+            "cost": 0,
+            "score": float(base_score),
+            "output": str(base_output),
+            "generation_s": float(base_generation_s),
+            "restore_timing": {
+                "transfer_ms": 0.0,
+                "inject_ms": 0.0,
+                "restored_count": 0.0,
+            },
+            "q2_sum": 0.0,
+            "turn_n_sum": 0.0,
+        }
+    ]
+    seen_position_sets: set[tuple[int, ...]] = {()}
+
+    for subset_bits in itertools.product((0, 1), repeat=len(filtered_groups)):
+        chosen_groups = [group for keep, group in zip(subset_bits, filtered_groups, strict=True) if keep]
+        chosen_positions = tuple(sorted({position for group in chosen_groups for position in group}))
+        if chosen_positions in seen_position_sets:
+            continue
+        seen_position_sets.add(chosen_positions)
+        repaired_cache, restore_timing = _restore_positions(
+            active_cache=active_cache,
+            evicted_cache=evicted_cache,
+            selected_positions=chosen_positions,
+        )
+        output, score, generation_s = _run_condition(
+            model=model,
+            tokenizer=tokenizer,
+            prepared=prepared,
+            cache=repaired_cache,
+        )
+        candidates.append(
+            {
+                "positions": chosen_positions,
+                "cost": len(chosen_positions),
+                "score": float(score),
+                "output": str(output),
+                "generation_s": float(generation_s),
+                "restore_timing": restore_timing,
+                "q2_sum": float(sum(q2_scores.get(position, 0.0) for position in chosen_positions)),
+                "turn_n_sum": float(sum(turn_n_scores.get(position, 0.0) for position in chosen_positions)),
+            }
+        )
+
+    return candidates
+
+
+def _choose_gold_span_oracle_candidate(
+    *,
+    candidates: Iterable[dict[str, Any]],
+    k: int,
+) -> dict[str, Any]:
+    """Choose the best already-evaluated gold-span subset with cost <= K."""
+    target_k = int(k)
+    best_candidate: dict[str, Any] | None = None
+    best_value: tuple[float, int, float, float] | None = None
+    for candidate in candidates:
+        cost = int(candidate["cost"])
+        if cost > target_k:
+            continue
+        value = (
+            float(candidate["score"]),
+            -cost,
+            float(candidate["q2_sum"]),
+            float(candidate["turn_n_sum"]),
+        )
+        if best_value is None or value > best_value:
+            best_candidate = candidate
+            best_value = value
+    if best_candidate is None:
+        raise RuntimeError("Gold-span oracle search found no candidate within budget.")
+    return best_candidate
+
+
 def _run_one_split(
     *,
     model,
@@ -286,6 +576,7 @@ def _run_one_split(
         sink_size=config.sink_size,
         recency_window=config.recency_window,
         pooling=config.pooling,
+        initial_compressor=config.initial_compressor,
     )
     keep_plan_s = time.perf_counter() - keep_plan_start
 
@@ -301,45 +592,126 @@ def _run_one_split(
         cache=base_partition.compressed,
     )
 
-    q2_query_start = time.perf_counter()
-    q2_query_rows = compute_q2_query_rows(
-        model,
-        active_cache=base_partition.compressed,
-        question_ids=split.q2_prepared.question_ids,
-    )
-    q2_query_s = time.perf_counter() - q2_query_start
+    q2_query_rows: torch.Tensor | None = None
+    q2_scores: dict[int, float] = {}
+    q2_query_s = 0.0
+    q2_score_s = 0.0
+    if _needs_q2_candidate_scores(config.conditions):
+        q2_query_start = time.perf_counter()
+        if config.query_scoring_mode == "exact_q":
+            q2_query_rows = compute_q2_exact_query_rows(
+                model,
+                active_cache=base_partition.compressed,
+                question_ids=split.q2_prepared.question_ids,
+            )
+        else:
+            q2_query_rows = compute_q2_query_rows(
+                model,
+                active_cache=base_partition.compressed,
+                question_ids=split.q2_prepared.question_ids,
+            )
+        q2_query_s = time.perf_counter() - q2_query_start
 
-    q2_score_start = time.perf_counter()
-    q2_scores = score_evicted_positions(
-        query_rows=q2_query_rows,
-        evicted_cache=base_partition.evicted,
-        pooling=config.pooling,
-    )
-    q2_score_s = time.perf_counter() - q2_score_start
+        q2_score_start = time.perf_counter()
+        q2_scores = score_evicted_positions(
+            query_rows=q2_query_rows,
+            evicted_cache=base_partition.evicted,
+            active_cache=base_partition.compressed,
+            pooling=config.pooling,
+        )
+        q2_score_s = time.perf_counter() - q2_score_start
+
+    refresh_scores: dict[int, float] | None = None
+    refresh_score_s = 0.0
+    if "Refresh-K" in config.conditions:
+        assert q2_query_rows is not None
+        refresh_score_start = time.perf_counter()
+        refresh_scores = _score_context_positions(
+            query_rows=q2_query_rows,
+            full_post_q1_cache=q1_turn.cache,
+            context_len=context_len,
+            tail_positions=keep_plan.tail_positions,
+            pooling=config.pooling,
+        )
+        refresh_score_s = time.perf_counter() - refresh_score_start
 
     wrong_q_scores: dict[int, float] | None = None
     wrong_q_query_s = 0.0
     wrong_q_score_s = 0.0
-    if "WrongQ-K" in config.conditions:
+    if "WrongQ-K" in config.conditions or "ContrastiveQ-K" in config.conditions:
         if wrong_q2_question_ids is None:
-            raise ValueError("WrongQ-K requires donor Q2 question ids.")
+            raise ValueError("WrongQ-K and ContrastiveQ-K require donor Q2 question ids.")
         wrong_q_query_start = time.perf_counter()
-        wrong_q_query_rows = compute_q2_query_rows(
-            model,
-            active_cache=base_partition.compressed,
-            question_ids=wrong_q2_question_ids,
-        )
+        if config.query_scoring_mode == "exact_q":
+            wrong_q_query_rows = compute_q2_exact_query_rows(
+                model,
+                active_cache=base_partition.compressed,
+                question_ids=wrong_q2_question_ids,
+            )
+        else:
+            wrong_q_query_rows = compute_q2_query_rows(
+                model,
+                active_cache=base_partition.compressed,
+                question_ids=wrong_q2_question_ids,
+            )
         wrong_q_query_s = time.perf_counter() - wrong_q_query_start
         wrong_q_score_start = time.perf_counter()
         wrong_q_scores = score_evicted_positions(
             query_rows=wrong_q_query_rows,
             evicted_cache=base_partition.evicted,
+            active_cache=base_partition.compressed,
             pooling=config.pooling,
         )
         wrong_q_score_s = time.perf_counter() - wrong_q_score_start
 
+    stale_q_scores: dict[int, float] | None = None
+    stale_q_query_s = 0.0
+    stale_q_score_s = 0.0
+    if "StaleQ-K" in config.conditions:
+        stale_q_query_start = time.perf_counter()
+        if config.query_scoring_mode == "exact_q":
+            stale_q_query_rows = compute_q2_exact_query_rows(
+                model,
+                active_cache=base_partition.compressed,
+                question_ids=split.q1_prepared.question_ids,
+            )
+        else:
+            stale_q_query_rows = compute_q2_query_rows(
+                model,
+                active_cache=base_partition.compressed,
+                question_ids=split.q1_prepared.question_ids,
+            )
+        stale_q_query_s = time.perf_counter() - stale_q_query_start
+        stale_q_score_start = time.perf_counter()
+        stale_q_scores = score_evicted_positions(
+            query_rows=stale_q_query_rows,
+            evicted_cache=base_partition.evicted,
+            active_cache=base_partition.compressed,
+            pooling=config.pooling,
+        )
+        stale_q_score_s = time.perf_counter() - stale_q_score_start
+
     q2_relevant_positions = relevant_positions_for_spans(split.q2_prepared, split.q2_span_names)
+    q2_relevant_groups = relevant_position_groups_for_spans(split.q2_prepared, split.q2_span_names)
     evicted_positions = tuple(int(position) for position in base_partition.evicted.positions)
+    gold_span_oracle_candidates: list[dict[str, Any]] | None = None
+    gold_span_oracle_search_s = 0.0
+    if "Oracle-K" in config.conditions and config.oracle_mode == "gold_spans":
+        oracle_search_start = time.perf_counter()
+        gold_span_oracle_candidates = _build_gold_span_oracle_candidates(
+            model=model,
+            tokenizer=tokenizer,
+            prepared=split.q2_prepared,
+            active_cache=base_partition.compressed,
+            evicted_cache=base_partition.evicted,
+            relevant_position_groups=q2_relevant_groups,
+            q2_scores=q2_scores,
+            turn_n_scores=keep_plan.importance_scores,
+            base_output=condition_b_output,
+            base_score=condition_b_score,
+            base_generation_s=condition_b_generation_s,
+        )
+        gold_span_oracle_search_s = time.perf_counter() - oracle_search_start
 
     rows: list[dict[str, Any]] = []
     for k in config.k_values:
@@ -367,8 +739,13 @@ def _run_one_split(
             "condition_b_generation_s": round(condition_b_generation_s, 6),
             "q2_query_rows_s": round(q2_query_s, 6),
             "q2_evicted_scoring_s": round(q2_score_s, 6),
+            "refresh_context_scoring_s": round(refresh_score_s, 6),
             "wrong_q_query_rows_s": round(wrong_q_query_s, 6),
             "wrong_q_evicted_scoring_s": round(wrong_q_score_s, 6),
+            "stale_q_query_rows_s": round(stale_q_query_s, 6),
+            "stale_q_evicted_scoring_s": round(stale_q_score_s, 6),
+            "wrong_query_mode": config.wrong_query_mode,
+            "wrong_query_donor_offset": int(config.wrong_query_donor_offset),
             "base_context_budget": int(config.base_context_budget),
             "context_length": context_len,
             "evicted_context_tokens": int(len(base_partition.evicted.positions)),
@@ -391,11 +768,20 @@ def _run_one_split(
                 "b_match_score": round(bmatch_score, 6),
                 "b_match_output": bmatch_output,
                 "b_match_generation_s": round(bmatch_generation_s, 6),
+                "b_match_kept_context_positions": list(bmatch_partition.kept_context_positions),
                 "b_match_overlap_fraction": round(
-                    _selected_overlap_fraction(bmatch_partition.kept_context_positions, q2_relevant_positions),
+                    _overlap_fraction(bmatch_partition.kept_context_positions, q2_relevant_positions),
+                    6,
+                ),
+                "b_match_active_overlap_fraction": round(
+                    _overlap_fraction(bmatch_partition.kept_context_positions, q2_relevant_positions),
                     6,
                 ),
             }
+        )
+        row["condition_b_overlap_fraction"] = round(
+            _overlap_fraction(base_partition.kept_context_positions, q2_relevant_positions),
+            6,
         )
 
         if "IdleKV" in config.conditions:
@@ -431,10 +817,73 @@ def _run_one_split(
                     "idlekv_restored_count": int(restore_timing["restored_count"]),
                     "idlekv_selected_positions": idlekv_positions,
                     "idlekv_overlap_fraction": round(
-                        _selected_overlap_fraction(idlekv_positions, q2_relevant_positions),
+                        _overlap_fraction(idlekv_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "idlekv_selected_overlap_fraction": round(
+                        _overlap_fraction(idlekv_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "idlekv_active_overlap_fraction": round(
+                        _overlap_fraction(
+                            tuple(sorted(set(base_partition.kept_context_positions) | set(idlekv_positions))),
+                            q2_relevant_positions,
+                        ),
                         6,
                     ),
                 }
+            )
+
+        if "IdleKV-Coverage" in config.conditions:
+            select_start = time.perf_counter()
+            idlekv_coverage_positions = select_coverage_aware_positions(
+                evicted_positions=evicted_positions,
+                q2_scores=q2_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                k=k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            select_s = time.perf_counter() - select_start
+            row.update(
+                _run_selected_position_condition(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prepared=split.q2_prepared,
+                    active_cache=base_partition.compressed,
+                    evicted_cache=base_partition.evicted,
+                    base_positions=base_partition.kept_context_positions,
+                    selected_positions=idlekv_coverage_positions,
+                    relevant_positions=q2_relevant_positions,
+                    selection_s=select_s,
+                    field_prefix="idlekv_coverage",
+                )
+            )
+
+        if "IdleKV-MMR" in config.conditions:
+            select_start = time.perf_counter()
+            idlekv_mmr_positions = select_mmr_positions(
+                evicted_positions=evicted_positions,
+                q2_scores=q2_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                k=k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            select_s = time.perf_counter() - select_start
+            row.update(
+                _run_selected_position_condition(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prepared=split.q2_prepared,
+                    active_cache=base_partition.compressed,
+                    evicted_cache=base_partition.evicted,
+                    base_positions=base_partition.kept_context_positions,
+                    selected_positions=idlekv_mmr_positions,
+                    relevant_positions=q2_relevant_positions,
+                    selection_s=select_s,
+                    field_prefix="idlekv_mmr",
+                )
             )
 
         if "WrongQ-K" in config.conditions:
@@ -471,7 +920,209 @@ def _run_one_split(
                     "wrong_q_k_restored_count": int(restore_timing["restored_count"]),
                     "wrong_q_k_selected_positions": wrong_q_positions,
                     "wrong_q_k_overlap_fraction": round(
-                        _selected_overlap_fraction(wrong_q_positions, q2_relevant_positions),
+                        _overlap_fraction(wrong_q_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "wrong_q_k_selected_overlap_fraction": round(
+                        _overlap_fraction(wrong_q_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "wrong_q_k_active_overlap_fraction": round(
+                        _overlap_fraction(
+                            tuple(sorted(set(base_partition.kept_context_positions) | set(wrong_q_positions))),
+                            q2_relevant_positions,
+                        ),
+                        6,
+                    ),
+                }
+            )
+
+        if "StaleQ-K" in config.conditions:
+            assert stale_q_scores is not None
+            select_start = time.perf_counter()
+            stale_q_positions = select_idlekv_positions(
+                evicted_positions=evicted_positions,
+                q2_scores=stale_q_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                k=k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            select_s = time.perf_counter() - select_start
+            repaired_cache, restore_timing = _restore_positions(
+                active_cache=base_partition.compressed,
+                evicted_cache=base_partition.evicted,
+                selected_positions=stale_q_positions,
+            )
+            stale_q_output, stale_q_score, stale_q_generation_s = _run_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                cache=repaired_cache,
+            )
+            row.update(
+                {
+                    "stale_q_k_score": round(stale_q_score, 6),
+                    "stale_q_k_output": stale_q_output,
+                    "stale_q_k_generation_s": round(stale_q_generation_s, 6),
+                    "stale_q_k_selection_s": round(select_s, 6),
+                    "stale_q_k_transfer_ms": round(restore_timing["transfer_ms"], 6),
+                    "stale_q_k_inject_ms": round(restore_timing["inject_ms"], 6),
+                    "stale_q_k_restored_count": int(restore_timing["restored_count"]),
+                    "stale_q_k_selected_positions": stale_q_positions,
+                    "stale_q_k_overlap_fraction": round(
+                        _overlap_fraction(stale_q_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "stale_q_k_selected_overlap_fraction": round(
+                        _overlap_fraction(stale_q_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "stale_q_k_active_overlap_fraction": round(
+                        _overlap_fraction(
+                            tuple(sorted(set(base_partition.kept_context_positions) | set(stale_q_positions))),
+                            q2_relevant_positions,
+                        ),
+                        6,
+                    ),
+                }
+            )
+
+        if "Refresh-K" in config.conditions:
+            assert refresh_scores is not None
+            select_start = time.perf_counter()
+            refresh_positions = select_refresh_positions(
+                context_positions=range(context_len),
+                mandatory_positions=keep_plan.mandatory_context_positions,
+                q2_scores=refresh_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                context_budget=config.base_context_budget + k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            select_s = time.perf_counter() - select_start
+            materialize_start = time.perf_counter()
+            refreshed_cache = _materialize_context_positions(
+                full_post_q1_cache=q1_turn.cache,
+                context_positions=refresh_positions,
+                tail_positions=keep_plan.tail_positions,
+            )
+            _sync_if_cuda(refreshed_cache.device)
+            materialize_ms = (time.perf_counter() - materialize_start) * 1000.0
+            refresh_set = {int(position) for position in refresh_positions}
+            base_set = {int(position) for position in base_partition.kept_context_positions}
+            evicted_set = {int(position) for position in base_partition.evicted_context_positions}
+            mandatory_set = {int(position) for position in keep_plan.mandatory_context_positions}
+            context_set = set(range(context_len))
+            selected_from_base_count = len(refresh_set & base_set)
+            selected_from_evicted_count = len(refresh_set & evicted_set)
+            dropped_base_count = len(base_set - refresh_set)
+            refresh_selected_count = max(1, len(refresh_positions))
+            refresh_output, refresh_score, refresh_generation_s = _run_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                cache=refreshed_cache,
+            )
+            row.update(
+                {
+                    "refresh_k_score": round(refresh_score, 6),
+                    "refresh_k_output": refresh_output,
+                    "refresh_k_generation_s": round(refresh_generation_s, 6),
+                    "refresh_k_selection_s": round(select_s, 6),
+                    "refresh_k_materialize_ms": round(materialize_ms, 6),
+                    "refresh_k_context_budget": int(config.base_context_budget + k_int),
+                    "refresh_k_selected_positions": refresh_positions,
+                    "refresh_scope": "buffered_active_plus_evicted",
+                    "refresh_uses_prefix_recompute": False,
+                    "refresh_scoring_pool": "all_original_context_plus_q1_tail",
+                    "refresh_materialization_source": "full_post_q1_cache",
+                    "refresh_selection_policy": "q2_score_then_burst_pack",
+                    "refresh_selected_from_base_count": int(selected_from_base_count),
+                    "refresh_selected_from_evicted_count": int(selected_from_evicted_count),
+                    "refresh_selected_from_evicted_fraction": round(
+                        selected_from_evicted_count / refresh_selected_count,
+                        6,
+                    ),
+                    "refresh_dropped_base_count": int(dropped_base_count),
+                    "refresh_dropped_base_fraction": round(
+                        dropped_base_count / max(1, len(base_set)),
+                        6,
+                    ),
+                    "refresh_selected_unique": len(refresh_positions) == len(refresh_set),
+                    "refresh_selected_in_context_range": refresh_set <= context_set,
+                    "refresh_mandatory_preserved": mandatory_set <= refresh_set,
+                    "refresh_budget_invariant": len(refresh_positions) == min(context_len, int(config.base_context_budget + k_int)),
+                    "refresh_jaccard_with_b_match": round(
+                        _jaccard_fraction(refresh_positions, bmatch_partition.kept_context_positions),
+                        6,
+                    ),
+                    "refresh_k_overlap_fraction": round(
+                        _overlap_fraction(refresh_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "refresh_k_selected_overlap_fraction": round(
+                        _overlap_fraction(refresh_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "refresh_k_active_overlap_fraction": round(
+                        _overlap_fraction(refresh_positions, q2_relevant_positions),
+                        6,
+                    ),
+                }
+            )
+
+        if "ContrastiveQ-K" in config.conditions:
+            assert wrong_q_scores is not None
+            select_start = time.perf_counter()
+            contrastive_scores = contrastive_position_scores(
+                evicted_positions,
+                positive_scores=q2_scores,
+                negative_scores=wrong_q_scores,
+            )
+            contrastive_positions = select_idlekv_positions(
+                evicted_positions=evicted_positions,
+                q2_scores=contrastive_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                k=k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            select_s = time.perf_counter() - select_start
+            repaired_cache, restore_timing = _restore_positions(
+                active_cache=base_partition.compressed,
+                evicted_cache=base_partition.evicted,
+                selected_positions=contrastive_positions,
+            )
+            contrastive_output, contrastive_score, contrastive_generation_s = _run_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                cache=repaired_cache,
+            )
+            row.update(
+                {
+                    "contrastive_q_k_score": round(contrastive_score, 6),
+                    "contrastive_q_k_output": contrastive_output,
+                    "contrastive_q_k_generation_s": round(contrastive_generation_s, 6),
+                    "contrastive_q_k_selection_s": round(select_s, 6),
+                    "contrastive_q_k_transfer_ms": round(restore_timing["transfer_ms"], 6),
+                    "contrastive_q_k_inject_ms": round(restore_timing["inject_ms"], 6),
+                    "contrastive_q_k_restored_count": int(restore_timing["restored_count"]),
+                    "contrastive_q_k_selected_positions": contrastive_positions,
+                    "contrastive_q_k_overlap_fraction": round(
+                        _overlap_fraction(contrastive_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "contrastive_q_k_selected_overlap_fraction": round(
+                        _overlap_fraction(contrastive_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "contrastive_q_k_active_overlap_fraction": round(
+                        _overlap_fraction(
+                            tuple(sorted(set(base_partition.kept_context_positions) | set(contrastive_positions))),
+                            q2_relevant_positions,
+                        ),
                         6,
                     ),
                 }
@@ -509,7 +1160,18 @@ def _run_one_split(
                     "random_k_restored_count": int(restore_timing["restored_count"]),
                     "random_k_selected_positions": random_positions,
                     "random_k_overlap_fraction": round(
-                        _selected_overlap_fraction(random_positions, q2_relevant_positions),
+                        _overlap_fraction(random_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "random_k_selected_overlap_fraction": round(
+                        _overlap_fraction(random_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "random_k_active_overlap_fraction": round(
+                        _overlap_fraction(
+                            tuple(sorted(set(base_partition.kept_context_positions) | set(random_positions))),
+                            q2_relevant_positions,
+                        ),
                         6,
                     ),
                 }
@@ -546,35 +1208,60 @@ def _run_one_split(
                     "oldest_k_restored_count": int(restore_timing["restored_count"]),
                     "oldest_k_selected_positions": oldest_positions,
                     "oldest_k_overlap_fraction": round(
-                        _selected_overlap_fraction(oldest_positions, q2_relevant_positions),
+                        _overlap_fraction(oldest_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "oldest_k_selected_overlap_fraction": round(
+                        _overlap_fraction(oldest_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "oldest_k_active_overlap_fraction": round(
+                        _overlap_fraction(
+                            tuple(sorted(set(base_partition.kept_context_positions) | set(oldest_positions))),
+                            q2_relevant_positions,
+                        ),
                         6,
                     ),
                 }
             )
 
         if "Oracle-K" in config.conditions:
-            select_start = time.perf_counter()
-            oracle_positions = select_oracle_positions(
-                evicted_positions=evicted_positions,
-                relevant_positions=q2_relevant_positions,
-                q2_scores=q2_scores,
-                turn_n_scores=keep_plan.importance_scores,
-                k=k_int,
-                left=config.burst_left,
-                right=config.burst_right,
-            )
-            select_s = time.perf_counter() - select_start
-            repaired_cache, restore_timing = _restore_positions(
-                active_cache=base_partition.compressed,
-                evicted_cache=base_partition.evicted,
-                selected_positions=oracle_positions,
-            )
-            oracle_output, oracle_score, oracle_generation_s = _run_condition(
-                model=model,
-                tokenizer=tokenizer,
-                prepared=split.q2_prepared,
-                cache=repaired_cache,
-            )
+            if config.oracle_mode == "gold_spans":
+                assert gold_span_oracle_candidates is not None
+                oracle_candidate = _choose_gold_span_oracle_candidate(
+                    candidates=gold_span_oracle_candidates,
+                    k=k_int,
+                )
+                oracle_positions = list(oracle_candidate["positions"])
+                select_s = gold_span_oracle_search_s
+                oracle_output = str(oracle_candidate["output"])
+                oracle_score = float(oracle_candidate["score"])
+                oracle_generation_s = float(oracle_candidate["generation_s"])
+                restore_timing = dict(oracle_candidate["restore_timing"])
+            else:
+                select_start = time.perf_counter()
+                oracle_positions = select_oracle_positions(
+                    evicted_positions=evicted_positions,
+                    relevant_positions=q2_relevant_positions,
+                    relevant_position_groups=None,
+                    q2_scores=q2_scores,
+                    turn_n_scores=keep_plan.importance_scores,
+                    k=k_int,
+                    left=config.burst_left,
+                    right=config.burst_right,
+                )
+                select_s = time.perf_counter() - select_start
+                repaired_cache, restore_timing = _restore_positions(
+                    active_cache=base_partition.compressed,
+                    evicted_cache=base_partition.evicted,
+                    selected_positions=oracle_positions,
+                )
+                oracle_output, oracle_score, oracle_generation_s = _run_condition(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prepared=split.q2_prepared,
+                    cache=repaired_cache,
+                )
             row.update(
                 {
                     "oracle_k_score": round(oracle_score, 6),
@@ -586,10 +1273,27 @@ def _run_one_split(
                     "oracle_k_restored_count": int(restore_timing["restored_count"]),
                     "oracle_k_selected_positions": oracle_positions,
                     "oracle_k_overlap_fraction": round(
-                        _selected_overlap_fraction(oracle_positions, q2_relevant_positions),
+                        _overlap_fraction(oracle_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "oracle_k_selected_overlap_fraction": round(
+                        _overlap_fraction(oracle_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "oracle_k_active_overlap_fraction": round(
+                        _overlap_fraction(
+                            tuple(sorted(set(base_partition.kept_context_positions) | set(oracle_positions))),
+                            q2_relevant_positions,
+                        ),
                         6,
                     ),
                 }
+            )
+
+        if "refresh_k_selected_positions" in row and "idlekv_selected_positions" in row:
+            row["refresh_jaccard_with_idlekv"] = round(
+                _jaccard_fraction(row["refresh_k_selected_positions"], row["idlekv_selected_positions"]),
+                6,
             )
 
         row["example_wall_s"] = round(time.perf_counter() - example_start, 6)
@@ -635,8 +1339,48 @@ def _summarize_rows_by_k(rows: list[dict[str, Any]]) -> dict[str, Any]:
                         6,
                     ),
                     "mean_idlekv_overlap_fraction": round(_mean(row["idlekv_overlap_fraction"] for row in group), 6),
+                    "mean_idlekv_active_overlap_fraction": round(
+                        _mean(row.get("idlekv_active_overlap_fraction", row["idlekv_overlap_fraction"]) for row in group),
+                        6,
+                    ),
                     "mean_idlekv_repair_ms": round(
                         _mean((float(row["idlekv_selection_s"]) * 1000.0) + float(row["idlekv_transfer_ms"]) + float(row["idlekv_inject_ms"]) for row in group),
+                        6,
+                    ),
+                }
+            )
+        if "idlekv_coverage_score" in group[0]:
+            payload.update(
+                {
+                    "mean_idlekv_coverage": round(_mean(row["idlekv_coverage_score"] for row in group), 6),
+                    "mean_idlekv_coverage_lift": round(
+                        _mean(float(row["idlekv_coverage_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "pct_idlekv_coverage_gt_b_match": round(
+                        _pct(float(row["idlekv_coverage_score"]) > float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "mean_idlekv_coverage_overlap_fraction": round(
+                        _mean(row["idlekv_coverage_overlap_fraction"] for row in group),
+                        6,
+                    ),
+                }
+            )
+        if "idlekv_mmr_score" in group[0]:
+            payload.update(
+                {
+                    "mean_idlekv_mmr": round(_mean(row["idlekv_mmr_score"] for row in group), 6),
+                    "mean_idlekv_mmr_lift": round(
+                        _mean(float(row["idlekv_mmr_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "pct_idlekv_mmr_gt_b_match": round(
+                        _pct(float(row["idlekv_mmr_score"]) > float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "mean_idlekv_mmr_overlap_fraction": round(
+                        _mean(row["idlekv_mmr_overlap_fraction"] for row in group),
                         6,
                     ),
                 }
@@ -659,6 +1403,52 @@ def _summarize_rows_by_k(rows: list[dict[str, Any]]) -> dict[str, Any]:
                     "mean_wrong_q_lift": round(_mean(float(row["wrong_q_k_score"]) - float(row["b_match_score"]) for row in group), 6),
                     "pct_wrong_q_gt_b_match": round(
                         _pct(float(row["wrong_q_k_score"]) > float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                }
+            )
+        if "stale_q_k_score" in group[0]:
+            payload.update(
+                {
+                    "mean_stale_q_k": round(_mean(row["stale_q_k_score"] for row in group), 6),
+                    "mean_stale_q_lift": round(
+                        _mean(float(row["stale_q_k_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "pct_stale_q_gt_b_match": round(
+                        _pct(float(row["stale_q_k_score"]) > float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                }
+            )
+        if "refresh_k_score" in group[0]:
+            payload.update(
+                {
+                    "mean_refresh_k": round(_mean(row["refresh_k_score"] for row in group), 6),
+                    "mean_refresh_lift": round(
+                        _mean(float(row["refresh_k_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "pct_refresh_gt_b_match": round(
+                        _pct(float(row["refresh_k_score"]) > float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "mean_refresh_overlap_fraction": round(
+                        _mean(row["refresh_k_overlap_fraction"] for row in group),
+                        6,
+                    ),
+                }
+            )
+        if "contrastive_q_k_score" in group[0]:
+            payload.update(
+                {
+                    "mean_contrastive_q_k": round(_mean(row["contrastive_q_k_score"] for row in group), 6),
+                    "mean_contrastive_q_lift": round(
+                        _mean(float(row["contrastive_q_k_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "pct_contrastive_q_gt_b_match": round(
+                        _pct(float(row["contrastive_q_k_score"]) > float(row["b_match_score"]) for row in group),
                         6,
                     ),
                 }
@@ -689,30 +1479,86 @@ def _artifact_path(config: Phase6Config) -> Path:
     stage_dir = ensure_results_dirs(config.stage)
     k_label = "-".join(str(value) for value in config.k_values)
     condition_label = _condition_label(config.conditions)
+    seed_label = f"_seed{config.dataset_seed_offset}" if int(config.dataset_seed_offset) != 0 else ""
+    scoring_label = ""
+    if config.query_scoring_mode != "proxy":
+        scoring_label += f"_q{config.query_scoring_mode}"
+    if config.oracle_mode != "burst_hindsight":
+        scoring_label += f"_o{config.oracle_mode}"
+    if config.wrong_query_mode != "phantom_key":
+        scoring_label += f"_wq{config.wrong_query_mode}"
+    if int(config.wrong_query_donor_offset) != DEFAULT_WRONG_QUERY_DONOR_OFFSET:
+        scoring_label += f"_wqd{config.wrong_query_donor_offset}"
+    if config.initial_compressor != "snapkv":
+        scoring_label += f"_i{config.initial_compressor}"
+    default_model = Path(DEFAULT_MODEL_DIR).resolve()
+    configured_model = Path(config.model_dir).expanduser()
+    try:
+        configured_model = configured_model.resolve()
+    except OSError:
+        configured_model = configured_model.absolute()
+    if configured_model != default_model:
+        model_label = re.sub(r"[^a-z0-9]+", "", configured_model.name.lower()) or "custommodel"
+        scoring_label += f"_m{model_label}"
     return stage_dir / (
         f"{config.task}_b{config.base_context_budget}_r{config.recency_window}"
-        f"_n{config.num_samples}_k{k_label}_c{condition_label}.json"
+        f"{seed_label}{scoring_label}_n{config.num_samples}_k{k_label}_c{condition_label}.json"
     )
 
 
-def _wrong_query_ids_by_split(split_views, *, tokenizer) -> dict[str, torch.Tensor]:
-    """Use a task-matched decoy query with nonexistent keys as the negative control."""
-    return {
-        split.split_spec.name: build_mismatched_question_ids(
-            base_example=split.base_example,
-            split_spec=split.split_spec,
+def _backup_existing_artifact(path: Path) -> Path | None:
+    """Copy an existing artifact aside before overwriting it."""
+    if not path.exists():
+        return None
+    backup_path = path.with_name(f"{path.stem}.prev{path.suffix}")
+    shutil.copy2(path, backup_path)
+    return backup_path
+
+
+def _wrong_query_ids_by_split(
+    split_views,
+    *,
+    tokenizer,
+    config: Phase6Config,
+    index: int,
+) -> dict[str, torch.Tensor]:
+    """Build wrong-query controls for every split view in the current example."""
+    if config.wrong_query_mode == "phantom_key":
+        return {
+            split.split_spec.name: build_mismatched_question_ids(
+                base_example=split.base_example,
+                split_spec=split.split_spec,
+                tokenizer=tokenizer,
+            )
+            for split in split_views
+        }
+    if config.wrong_query_mode == "donor_q2":
+        donor_base_example = build_base_example(
+            split_spec=config.split_specs[0],
+            index=int(index) + int(config.wrong_query_donor_offset),
+            context_length=config.context_length,
             tokenizer=tokenizer,
+            dataset_seed_offset=config.dataset_seed_offset,
         )
-        for split in split_views
-    }
+        donor_split_views = tuple(
+            build_split_prepared_from_base_example(
+                base_example=donor_base_example,
+                split_spec=split_spec,
+                tokenizer=tokenizer,
+            )
+            for split_spec in config.split_specs
+        )
+        return {split.split_spec.name: split.q2_prepared.question_ids for split in donor_split_views}
+    raise ValueError(f"Unsupported wrong_query_mode: {config.wrong_query_mode!r}.")
 
 
 def run_experiment(config: Phase6Config) -> dict[str, Any]:
     """Run one full Phase 6 experiment and persist the JSON artifact."""
     artifact_path = _artifact_path(config)
     overall_start = time.perf_counter()
-    model = load_model()
-    tokenizer = load_tokenizer()
+    model_dir = Path(config.model_dir).expanduser()
+    model = load_model(model_dir)
+    tokenizer = load_tokenizer(model_dir)
 
     rows: list[dict[str, Any]] = []
     for index in range(int(config.num_samples)):
@@ -732,8 +1578,13 @@ def run_experiment(config: Phase6Config) -> dict[str, Any]:
             for split_spec in config.split_specs
         )
         wrong_q2_question_ids_by_split: dict[str, torch.Tensor] = {}
-        if "WrongQ-K" in config.conditions:
-            wrong_q2_question_ids_by_split = _wrong_query_ids_by_split(split_views, tokenizer=tokenizer)
+        if "WrongQ-K" in config.conditions or "ContrastiveQ-K" in config.conditions:
+            wrong_q2_question_ids_by_split = _wrong_query_ids_by_split(
+                split_views,
+                tokenizer=tokenizer,
+                config=config,
+                index=index,
+            )
         full_cache = build_position_tracked_cache(model, split_views[0].q1_prepared.context_ids)
 
         for split in split_views:
@@ -755,8 +1606,18 @@ def run_experiment(config: Phase6Config) -> dict[str, Any]:
                 part = f"k={row['k']}:Bm={row['b_match_score']:.3f}"
                 if "idlekv_score" in row:
                     part += f"/I={row['idlekv_score']:.3f}"
+                if "idlekv_coverage_score" in row:
+                    part += f"/Cov={row['idlekv_coverage_score']:.3f}"
+                if "idlekv_mmr_score" in row:
+                    part += f"/MMR={row['idlekv_mmr_score']:.3f}"
                 if "wrong_q_k_score" in row:
                     part += f"/W={row['wrong_q_k_score']:.3f}"
+                if "stale_q_k_score" in row:
+                    part += f"/S={row['stale_q_k_score']:.3f}"
+                if "refresh_k_score" in row:
+                    part += f"/F={row['refresh_k_score']:.3f}"
+                if "contrastive_q_k_score" in row:
+                    part += f"/C={row['contrastive_q_k_score']:.3f}"
                 if "random_k_score" in row:
                     part += f"/R={row['random_k_score']:.3f}"
                 if "oldest_k_score" in row:
@@ -780,5 +1641,8 @@ def run_experiment(config: Phase6Config) -> dict[str, Any]:
         "elapsed_s": round(time.perf_counter() - overall_start, 6),
         "artifact_path": str(artifact_path),
     }
+    backup_path = _backup_existing_artifact(artifact_path)
+    if backup_path is not None:
+        payload["previous_artifact_backup_path"] = str(backup_path)
     write_json(artifact_path, payload)
     return payload

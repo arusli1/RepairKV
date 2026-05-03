@@ -104,6 +104,15 @@ TASK_SPECS: dict[str, TaskSpec] = {
         {"mode": "single", "num_needles": 1, "depths": [0.15]},
     ),
     # NIAH multi-query tasks with increasing needle counts.
+    "mq_niah_2q": TaskSpec(
+        "mq_niah_2q",
+        "MQ-NIAH-2q",
+        "niah",
+        40,
+        100,
+        tuple(DEFAULT_BUDGETS),
+        {"mode": "multi_query", "num_needles": 2, "depths": [0.35]},
+    ),
     "mq_niah_3q": TaskSpec(
         "mq_niah_3q",
         "MQ-NIAH-3q",
@@ -121,5 +130,23 @@ TASK_SPECS: dict[str, TaskSpec] = {
         100,
         tuple(DEFAULT_BUDGETS),
         {"mode": "multi_query", "num_needles": 4, "depths": [0.10, 0.37, 0.63]},
+    ),
+    "mq_niah_6q": TaskSpec(
+        "mq_niah_6q",
+        "MQ-NIAH-6q",
+        "niah",
+        96,
+        100,
+        tuple(DEFAULT_BUDGETS),
+        {"mode": "multi_query", "num_needles": 6, "depths": [0.08, 0.24, 0.40, 0.56, 0.72]},
+    ),
+    "mq_niah_8q": TaskSpec(
+        "mq_niah_8q",
+        "MQ-NIAH-8q",
+        "niah",
+        128,
+        100,
+        tuple(DEFAULT_BUDGETS),
+        {"mode": "multi_query", "num_needles": 8, "depths": [0.06, 0.18, 0.30, 0.42, 0.54, 0.66]},
     ),
 }

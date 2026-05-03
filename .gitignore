@@ -1,12 +1,17 @@
 # Python caches
 __pycache__/
+**/__pycache__/
 *.py[cod]
+.pytest_cache/
 
 # Local virtual environment
 .venv/
 
 # Local model weights and caches
 models/
+
+# Local screenshots and review captures
+Screenshot*.png
 
 # Vendored benchmark checkout and transient Python output
 ruler/
@@ -18,7 +23,15 @@ phases/*/logs/
 phases/*/results/
 
 # LaTeX build artifacts
+/*.aux
+/*.fdb_latexmk
+/*.fls
+/*.log
+/*.out
+/*.synctex.gz
 paper/aux/
+paper/**/aux/
+paper/initial_draft/
 paper/*.aux
 paper/*.fdb_latexmk
 paper/*.fls
@@ -27,4 +40,5 @@ paper/*.out
 paper/*.pdf
 paper/*.synctex.gz
 paper/figures/*.pdf
+paper/figures/*.png
 paper/figures/*.svg

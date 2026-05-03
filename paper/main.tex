@@ -1,7 +1,5 @@
 \documentclass{article}
 
-% Internal ICML-workshop draft.
-
 \usepackage{microtype}
 \usepackage{graphicx}
 \usepackage{booktabs}
@@ -12,56 +10,66 @@
 \usepackage{xcolor}
 \usepackage{tikz}
 \usepackage{pgfplots}
+\usepackage{placeins}
 
 \usetikzlibrary{arrows.meta,positioning}
 \pgfplotsset{compat=1.18}
+\makeatletter
+\setlength{\@fptop}{0pt}
+\setlength{\@dblfptop}{0pt}
+\makeatother
 \newcommand{\idlekv}{\textsc{IdleKV}}
 \newcommand{\bbase}{\ensuremath{B_{\mathrm{base}}}}
 \newcommand{\bmatch}{\ensuremath{B_{\mathrm{match}}}}
-\newcommand{\oraclek}{\ensuremath{\mathrm{Oracle}\mbox{-}K}}
+\newcommand{\goldk}{\ensuremath{\mathrm{Gold}\mbox{-}K}}
 
 \usepackage{icml2026}
 
-\icmltitlerunning{IdleKV: Refreshing Stale KV Caches}
+\icmltitlerunning{IdleKV: Exploiting Idle Time to Repair KV Caches}
 
 \begin{document}
 
 \twocolumn[
-  \icmltitle{IdleKV: Repairing Stale KV Caches Between Turns}
+  \icmltitle{IdleKV: Exploiting Idle Time to Repair KV Caches for Long-Context Agents}
 
   \begin{icmlauthorlist}
-    \icmlauthor{Shreyan Paliwal}{equal,harvard}
     \icmlauthor{Andrew Rusli}{equal,harvard}
+    \icmlauthor{Shreyan Paliwal}{equal,harvard,opt32}
   \end{icmlauthorlist}
   \icmlaffiliation{equal}{Equal contribution}
   \icmlaffiliation{harvard}{Harvard College, Cambridge, MA, USA}
+  \icmlaffiliation{opt32}{Opt32}
   \icmlcorrespondingauthor{Shreyan Paliwal}{shreyanpaliwal@college.harvard.edu}
-  \icmlkeywords{adaptive inference, KV cache repair, long-context agents,
-    tool calling, runtime systems}
+  \icmlkeywords{resource-adaptive inference, KV cache repair,
+    long-context agents, dynamic KV cache compression, runtime systems}
   \vskip 0.3in
 ]
 
 \printAffiliationsAndNotice{\icmlEqualContribution}
 
 \begin{abstract}
-Tool-using agents create idle gaps between turns, but long-context
-inference systems usually compress KV caches before the next turn is
-known.
-That can leave a stale active cache: tokens that looked unimportant at
-turn $N$ may become critical once a follow-up query is revealed.
-We study this as a matched-footprint adaptive-inference problem and
-introduce \idlekv{}, a minimal idle-window mechanism that buffers evicted
-KV on CPU, scores it against the now-known turn-$(N{+}1)$ query, and
-restores up to $K$ context tokens before decoding resumes.
-On a Qwen2.5-7B-Instruct prototype at 32K context, a calibrated
-nonzero-baseline regime on a pooled split-query MQ-NIAH-4q suite keeps
-matched no-repair performance near $0.10$, while \idlekv{} rises from
-$0.342$ at $K=8$ to $0.685$ at $K=64$; random and oldest-token repairs
-stay near baseline, and oracle repair reaches $1.0$ by $K=48$.
-The prototype transfer-and-restore path stays below $50$\,ms p50 through
-$K=500$ on the target hardware, suggesting that idle-window cache
-maintenance is a practical and promising adaptive-inference primitive
-for long-context agents.
+Agent-motivated long-context workloads often pause between turns while
+tools or users respond, but key-value (KV) cache compression is usually
+a one-shot decision made before the next turn is known.
+When the follow-up turn changes which earlier context is relevant, the
+resumed active cache can be stale even at the same active-cache budget as
+a no-repair baseline.
+We formulate this as a matched resumed active-cache-budget problem and
+introduce \idlekv{}, an idle-window mechanism that keeps evicted KV in a
+host-memory store, scores it after the turn-$(N{+}1)$ query $Q_2$ is
+known, and restores up to $K$ context tokens before decoding resumes.
+On Qwen2.5-7B-Instruct at 32K context, calibrated split-query
+MQ-NIAH-4Q/6Q/8Q restore-budget sweeps
+show \idlekv{} improving $Q_2$ score over matched no-repair by $0.755$,
+$0.575$, and $0.435$ at $K=128$, while random/oldest-token restores
+stay near the matched baseline.
+A locked five-turn revisit diagnostic further shows repeated repair
+across relevance shifts, with non-initial-turn gain $0.542$ over matched
+no-repair at $K=80$ and positive paired uncertainty.
+These controlled diagnostics do not establish end-to-end agent gains,
+but they support idle-window cache maintenance as a
+resource-adaptive inference primitive; faster approximate scoring remains
+necessary for deployment.
 \end{abstract}
 
 % -----------------------------------------------------------------------
@@ -70,40 +78,32 @@ for long-context agents.
 
 \paragraph{Motivation.}
 Adaptive inference is increasingly shaped by deployment constraints, and
-tool-using agents make that pressure especially clear.
-In batch-1 settings, decoding is interleaved with file reads, tests,
-retrieval, remote APIs, and other external actions that pause
-generation for milliseconds to seconds.
+agent-motivated long-context workloads make that pressure especially
+clear.
+In batch-1, local-GPU, or dedicated-tenant settings, decoding is
+interleaved with file reads, tests, retrieval, remote APIs, and other
+external actions that pause generation for milliseconds to seconds while
+the model state remains useful.
 Those pauses are usually treated as dead time.
 We argue that they expose a valuable new adaptation point: the idle
 interval between turns.
-We study a specific cross-turn case: revising a compressed cache after
-new turn information arrives but before decoding resumes.
+For systems that must adapt to memory, latency, energy, or cost budgets,
+the cache need not be only compressed and forgotten; it can be
+compressed, offloaded, and repaired when new information arrives.
+The broader systems problem is not limited to question answering: any
+next-turn text, tool result, test failure, or user correction can change
+which past context should remain active.
+We study a minimal controlled instance of that problem: revising a
+compressed cache after the next-turn query is revealed but before
+decoding resumes.
 
-\paragraph{Adjacent work.}
-On the systems side, PagedAttention/vLLM improves KV-memory efficiency
-during serving~\citep{vllm}, while InferCept preserves paused requests
-to avoid recomputing prefixes when augmented generation
-resumes~\citep{infercept}.
-On the efficient-decoding side, SnapKV, StreamingLLM, and H$_2$O
-compress the cache under a fixed budget, while query-aware methods such
-as QUEST emphasize that token criticality depends on the
-query~\citep{snapkv,streamingllm,h2o,quest}.
-These methods address adjacent parts of the problem, but not the
-cross-turn case studied here.
-Serving systems preserve interrupted state efficiently, while
-query-aware compression still chooses the active cache before the next
-turn is known.
-By contrast, \idlekv{} starts from an already compressed paused state,
-does not rerun selection over the full prefix, and revises memory only
-within the idle-window latency budget before decoding resumes.
-
-\paragraph{Problem setting.}
+\paragraph{Setting.}
 For long-context agents, relevance over a fixed context can shift across
 turns.
-A tool result or follow-up question can make earlier context newly
-important, and recent analysis shows that KV compression can sharply
-degrade instructions and facts that later become
+A tool result, user correction, file change, failed test, topic shift, or
+follow-up question can make earlier context newly important, and recent
+analysis shows that KV compression can sharply degrade instructions and
+facts that later become
 important~\citep{pitfalls}.
 The core failure is therefore temporal: the cache is allocated using the
 wrong relevance signal for the next turn.
@@ -112,57 +112,95 @@ instead of what will matter once the tool call returns.
 Current benchmarks also leave this regime under-specified.
 Single-turn long-context tasks can show compression loss, and serving
 benchmarks can show pause/resume efficiency, but neither isolates
-whether future-turn information can improve a compressed cache at fixed
-final active decode-time footprint.
+whether future-turn information improves a compressed cache when the next
+turn resumes with the same active evictable-context budget and identical
+preserved $Q_1$ prompt and answer tail.
 A useful benchmark for this setting needs explicit turn boundaries, a
-hidden future query, shared pre-turn history, and matched-footprint
-controls.
+hidden future query, shared pre-turn history, and no-repair controls
+matched on resumed-cache budget.
+In our experiments, the future relevance signal is an explicit $Q_2$
+retrieval query so that the effect is measurable; the intended workflow
+claim is broader than query answering.
 
-\paragraph{Approach and scope.}
+\paragraph{Contributions.}
 \idlekv{} targets this gap with dynamic KV cache repair.
 After turn $N$, the runtime compresses the evictable context portion to a
-base budget, buffers evicted KV on CPU, waits for the tool call, and
-during the idle window scores the buffer against the now-known
-turn-$(N{+}1)$ query before restoring up to $K$ context tokens.
+base budget, offloads evicted KV to a host-memory store, waits for the
+tool call, and during the idle window scores the store against the
+now-known turn-$(N{+}1)$ query before restoring up to $K$ context tokens.
+More generally, the scoring signal could come from any newly available
+turn text or tool observation; this paper uses $Q_2$ because it gives a
+clean first test of whether post-compression repair can exploit new
+relevance information.
 The adaptation happens in the active KV allocation itself, not in model
 depth, routing, or weight choice.
-This is state-revising pre-resume repair: unlike pause/resume serving,
+This is post-compression pre-resume repair: unlike pause/resume serving,
 it intentionally mutates memory before resumption; unlike within-turn
 query-aware compression, it starts from a paused compressed state and
 does not rerun full-prefix selection once $Q_2$ is revealed.
 The practical question is whether tool-call time can be used to improve
-the \emph{final} cache seen by the next turn at the same final active
-decode-time footprint.
-Concretely, the paper contributes:
+the \emph{resumed} cache seen by the next turn at the same active-cache
+budget.
+We contribute:
 \begin{itemize}[leftmargin=1.4em,noitemsep,topsep=2pt]
-  \item a matched-footprint protocol for cross-turn relevance shift that
-  isolates better cache selection from simply keeping more tokens; and
-  \item a calibrated nonzero-baseline result on a pooled split-query
-  MQ-NIAH-4q suite where \idlekv{} substantially exceeds matched
-  no-repair retention and simple restore controls; and
-  \item a simple idle-window repair path with prototype latency
-  measurements on one model, one eviction policy, and one hardware
-  stack.
+  \item a matched resumed-cache-budget protocol for cross-turn
+  relevance shift that isolates better cache selection from simply
+  keeping more active tokens; and
+  \item calibrated evidence on pooled split-query multi-query
+  needle-in-a-haystack (MQ-NIAH) 4Q/6Q/8Q evaluations, where \idlekv{}
+  substantially exceeds the matched
+  no-repair baseline and content-agnostic restore controls; and
+  \item a repair prototype with transfer/reinjection feasibility results
+  and an instrumented latency probe that separates cheap state movement
+  and proxy scoring from the current exact Q$_2$ attention-query scorer.
 \end{itemize}
-The paper still makes a narrow claim: one model, one eviction policy,
-one synthetic task family, and one calibrated regime.
+The empirical claim remains narrow: one model, one primary first-stage
+retention rule in the main evaluation, one synthetic task family, and calibrated
+settings within that family.
+Its broader implication is resource-adaptive: long-context agents may
+need between-turn cache maintenance, not only pre-generation pruning.
 
 % -----------------------------------------------------------------------
-\section{Protocol}
+\section{Related Work}
+\label{sec:related}
+% -----------------------------------------------------------------------
+
+On the systems side, PagedAttention/vLLM improves KV-memory efficiency
+during serving~\citep{vllm}, while InferCept preserves paused requests
+to avoid recomputing prefixes when augmented generation
+resumes~\citep{infercept}.
+On the efficient-decoding side, SnapKV, StreamingLLM, and H$_2$O
+compress the cache under a fixed budget, while query-aware methods such
+as QUEST emphasize that token criticality depends on the
+query~\citep{snapkv,streamingllm,h2o,quest}.
+SCBench makes the KV-cache lifecycle itself a benchmark target, and
+ShadowKV shows that sparse KV reconstruction and offload can improve
+long-context serving throughput~\citep{scbench,shadowkv}.
+These works motivate treating KV state dynamically, but they address
+adjacent parts of the problem.
+Serving systems preserve or reload interrupted state efficiently, while
+within-request query-aware methods choose which KV pages or tokens to
+load during active inference.
+By contrast, \idlekv{} starts from an already compressed paused state,
+does not rerun full-prefix selection after $Q_2$ is revealed, and
+revises memory before decoding resumes under a matched resumed-cache
+budget.
+
+% -----------------------------------------------------------------------
+\section{Method}
 \label{sec:method}
 % -----------------------------------------------------------------------
 
 \paragraph{Overview.}
-The key systems assumption is simple: a paused request need not preserve
-its memory state exactly.
+The method starts from the observation that a paused request need not
+preserve its memory state exactly.
 If the next turn is already known, the idle interval before resumption
-can be used to improve the active cache that the next decode phase will
-see.
-We study the smallest such mechanism: repair buffered evictions without
+can be used to improve the active cache that the next decode will see.
+We study the smallest such mechanism: repair offloaded evictions without
 rerunning a full query-aware compressor over the entire prefix.
 
 \paragraph{Two-turn protocol.}
-The protocol is simple.
+The protocol proceeds in two turns.
 The model first processes a long context and answers $Q_1$ from the full
 cache.
 After that answer, the runtime compresses only the evictable context
@@ -171,8 +209,12 @@ prompt and generated-answer tail.
 During the subsequent tool-call idle window, the turn-$(N{+}1)$ query
 $Q_2$ becomes known.
 \idlekv{} encodes $Q_2$ against the active post-$Q_1$ cache, scores the
-evicted context tokens against that signal, restores $K$ buffered
+offloaded evicted context tokens against that signal, restores $K$
 context tokens, and answers $Q_2$ from the repaired cache.
+The data path therefore has two movements: evicted rows are offloaded
+from the device-resident cache to a host-memory store after $Q_1$, and
+selected rows are copied back into the active device-resident cache
+before $Q_2$ decoding.
 The protocol does not rerun full-prefix compression after $Q_2$ is
 revealed.
 
@@ -182,12 +224,12 @@ revealed.
   box/.style={draw, rounded corners=3pt, align=center,
               inner sep=3.5pt, minimum width=1.55cm},
   gpu/.style={box, fill=blue!8, draw=blue!60!black},
-  cpu/.style={box, fill=orange!10, draw=orange!70!black}]
+  host/.style={box, fill=orange!10, draw=orange!70!black}]
   \node[gpu] (turnn) at (0,0) {\textbf{Turn $N$}\\prefill + $Q_1$};
   \node[box, fill=gray!8] (idle) at (3.25,0) {\textbf{Tool call}\\idle window};
   \node[gpu] (turnn1) at (6.5,0) {\textbf{Turn $N{+}1$}\\answer $Q_2$};
 
-  \node[cpu] (buf) at (1.7,-1.8) {CPU buffer\\evicted KV};
+  \node[host] (buf) at (1.7,-1.8) {host-memory\\evicted KV};
   \node[box, draw=gray, dashed] (score) at (4.85,-1.8) {score vs $Q_2$\\restore $K$ tokens};
 
   \draw[->, thick] (turnn) -- (idle);
@@ -200,349 +242,374 @@ revealed.
     node[midway, right, font=\tiny]{restore $K$};
 \end{tikzpicture}
 \caption{\idlekv{} uses the tool-call gap between turns to rescore
-buffered KV and restore $K$ context tokens before answering $Q_2$.}
+offloaded evicted KV and restore $K$ context tokens before answering
+$Q_2$.}
 \label{fig:pipeline}
 \end{figure}
 
-\paragraph{Repair unit.}
-Our prototype restores short query-scored local bursts rather than
-isolated single tokens.
+\paragraph{Repair operation.}
+The repair step has three operations: score evicted context positions
+against the newly available turn-$(N{+}1)$ signal, pack the highest-scoring
+anchors into short local bursts, and transfer the selected KV rows back
+into the active cache before decoding resumes.
+The prototype restores bursts rather than isolated single tokens, because
+the query often contains a key-bearing anchor while the answer depends on
+nearby value tokens.
 Here $K$ always denotes a restored-context-token budget, not an anchor
 count.
-Candidate anchor positions in the evicted buffer are ranked by the
-future-query signal; accepted bursts are merged on overlap; and
-restoration stops once $K$ context tokens have been reactivated.
-For split-query retrieval tasks, this is the right unit of repair: the
-query often contains a key-bearing anchor while the answer depends on
-nearby value tokens.
 
-\paragraph{Evaluation principle.}
+\paragraph{Matched-budget evaluation.}
 All main claims are made against a no-repair baseline with the same
-final active decode-time footprint.
+resumed active-cache budget.
+A matched resumed-cache budget means that $Q_2$ decoding sees
+the same number of active evictable-context tokens in addition to the
+identical preserved $Q_1$ prompt and answer tail; it does not mean that
+the runtime stores the same amount of offloaded KV state.
 Let $\bmatch$ denote the no-repair condition that applies the base
 eviction policy with context budget $\bbase + K$ while preserving the
 same $Q_1$ prompt and answer tail.
-Because every compared run shares the same preserved tail and the same
-active-token budget, the active cache footprint seen by $Q_2$ is
-matched across $\bmatch$, \idlekv{}, and $\oraclek$, although the
-selected context tokens differ by design.
-Total retained CPU+GPU state is not matched, because \idlekv{} also
-keeps an auxiliary CPU buffer of evicted KV.
-We report:
+The main restore-budget frontier reports raw answer score so readers can
+compare absolute quality across task difficulty levels.
+For effect-size comparisons, we also report score gain over matched
+no-repair,
 \begin{equation}
-  \mathrm{lift} =
+  \Delta_{\mathrm{repair}} =
   \mathrm{Score}(\mathrm{IdleKV}) - \mathrm{Score}(B_{\mathrm{match}})
 \end{equation}
-and
-\begin{equation}
-  \mathrm{recovery} =
-  \frac{\mathrm{Score}(\mathrm{IdleKV})-\mathrm{Score}(B_{\mathrm{match}})}
-       {\mathrm{Score}(\mathrm{Oracle}\mbox{-}K)-\mathrm{Score}(B_{\mathrm{match}})}.
-\end{equation}
-Here $\mathrm{Score}$ is the mean fraction of the two $Q_2$ needles
+where $\mathrm{Score}$ is the mean fraction of held-out $Q_2$ targets
 recovered correctly per example, averaged over the fixed evaluation set
 shared across all conditions for that setting.
-The numerator measures whether repair selects a better final cache than
-matched no-repair retention; the denominator measures how much
-recoverable headroom remains in the regime.
-We report $\mathrm{recovery}$ only when
-$\mathrm{Score}(\mathrm{Oracle}\mbox{-}K) >
-\mathrm{Score}(B_{\mathrm{match}})$.
-$\oraclek$ obeys the same $K$-token budget and the same burst-packing
-rule as \idlekv{}, but ranks anchors using gold $Q_2$ needle locations
-from the synthetic task metadata.
-The protocol therefore tests whether newly revealed turn-$(N{+}1)$
+$\goldk$ is a benchmark-metadata hindsight reference over annotated
+$Q_2$ span groups; it is not a mathematical upper bound over arbitrary
+token subsets.
+Thus the protocol tests whether newly revealed turn-$(N{+}1)$
 information can improve a compressed cache relative to matched
-no-repair retention.
+no-repair retention, not whether the runtime simply keeps more active
+tokens.
 
 % -----------------------------------------------------------------------
-\section{Setup}
+\section{Experimental Setup}
 \label{sec:setup}
 % -----------------------------------------------------------------------
 
-\paragraph{Primary setting.}
-The main text focuses on one primary benchmark slice rather than a broad
-matrix.
-We use Qwen2.5-7B-Instruct~\citep{qwen} at 32K rendered context on a
-single RTX PRO 6000 Blackwell GPU, with SnapKV~\citep{snapkv} as the
-base eviction policy.
-The task family is a split-query version of \texttt{MQ-NIAH-4q} derived
-from RULER~\citep{ruler}.
-We treat three balanced $2|2$ set partitions as one pooled clean suite:
-`14$\rightarrow$23', `24$\rightarrow$13', and `34$\rightarrow$12'.
-These are the distinct balanced partitions whose $Q_2$ side excludes the
-tail-anchored fourth needle, which would otherwise leak a recency freebie
-into the no-repair baseline.
-Within-turn order is not treated as a separate condition, so
-`34$\rightarrow$12' and `43$\rightarrow$21' are equivalent up to prompt
-permutation under the values-only scoring format.
-Splits such as `12$\rightarrow$34' are left to diagnostics, because they
-make the matched no-repair baseline easier for reasons unrelated to the
-future-query mechanism.
+\paragraph{Benchmark family.}
+The main evaluation uses Qwen2.5-7B-Instruct~\citep{qwen} at 32K
+rendered context on a single RTX PRO 6000 Blackwell GPU, with
+a context-only SnapKV-style first-stage retention rule~\citep{snapkv}.
+The task family is a split-query version of multi-query
+needle-in-a-haystack (MQ-NIAH) derived from RULER~\citep{ruler}.
+Each needle binds a key to a value inside a long distractor context, and
+the model must return the values for the keys requested in the current
+turn.
+The 4Q, 6Q, and 8Q variants use the same underlying task template; the
+larger variants ask for more queried values and use longer decode
+budgets, but do not change the benchmark family.
+The names 4Q/6Q/8Q mean that four, six, or eight key/value needles are
+queried across the two turns.
+For each variant, we pool balanced partitions that withhold the
+tail-recent needles from $Q_2$: three $2|2$ partitions for MQ-NIAH-4Q,
+four $3|3$ partitions for MQ-NIAH-6Q, and five $4|4$ partitions for
+MQ-NIAH-8Q.
+This avoids a trivial recency advantage for the no-repair baseline while
+keeping the future-query mechanism measurable; Appendix
+Figure~\ref{fig:app-partition-endpoints} summarizes the exact splits.
 
-\paragraph{Configuration.}
-The main study avoids both recency-saturated settings and the all-zero
-baseline regime found at much smaller budgets.
-We therefore use context-only SnapKV with a fixed context recency
-reserve and report the calibrated family-level regime:
-\begin{itemize}[leftmargin=1.4em,noitemsep,topsep=2pt]
-  \item context-only SnapKV with fixed recency reserve
-  $R_{\mathrm{ctx}}=128$;
-  \item base budget $\bbase=12288$;
-  \item concise split prompts that request the values only,
-  comma-separated, with a short answer prefix and fixed
-  $24$-token decode budget per split turn;
-  \item repair budgets $K \in \{8,16,32,48,64\}$ chosen by a small
-  calibration sweep to keep the left edge non-dead and the right edge
-  below oracle saturation; and
-  \item one shared $Q_1$ transcript across all conditions and a fixed
-  100-example evaluation set per split.
-\end{itemize}
+\paragraph{Evaluation configuration.}
+The main study avoids both recency saturation and the all-zero baseline
+regime found at smaller budgets.
+Unless stated otherwise, reported evaluations use context-only SnapKV
+with fixed context recency reserve $R_{\mathrm{ctx}}=128$.
+We set $\bbase=16384$ for MQ-NIAH-4Q and $\bbase=18432$ for
+MQ-NIAH-6Q/8Q, sweep
+$K \in \{8,16,24,32,48,64,80,96,128\}$, and reuse one shared
+full-cache-generated $Q_1$ transcript across all conditions within each
+setting.
+MQ-NIAH-4Q/6Q use fixed 100-example evaluation sets per split; MQ-NIAH-8Q
+uses 24 examples per split over five partitions.
+Prompt and decode settings are reported in the appendix.
+
+\paragraph{Scorers.}
 The turn-$N$ eviction signal is the exact generated $Q_1$ answer tail,
 not a generic last-$32$-token cache suffix.
+The main curves use an exact Q$_2$ attention-query scorer that extracts
+the model's $Q_2$ self-attention query vectors after RoPE and scores
+them against active and evicted keys.
+The latency probe also measures a cheaper $Q_2$-appended-state proxy
+scorer, reported separately from the exact quality curves.
 
-\paragraph{Condition semantics.}
-We first generate one full-cache turn-$N$ transcript comprising the
-shared context, $Q_1$, and the model-generated $Q_1$ answer tail.
-Every condition reuses that exact transcript when answering $Q_2$.
-$A$ keeps the full context active during $Q_2$ and is therefore the
-full-cache ceiling under the fixed transcript.
-$B$ compresses only the evictable context portion to $\bbase$.
-$\bmatch$ applies the same base eviction policy at context budget
-$\bbase + K$ and performs no repair.
-Random-$K$ and Oldest-$K$ start from $B$ and restore the same $K$-token
-budget from the same evicted buffer without future-query scoring.
-\idlekv{} repairs $B$ during the idle gap, and $\oraclek$ applies the
-same burst-packing rule using gold $Q_2$ needle locations from the
-synthetic task metadata.
-
-\paragraph{Scope.}
-The paper keeps the main text to one task family, one model, and one
-eviction policy.
-That is enough to answer the first question cleanly: once the future
-query is revealed, can idle-time repair produce a better final cache
-than matched no-repair retention?
-This study estimates conditional turn-$(N{+}1)$ quality given a fixed,
-full-cache-generated turn-$N$ transcript; it does not measure end-to-end
-two-turn agent quality.
-The main benchmark slice is a positive-control suite chosen to keep
-future relevance hidden, remove trivial recency wins from $Q_2$, and
-keep eviction choices nontrivial, not to estimate average gains across
-agent workloads.
-It also does not yet compare against stronger learned or
-future-query-aware alternative refresh mechanisms that use the same idle
-window, or against a second task family calibrated to the same
-acceptance rule.
+\paragraph{Baselines and references.}
+Every condition reuses the same full-cache-generated turn-$N$
+transcript when answering $Q_2$.
+We compare the full-cache reference $A$, the base compressed cache $B$,
+matched no-repair $\bmatch$, Random-$K$ and Oldest-$K$ restore
+controls, \idlekv{}, and $\goldk$.
+Random-$K$ and Oldest-$K$ restore from the same evicted-KV store as
+\idlekv{} without future-query scoring, so they test whether gains come
+from query-aware repair rather than from generic reinsertion.
 
 % -----------------------------------------------------------------------
 \section{Results}
 \label{sec:results}
 % -----------------------------------------------------------------------
 
-\paragraph{Main matched-footprint result.}
-Figure~\ref{fig:main-frontier} reports the pooled clean-suite frontier
-for the completed main run at $\bbase=12288$.
-In this calibrated nonzero-baseline regime, the compressed base score is
-$0.093$ and the matched no-repair baseline stays near $0.10$ across the
-entire $K$ sweep.
-\idlekv{} rises from $0.342$ at $K=8$ to $0.685$ at $K=64$, while
-Random-$K$ and Oldest-$K$ stay near $\bmatch$.
-Oracle repair remains above \idlekv{} throughout, reaching $0.927$ at
-$K=32$ and $1.0$ by $K=48$, so the regime still contains real headroom.
-Selection lift over $\bmatch$ grows from $0.24$ at $K=8$ to $0.585$ at
-$K=64$, and \idlekv{} exceeds $\bmatch$ on $92.3\%$ of examples at the
-right edge of the sweep.
-
+\paragraph{Matched-budget frontier.}
+Figure~\ref{fig:main-frontier} reports
+$Q_2$ answer score as a function of restore budget across the full
+2Q/4Q/6Q/8Q MQ-NIAH family.
+MQ-NIAH-2Q saturates by $K=80$, while matched no-repair remains near
+$0.06$.
+The higher query-count settings separate the curves more gradually: at $K=96$,
+\idlekv{} scores $0.910$ on 4Q, $0.989$ on 6Q, and $0.960$ on 8Q,
+while matched no-repair scores $0.245$, $0.422$, and $0.546$,
+respectively.
+Random-$K$ and Oldest-$K$ stay near matched no-repair in the same
+evaluations, showing that generic reinsertion from the same offloaded
+evicted-KV store does not explain the effect.
+The $\goldk$ reference shows remaining benchmark-metadata selection
+headroom at intermediate budgets, especially on MQ-NIAH-6Q at $K=48$
+($0.994$ versus $0.653$ for \idlekv{} in absolute score).
 \begin{figure}[t]
   \centering
-  \begin{tikzpicture}
-    \begin{axis}[
-      width=\columnwidth,
-      height=0.68\columnwidth,
-      xmin=8, xmax=64,
-      ymin=0, ymax=1.05,
-      xtick={8,16,32,48,64},
-      xlabel={Restore budget $K$},
-      ylabel={Mean turn-2 score},
-      legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west},
-      grid=major,
-      line width=0.9pt,
-    ]
-      \addplot[black, dashed] coordinates {(8,1.0) (64,1.0)};
-      \addlegendentry{$A$}
-      \addplot[gray!70!black, mark=square*] table [x=k, y=b_match, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
-      \addlegendentry{$B_{\mathrm{match}}$}
-      \addplot[blue!70!black, mark=*] table [x=k, y=idlekv, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
-      \addlegendentry{\idlekv{}}
-      \addplot[teal!70!black, mark=triangle*] table [x=k, y=random_k, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
-      \addlegendentry{Random-$K$}
-      \addplot[orange!90!black, mark=diamond*] table [x=k, y=oldest_k, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
-      \addlegendentry{Oldest-$K$}
-      \addplot[red!75!black, mark=otimes*] table [x=k, y=oracle_k, col sep=comma] {figures/phase6_clean_suite_b12288_overall.csv};
-      \addlegendentry{\oraclek{}}
-    \end{axis}
-  \end{tikzpicture}
-  \caption{Pooled clean-suite frontier at $\bbase=12288$.
-  Matched no-repair retention stays near $0.10$, simple restore controls
-  remain near baseline, and \idlekv{} approaches the oracle curve as
-  $K$ grows.}
+  \includegraphics[width=\columnwidth]{figures/frontier_raw_overlay.pdf}
+  \caption{Raw exact $Q_2$ score under matched resumed-cache budgets.
+  Solid curves show \idlekv{} for each MQ-NIAH query count; dotted
+  curves show matched no-repair with the same resumed active KV budget.
+  Right-side labels report the query count and $\Delta_{96}$, the
+  \idlekv{} minus matched no-repair score difference at $K=96$.
+  Random-$K$/Oldest-$K$ controls and the $\goldk{}$
+  benchmark-metadata reference are summarized by the endpoint robustness
+  view in Appendix Figure~\ref{fig:app-partition-endpoints}.
+  MQ-NIAH-2Q/4Q/6Q use 100-example evaluation sets; MQ-NIAH-8Q uses
+  24 examples per split over five partitions.}
   \label{fig:main-frontier}
 \end{figure}
 
-\paragraph{Split heterogeneity.}
-The pooled result hides a real spread in difficulty across the three
-clean splits.
-Table~\ref{tab:split-endpoints} shows the right edge of the frontier.
-`14$\rightarrow$23' is easy once repair has enough budget, and
-`24$\rightarrow$13' is moderate.
-`34$\rightarrow$12' is the hard split: both $B$ and $\bmatch$ stay at
-zero there, but oracle repair still reaches $1.0$, which indicates that
-the benchmark is valid while the current selector leaves substantial
-headroom on the hardest slice.
-
-\begin{table}[t]
-  \caption{Per-split frontier endpoints at $K=64$.}
-  \label{tab:split-endpoints}
+\paragraph{Next-turn signal specificity.}
+Figure~\ref{fig:specificity-control} fixes the operating point and tests
+whether the repair gain comes from the newly revealed $Q_2$ signal rather
+than from restoring any additional cached tokens or any query-like text.
+At $K=48$, stale-query and donor-query repairs remain near matched
+no-repair ($0.243$ versus $0.215$), while \idlekv{} reaches $0.542$
+with a positive paired gain confidence interval.
+The same panel also shows the method boundary.
+Refresh-buffered, which reselects the whole resumed active budget from
+the active cache plus offloaded evicted-KV store using $Q_2$ scores,
+reaches the
+$\goldk{}$ reference at this operating point.
+Thus \idlekv{} is not the strongest possible $Q_2$-time store-backed
+selector; it is an incremental repair primitive that leaves
+room for stronger selection policies.
+\begin{figure}[t]
   \centering
-  \small
-  \setlength{\tabcolsep}{4pt}
-  \begin{tabular}{l c c c c}
+  \includegraphics[width=\columnwidth]{figures/specificity_control_dotplot.pdf}
+  \caption{Next-turn signal specificity at $K=48$ on MQ-NIAH-4Q
+  ($n{=}24$ examples across three partitions; $72$ paired cases, one
+  case per example-partition pair). Points show raw exact $Q_2$ score
+  with bootstrap $95\%$ confidence intervals; horizontal segments and
+  right-side labels show gain over matched no-repair. Stale and donor
+  controls test whether any query-like signal suffices; Refresh is a
+  full-budget reselector and \goldk{} uses benchmark metadata.}
+  \label{fig:specificity-control}
+\end{figure}
+
+\paragraph{Repeated relevance shifts.}
+Figure~\ref{fig:multiturn} applies the same repair operation across a
+locked five-turn MQ-NIAH-8Q revisit schedule with $K=80$ and $n=24$
+examples.
+The figure shows grouped raw exact scores for matched no-repair,
+\idlekv{}, and the $\goldk{}$ benchmark-metadata reference on each
+post-priming turn.
+Turn 1 is the full-context priming turn and is omitted; turn 3 has
+matched no-repair, \idlekv{}, and $\goldk{}$ all at 1.0, so there is no
+available repair headroom because the matched cache already retains most
+of the requested evidence.
+This no-headroom turn dilutes the aggregate gain rather than inflating it.
+On non-initial turns, \idlekv{} gains $0.542$ over matched no-repair
+with paired bootstrap interval $[0.458,0.620]$; Random-$K$ and
+Oldest-$K$ controls gain only $0.010$ and $0.021$.
+On the revisit turn, \idlekv{} gains $0.938$ with interval
+$[0.875,1.000]$.
+The diagnostic also checks specificity across turns: a current-query-only
+repair matches \idlekv{}, while a stale-query-only repair gains $0.234$
+on non-initial turns, and current-query-only exceeds stale-query-only by
+$0.307$ with paired interval $[0.240,0.370]$.
+This supports repeated adaptation under controlled relevance shifts, but
+the stale-query control still recovers part of the gap, so the evidence
+should be read as a dynamic-workflow diagnostic rather than end-to-end
+agent validation.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/multiturn_hard_trajectory.pdf}
+  \caption{Locked five-turn relevance-shift diagnostic on MQ-NIAH-8Q
+  ($B{=}18{,}432$, $K{=}80$, $n{=}24$). Groups show post-priming exact
+  scores at equal active-cache budget for matched no-repair, \idlekv{},
+  and \goldk{}. Blue intervals are bootstrap $95\%$ confidence
+  intervals for \idlekv{}; Rand/old summarizes the Random-$K$ and
+  Oldest-$K$ controls. Turn 3 has no matched-to-\goldk{} headroom.}
+  \label{fig:multiturn}
+\end{figure}
+
+\paragraph{First-stage retention sensitivity.}
+Figure~\ref{fig:policy-breadth} repeats the MQ-NIAH-4Q restore-budget
+grid after changing only the first-stage retention rule before
+repair.
+To compare policies with different matched no-repair baselines, the
+figure reports score gain over each policy's own matched baseline.
+The SnapKV and accumulated-attention rules show large mid-to-high
+$K$ gains, and the structurally different sink-plus-recent
+rule also passes the gate: at $K=128$, \idlekv{} gains $0.431$ over
+matched no-repair while Random-$K$/Oldest-$K$ remain at the matched
+baseline.
+These are first-stage retention-policy variants, not canonical
+reproductions of every systems detail in H$_2$O or StreamingLLM, but
+they show that the repair effect is not limited to the primary
+SnapKV-style retention rule.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/policy_breadth_delta.pdf}
+  \caption{First-stage retention sensitivity on MQ-NIAH-4Q
+  ($n{=}24$, $B{=}16{,}384$). Curves show exact $Q_2$ score gain over
+  each retention rule's matched no-repair baseline; gray and orange bands
+  span Random-$K$/Oldest-$K$ and \goldk{} gains across rules.
+  Accumulated-attention and sink-plus-recent are protocol-matched
+  variants inspired by H$_2$O and StreamingLLM, not full system
+  reproductions.}
+  \label{fig:policy-breadth}
+\end{figure}
+
+\paragraph{Robustness and mechanism.}
+The pooled result hides real variation across query partitions,
+especially in MQ-NIAH-6Q, but the high-$K$ result is not carried by one
+easy partition.
+At $K=128$, all twelve balanced partitions pass the same direction check:
+\idlekv{} beats $\bmatch$ and both content-agnostic restore controls.
+The minimum score gain over $\bmatch$ is $0.585$ for MQ-NIAH-4Q and
+$0.387$ for MQ-NIAH-6Q, and $0.292$ for MQ-NIAH-8Q.
+The weakest MQ-NIAH-6Q partition by full-cache reference is
+$256{\rightarrow}134$, where $A=0.963$ and \idlekv{} reaches $0.967$.
+The weakest MQ-NIAH-8Q partition by repair gain is
+$1678{\rightarrow}2345$, where \idlekv{} still reaches $0.969$ versus
+$0.677$ for $\bmatch$.
+Appendix Figure~\ref{fig:app-partition-endpoints} gives the
+per-partition endpoints.
+A same-protocol appendix check with Llama-3.1-8B-Instruct on MQ-NIAH-6Q
+points in the same direction without supporting a broad model-family
+claim: \idlekv{} reaches $1.000$ at $K\in\{64,96,128\}$ versus $0.472$
+for matched no-repair, with Random-$K$/Oldest-$K$ at or below matched.
+The restored tokens also move the final active cache toward the annotated
+$Q_2$ gold spans.
+For MQ-NIAH-4Q, \idlekv{} final-active overlap rises from $0.363$ at $K=8$ to
+$0.794$ at $K=128$, while $\bmatch$ stays near $0.36$.
+For MQ-NIAH-6Q, \idlekv{} overlap rises from $0.498$ to $0.851$, while
+$\bmatch$ stays near $0.49$.
+The random and oldest-token controls remain near the matched baseline in
+both panels.
+Overlap is a mechanism diagnostic rather than the task score itself:
+the values-only needle-in-a-haystack task can be solved without
+recovering every annotated token, which is why \idlekv{} can nearly
+saturate quality before final-active overlap reaches the $\goldk$
+reference.
+
+\paragraph{Latency accounting.}
+Earlier transfer-and-reinjection measurements on the same target
+hardware, excluding exact scoring, reach $46.94$\,ms p50 at $K=500$.
+Here p50 denotes the median over measured repair probes; p95/p99 in the
+appendix report the corresponding tail latencies.
+The exact scorer is much slower because it scores the evicted pool
+directly: p50 is $6.38$\,s for MQ-NIAH-4Q and $6.99$\,s for
+MQ-NIAH-6Q, almost all in scoring.
+At $K=96$, the $Q_2$-appended-state proxy reduces p50 to $0.83$\,s and
+$0.71$\,s, respectively, giving $7.7{\times}$ and $9.9{\times}$ p50
+speedups over exact scoring while remaining above $\bmatch$ in paired
+$n{=}100$ probes.
+Thus the exact curves are mechanistic evidence, and deployment requires
+a faster approximate scorer.
+\begin{table}[t]
+  \caption{Runtime audit at $K=96$ unless noted. Scores are exact
+  $Q_2$ scores for the repaired cache; move-only measures KV transfer
+  and reinjection at $K=500$ and excludes scoring.}
+  \label{tab:runtime-audit}
+  \centering
+  \footnotesize
+  \setlength{\tabcolsep}{3.0pt}
+  \begin{tabular}{llccc}
     \toprule
-    split & $B$ & $\bmatch$ & \idlekv{} & \oraclek{} \\
+    setting & path & score & p50 total & p50 scoring \\
     \midrule
-    $14 \rightarrow 23$ & 0.160 & 0.175 & 1.000 & 1.000 \\
-    $24 \rightarrow 13$ & 0.120 & 0.125 & 0.540 & 1.000 \\
-    $34 \rightarrow 12$ & 0.000 & 0.000 & 0.515 & 1.000 \\
+    4Q & exact & 0.910 & 6.38\,s & 6.29\,s \\
+    4Q & proxy & 0.970 & 0.83\,s & 0.63\,s \\
+    6Q & exact & 0.989 & 6.99\,s & 6.90\,s \\
+    6Q & proxy & 0.894 & 0.71\,s & 0.54\,s \\
+    -- & move only & -- & 46.94\,ms & -- \\
     \bottomrule
   \end{tabular}
 \end{table}
-
-\paragraph{Measured feasibility.}
-Table~\ref{tab:latency} reports the current measured overheads on the
-target hardware for the prototype repair path.
-
-\begin{table}[t]
-  \caption{Measured repair overhead on the target hardware.}
-  \label{tab:latency}
-  \centering
-  \small
-  \setlength{\tabcolsep}{4pt}
-  \begin{tabular}{l c c c}
-    \toprule
-    $K$ & transfer p50 & total repair p50 & total repair p99 \\
-    \midrule
-    100 & 2.68\,ms  & 35.00\,ms & 37.34\,ms \\
-    250 & 6.09\,ms  & 38.89\,ms & 40.44\,ms \\
-    500 & 12.58\,ms & 46.94\,ms & 53.47\,ms \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-Measured transfer-plus-restore p50 stays below 50\,ms through $K=500$.
-On the main quality run, the restore-only part of \idlekv{} averages
-$22.2$\,ms at $K=8$ and about $17$--$18$\,ms from $K=16$ through
-$K=64$, while the exact CPU-side evicted-pool scoring pass averages
-about $226$\,ms per example.
-The prototype is therefore still scoring-dominated rather than
-transfer-dominated, but the end-to-end overhead remains small relative
-to many real tool-call delays.
 
 % -----------------------------------------------------------------------
-\section{Discussion}
+\section{Discussion and Limitations}
 \label{sec:discussion}
 % -----------------------------------------------------------------------
 
-\paragraph{Position in adaptive inference.}
-This paper is best read as a runtime-systems and benchmarking
-contribution for adaptive inference.
-Within that landscape, flexible architectures and routing change the
-model path; test-time compute changes how much computation to spend;
-compression and optimization reduce model or token cost; and efficient
-decoding adapts attention or cache retention within a turn.
-\idlekv{} points to a complementary question: once a request is paused
-and compressed, can the runtime use the idle gap to revise memory before
-the next turn begins?
-That question matters most for agent workloads, because external actions
-create exactly the pause in which such revision can happen.
+\paragraph{Positioning.}
+\idlekv{} is a runtime-systems and benchmarking contribution for
+resource-adaptive inference.
+It is complementary to serving systems that preserve or resume paused
+requests efficiently~\citep{vllm,infercept}: here the question is what
+quality-improving work can be done during the interruption.
+The setting is also distinct from within-turn query-aware eviction
+because the request has already been compressed and full-prefix
+recomputation is disallowed.
 
-\paragraph{Relation to serving systems.}
-\idlekv{} is complementary to serving systems such as vLLM and
-InferCept.
-Those systems decide how to preserve, schedule, and resume interrupted
-requests efficiently~\citep{vllm,infercept}; \idlekv{} asks what useful
-quality-improving work can be done \emph{during} the interruption before
-decoding resumes.
-It is therefore state-revising pre-resume repair, not state-preserving
-pause/resume serving.
-It is also distinct from within-turn query-aware eviction: the request
-has already been compressed, full-prefix recomputation is disallowed,
-and the runtime operates under an idle-window latency budget.
-
-\paragraph{When repair should help.}
+\paragraph{Applicability and limitations.}
 Repair should help when new turn information changes relevance, the base
-eviction policy still has real choice beyond recency, and the hindsight
-ceiling leaves nontrivial headroom over $\bmatch$.
-It should help less when the future turn adds little new information,
-the keep budget is recency-saturated, or the idle gap is shorter than
-the repair overhead.
-These criteria matter both for benchmark design and for interpreting
-null results.
-
-\paragraph{Limitations and next steps.}
-The study is intentionally conditional and favorable: one model, one
-eviction policy, one synthetic split-query family, fixed
-full-cache-generated turn-$N$ transcripts, and no stronger learned or
-future-query-aware alternative post-$Q_2$ refresh baselines yet.
-That makes the mechanism legible, but it is not evidence about
-end-to-end two-turn agent quality or average gains across workloads.
-The current selector is also still leaving clear headroom on the harder
-clean splits.
-In this prototype, ``improving the selector'' means better choosing
-which evicted bursts to reactivate once $Q_2$ is known: for example,
-adaptive burst widths, stronger scoring of value-bearing neighbors,
-active-cache-aware marginal gain estimates, or multi-anchor packing
-rules that avoid spending budget on partially redundant restorations.
-The immediate next steps are therefore broader evidence on additional
-families calibrated to the same acceptance rule, explicit diagnostic
-tail-leaky splits such as $12\rightarrow34$, and stronger post-$Q_2$
-selection policies on the existing benchmark before moving to noisier
-agent-style tasks.
-One preflight caveat is that a task-matched mismatched-query control did
-not separate reliably on this templated NIAH family, likely because even
-wrong queries recover generic key/value bursts; we therefore emphasize
-matched-footprint and simple-restore controls in the main text and treat
-wrong-query controls as a benchmark-design issue to revisit on broader
-tasks.
-More broadly, the field still needs benchmarks with explicit idle
-intervals, hidden future queries, matched no-repair controls, hindsight
-ceilings, and latency measurements tied to real interruption windows.
-If those studies continue to show gains, then idle-window memory
-maintenance becomes a plausible systems primitive for long-context
-agents.
+eviction policy still has real choice beyond recency, and the idle gap is
+long enough to cover repair overhead.
+The present evidence is intentionally narrow: one primary model in the
+main evaluation, one primary first-stage retention rule, one synthetic split-query
+family, fixed full-cache-generated turn-$N$ transcripts, no learned
+selector, and no latency-normalized full-prefix recompute or full
+post-$Q_2$ reselection refresh baseline.
+The curves match the resumed active GPU KV budget, not total host-plus-
+device storage, because repair assumes an offloaded evicted-KV store.
+Figure~\ref{fig:policy-breadth} gives accumulated-attention and
+sink-plus-recent first-stage retention checks, and Appendix
+Figure~\ref{fig:app-transfer-runtime} gives one same-protocol
+Llama-3.1-8B-Instruct MQ-NIAH-6Q portability check, but broader
+retention-rule and multi-model transfer remain open.
+Future benchmarks should also vary the number, timing, and conflict
+structure of new-turn constraints: the 2Q and 8Q breadth checks suggest
+that easy regimes can saturate while stricter multi-query turns expose
+how quickly eviction failures accumulate.
+The locked five-turn diagnostic in Figure~\ref{fig:multiturn} strengthens
+the dynamic-workflow evidence, but it remains synthetic and a stale
+previous-query scorer still closes part of the gap.
+The current selector also leaves visible gap to $\goldk$ at moderate $K$,
+which motivates stronger selection rules and broader task families with
+the same matched-budget controls.
 
 % -----------------------------------------------------------------------
 \section{Conclusion}
 \label{sec:conclusion}
 % -----------------------------------------------------------------------
 
-Tool-call stalls in agent workflows can be treated as part of the
+Agent-motivated pauses between turns can be treated as part of the
 inference budget rather than as dead time.
 \idlekv{} contributes a concrete way to spend that budget: revise a
-compressed cache before the next turn under a matched final active
-decode-time footprint.
-On the primary pooled split-query benchmark, the completed main run
-shows that idle-window repair can substantially outperform matched
-no-repair retention while random and oldest-token restores stay near
-baseline.
-The remaining work is to broaden that evidence across families and to
-close the gap between the current selector and the available oracle
-headroom.
+compressed cache before the next turn under the same resumed-cache
+budget.
+On calibrated pooled split-query MQ-NIAH-4Q/6Q/8Q panels, the final
+exact evaluations show that idle-window repair can substantially
+outperform matched no-repair retention while random and oldest-token
+restores stay near baseline.
+The remaining work is to broaden the evidence beyond this synthetic
+family and to close the gap between the current repair selection rule
+and the $\goldk$ reference.
 More broadly, long-context agent systems may need to be judged not only
 by how efficiently they decode, but by how well they maintain memory
 between turns.
 
 % -----------------------------------------------------------------------
-\begin{thebibliography}{10}
+\begin{thebibliography}{12}
 
 \bibitem[Abhyankar et~al.(2024)]{infercept}
 Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and Zhang, Y.
@@ -571,6 +638,13 @@ Li, Y., Huang, Y., Yang, B., Venkitesh, B., Locatelli, A., Ye, H.,
 \newblock SnapKV: LLM knows what you are looking for before generation.
 \newblock \emph{arXiv:2404.14469}, 2024.
 
+\bibitem[Li et~al.(2025)]{scbench}
+Li, Y., Jiang, H., Wu, Q., Luo, X., Ahn, S., Zhang, C., Abdi, A. H.,
+  Li, D., Gao, J., Yang, Y., and Qiu, L.
+\newblock SCBench: A KV cache-centric analysis of long-context methods.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2025.
+
 \bibitem[Chen et~al.(2025)]{pitfalls}
 Chen, A., Geh, R., Grover, A., Van den Broeck, G., and Israel, D.
 \newblock The pitfalls of KV cache compression.
@@ -588,6 +662,13 @@ Tang, J., Zhao, Y., Zhu, K., Xiao, G., Kasikci, B., and Han, S.
 \newblock In \emph{Proceedings of the 41st International Conference on
   Machine Learning (ICML)}, 2024.
 
+\bibitem[Sun et~al.(2025)]{shadowkv}
+Sun, H., Chang, L.-W., Bao, W., Zheng, S., Zheng, N., Liu, X., Dong,
+  H., Chi, Y., and Chen, B.
+\newblock ShadowKV: KV cache in shadows for high-throughput long-context
+  LLM inference.
+\newblock \emph{arXiv:2410.21465}, 2025.
+
 \bibitem[Xiao et~al.(2024)]{streamingllm}
 Xiao, G., Tang, Y., Zuo, J., Guo, J., Yang, S., Tang, H., Fu, Y.,
   and Han, S.
@@ -604,5 +685,144 @@ Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song, Z.,
   (NeurIPS)}, 2023.
 
 \end{thebibliography}
+
+\appendix
+
+\section{Additional Evaluation Details}
+\label{app:evaluation-details}
+
+\paragraph{Protocol details.}
+Concise split prompts request values only, comma-separated, with a short
+answer prefix and fixed decode budgets of 24 tokens for MQ-NIAH-4Q,
+48 tokens for MQ-NIAH-6Q, and 64 tokens for MQ-NIAH-8Q.
+The exact Q$_2$ attention-query scorer extracts the model's actual
+self-attention query vectors for $Q_2$ prompt tokens after RoPE and
+scores them against active and evicted keys; this is distinct from
+decode-time answer-token attention.
+The $Q_2$-appended-state proxy instead appends $Q_2$ to the compressed
+cache with an ordinary forward pass and reuses the appended $Q_2$ cache
+rows as scoring rows.
+
+\paragraph{Hindsight reference.}
+$\goldk$ starts from the same $B$ state and offloaded evicted-KV store
+as \idlekv{}.
+It enumerates the small family of annotated gold $Q_2$ span-group
+subsets, one key/value span group per requested needle, evaluates each
+subset once under actual $Q_2$ generation, and chooses the
+highest-scoring subset with total cost at most $K$.
+It is exact over this benchmark-specific span-group family, but not over
+all arbitrary token subsets or possible final generations.
+
+\paragraph{Partition choices.}
+For MQ-NIAH-4Q, the pooled panel uses
+$14{\rightarrow}23$, $24{\rightarrow}13$, and
+$34{\rightarrow}12$.
+These are the balanced $2|2$ partitions whose $Q_2$ side excludes the
+tail-anchored fourth needle.
+For MQ-NIAH-6Q, the pooled panel uses
+$156{\rightarrow}234$, $256{\rightarrow}134$,
+$356{\rightarrow}124$, and $456{\rightarrow}123$, so the second turn
+excludes the two latest needles.
+For MQ-NIAH-8Q, the pooled panel uses
+$5678{\rightarrow}1234$, $1678{\rightarrow}2345$,
+$2678{\rightarrow}1345$, $3678{\rightarrow}1245$, and
+$4678{\rightarrow}1235$, again excluding the two latest needles from the
+second turn.
+Within-turn order is not treated as a separate condition because the
+prompt asks for comma-separated values only and scoring checks whether
+each requested value is recovered.
+Recency-favorable splits such as $12{\rightarrow}34$ are left to
+separate diagnostics rather than pooled into the main future-query
+repair result.
+
+\section{Supplementary Experimental Views}
+\label{app:supplementary-figures}
+
+Figures in this section provide compact diagnostic views that support the
+main claims without replacing the primary matched-budget frontier. Exact
+audit values are kept in the released result artifacts rather than
+duplicated as wide tables.
+\FloatBarrier
+
+\IfFileExists{figures/query_count_breadth.pdf}{%
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/query_count_breadth.pdf}
+  \caption{Locked query-count breadth check. Points and thin lines show
+  \idlekv{} score gain over matched no-repair for $K=48$ and $K=96$
+  across 2-, 3-, 4-, 6-, and 8-question split-query variants.
+  Figure~\ref{fig:main-frontier} uses full K-grid frontiers for
+  2Q/4Q/6Q/8Q; 3Q remains an appendix breadth check.}
+  \label{fig:app-query-count-breadth}
+\end{figure}
+}{}
+
+\IfFileExists{figures/operating_regime_heatmap.pdf}{%
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/operating_regime_heatmap.pdf}
+  \caption{Operating-regime heatmap for the final exact $Q_2$
+  evaluations ($n{=}24$ per setting). Cells show the fraction of
+  available $\goldk{}$ headroom recovered by \idlekv{}, clipped to
+  $[0,1]$: $(S_{\mathrm{IdleKV}}-S_{\bmatch})/
+  (S_{\goldk{}}-S_{\bmatch})$, averaged over pooled balanced splits for
+  MQ-NIAH-4Q and MQ-NIAH-6Q. Cells with little remaining $\goldk{}$
+  headroom should be read as saturation diagnostics.}
+  \label{fig:app-operating-regime}
+\end{figure}
+}{}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/repair_selection_diagnostic.pdf}
+  \caption{Real-data selection diagnostic for the final exact
+  evaluations. The left column shows answer score; the right column
+  shows overlap between restored tokens and annotated $Q_2$ answer
+  spans. Content-agnostic restores stay near the matched baseline while
+  \idlekv{} increases both answer score and future-span coverage.}
+  \label{fig:app-selection-diagnostic}
+\end{figure}
+
+\IfFileExists{figures/partition_endpoint_dotplot.pdf}{%
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/partition_endpoint_dotplot.pdf}
+  \caption{Per-partition endpoint scores at $K=128$ on the final exact
+  evaluations. Gray segments show the change from matched
+  no-repair to \idlekv{}, orange points show the benchmark-metadata
+  $\goldk{}$ reference, and labels report the \idlekv{} difference over
+  matched no-repair.}
+  \label{fig:app-partition-endpoints}
+\end{figure}
+}{}
+
+\IfFileExists{figures/model_transfer_breadth.pdf}{%
+\IfFileExists{figures/proxy_latency_tradeoff.pdf}{%
+\begin{figure*}[t]
+  \centering
+  \begin{minipage}[t]{0.47\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/model_transfer_breadth.pdf}
+    \centerline{\small (a) Same-protocol Llama 6Q check}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[t]{0.47\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/proxy_latency_tradeoff.pdf}
+    \centerline{\small (b) Fixed-$K$ scorer-latency probe}
+  \end{minipage}
+  \caption{Supplementary portability and runtime diagnostics. Left: the
+  gray band spans matched no-repair and content-agnostic restore
+  controls; blue and orange marks show \idlekv{} and $\goldk{}$ for a
+  Llama-3.1-8B-Instruct same-protocol 6Q appendix check. Right: ``move
+  only'' places the matched no-repair score at measured KV transfer and
+  reinjection latency. In paired $n{=}100$, $K=96$ probes, the proxy
+  remains above matched no-repair on both 4Q and 6Q while reducing p50
+  total scorer latency from 6.38\,s to 0.83\,s and from 6.99\,s to
+  0.71\,s, respectively. Transfer and reinjection alone are 46.94\,ms
+  p50 and 53.47\,ms p99 at $K=500$.}
+  \label{fig:app-transfer-runtime}
+\end{figure*}
+}{}}{}
 
 \end{document}

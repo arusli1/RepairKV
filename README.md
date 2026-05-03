@@ -1,53 +1,113 @@
 # IdleKV
 
-IdleKV explores a simple idea for batch-1 LLM agents: use GPU idle time during
-tool calls to repair KV-cache damage caused by eviction.
+IdleKV is a research prototype for repairing compressed key-value (KV)
+caches during idle gaps between long-context agent turns. The core idea is
+that a cache compressed after one turn can be stale for the next turn: once
+new turn text reveals what matters, the system can use the idle window to
+restore selected evicted KV rows before decoding resumes.
 
-## Repo Layout
+The paper studies this under matched resumed active-cache budgets. IdleKV
+keeps evicted KV rows in an offloaded store, scores candidates after the
+next-turn relevance signal is known, restores a fixed budget `K`, and compares
+against a no-repair baseline with the same active-cache budget.
 
-- `phases/phase0_baseline/`: Phase 0 baseline RULER validation.
-- `phases/phase1_degradation/`: Phase 1 degradation harness and task variants.
-- `phases/phase2_kv_cache/`: Phase 2 KV save/load/slice/inject validation.
-- `phases/phase3_eviction/`: Phase 3 eviction policies, smoke suite, and degradation benchmark.
-- `phases/phase4_eviction_buffer/`: Phase 4 CPU eviction buffer and profiling setup.
-- `ruler/`: vendored upstream RULER checkout.
-- `paper/`: paper draft and figures.
-- `saved_results/`: tracked memory layer with the canonical P0-P3 summaries and the small Phase 3 launcher log/status pair.
-- `docs/`: phase notes, current status, and result-retention guidance.
-- `models/`: local model weights only, ignored by git.
+## Current Status
 
-## Clean Repo Guide
+- Paper draft: `paper/main.tex`; rebuilt PDF: `paper/main.pdf`.
+- Main figure generation: `paper/scripts/render_paper_figures.py`.
+- Paper guide and terminology/style rules: `paper_guide.md`.
+- Locked main evidence currently covers MQ-NIAH-2Q/4Q/6Q/8Q on
+  Qwen2.5-7B-Instruct, plus specificity, multi-turn, and first-stage
+  retention-policy diagnostics.
+- Cross-model and additional algorithm branches are tracked in
+  `phases/phase13_iteration_framework/phase13_plan.md`; promote only locked
+  runs that pass written gates.
 
-- Keep runnable project code under `phases/`.
-- Keep bulky generated outputs inside each phase under `results/`, `artifacts/`, or `logs/`.
-- Copy only the small summaries worth remembering into `saved_results/`.
-- Keep human-readable project memory in `docs/`.
-- Treat `ruler/` as vendored code, not project source.
-- Do not track local model weights or full generated output trees.
-- If you need to prune local outputs later, read `docs/results-retention.md` first.
+## Repository Map
 
-## Current State
+- `paper/`: ICML-style draft, figure assets, and rendering scripts.
+- `paper_guide.md`: source-of-truth writing, terminology, and figure rules.
+- `docs/`: current project status and result-retention notes.
+- `phases/phase6_repair/`: matched-budget repair protocol, selectors,
+  reporting, and tests.
+- `phases/phase7_broader_evidence/`: locked 4Q/6Q evidence and export
+  scripts.
+- `phases/phase9_experiment_deepening/`: operating-regime and proxy-scorer
+  experiments.
+- `phases/phase10_expansion/`: query-count breadth, specificity, multi-turn,
+  retention-policy, model-transfer, and quantization probes.
+- `phases/phase11_main_robustness/`: Llama 4Q and accumulated-attention
+  retention robustness runs.
+- `phases/phase12_policy_breadth/`: sink-plus-recent retention breadth runs.
+- `phases/phase13_iteration_framework/`: closure framework, promotion gates,
+  and active next-run scripts.
+- `saved_results/`: small retained summaries from earlier phases.
+- `models/`: local model weights only; ignored by git.
+- `ruler/`: vendored RULER checkout; treated as external benchmark code.
 
-- P0 baseline: done.
-- P1 degradation harness: done enough for smoke, not yet polished into final
-  experiment tables.
-- P2 KV access layer: validated.
-- P3 eviction validation: done enough for smoke.
-- P4 CPU eviction buffer: implemented and first profiling pass complete.
+## Rebuild The Paper
 
-See `docs/project-status.md` for the current phase-by-phase readout.
+From the repo root:
 
-## Phase Notes
+```bash
+.venv/bin/python paper/scripts/render_paper_figures.py
+cd paper
+latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex
+```
 
-- `docs/phases/phase0.md`
-- `docs/phases/phase1.md`
-- `docs/phases/phase2.md`
-- `docs/phases/phase3.md`
-- `docs/phases/phase4.md`
+`paper/main.pdf` should rebuild without LaTeX errors. Underfull box warnings
+from float placement are acceptable; overfull text or figure overlap should be
+fixed before a paper snapshot.
 
-## Key Docs
+## Test Commands
 
-- `plan.md`: full development plan.
-- `instructions.md`: current working spec.
-- `docs/project-status.md`: concise current repo state.
-- `docs/results-retention.md`: what to keep vs what can be regenerated.
+Targeted paper/closure tests:
+
+```bash
+.venv/bin/python -m pytest \
+  phases/phase13_iteration_framework/tests/test_paper_language.py \
+  phases/phase13_iteration_framework/tests/test_framework.py \
+  phases/phase10_expansion/tests/test_multiturn.py \
+  phases/phase10_expansion/tests/test_multiturn_runner.py -q
+```
+
+Broader CPU-side suite:
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+Run unit tests after code changes. GPU experiments should be preceded by the
+smallest smoke that can falsify the experiment design.
+
+## Experiment Discipline
+
+Every GPU run should be tied to one of two purposes:
+
+- **Smoke run:** validate task design, implementation, budget calibration, and
+  failure modes before spending more compute.
+- **Locked run:** produce a pre-specified figure/table candidate with a written
+  promotion gate.
+
+Long GPU jobs should run in `tmux`, write explicit CSV/JSON outputs under the
+owning phase directory, and be audited before paper integration. Do not use
+smoke-only data in the main paper.
+
+## Evidence Conventions
+
+- `Matched` means no repair under the same resumed active-cache budget.
+- `IdleKV` means current next-turn signal conditioned restore from the
+  offloaded evicted-KV store.
+- `Gold-K` is a benchmark-metadata hindsight reference, not an implementable
+  algorithm.
+- `Random-K` and `Oldest-K` are content-agnostic restore controls.
+- `Refresh-buffered` reselects the whole resumed active budget from active plus
+  offloaded rows using the next-turn signal; it is a method-boundary reference,
+  not a deployable full-prefix recompute baseline.
+
+## Git Hygiene
+
+Generated phase outputs, local model weights, LaTeX intermediates, and rendered
+plot binaries are ignored unless deliberately promoted. Keep paper-ready source
+changes in tracked code, `.tex`, `.md`, and compact CSV artifacts that are
+needed to regenerate figures.

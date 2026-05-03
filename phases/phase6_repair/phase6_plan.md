@@ -1,6 +1,14 @@
-# Phase 6: Main Paper Experiment
+# Phase 6: Historical Main Paper Experiment Record
 
 Generated: 2026-05-01
+
+This document records the finalized Phase 6 design and outcomes.
+It is no longer the active broader-evidence plan.
+
+Current exact-mode bridge and hard-panel work lives in:
+
+- `phases/phase7_broader_evidence/phase7_plan.md`
+- `phases/phase7_broader_evidence/phase7_handoff.md`
 
 ## Thesis
 

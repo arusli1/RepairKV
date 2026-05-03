@@ -22,6 +22,23 @@ VALUES_ONLY_MAX_NEW_TOKENS = 24
 MISMATCHED_KEY_STEM = "phantom_key"
 
 
+def _apply_rotary_pos_emb_for_model(
+    model,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply the RoPE helper that matches the checkpoint family."""
+    model_type = str(getattr(getattr(model, "config", None), "model_type", "")).lower()
+    if model_type == "llama":
+        from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
+    else:
+        from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb
+
+    return apply_rotary_pos_emb(query, key, cos, sin)
+
+
 @dataclass(frozen=True)
 class SplitTaskSpec:
     """One fixed Q1/Q2 split over an existing task family."""
@@ -40,6 +57,91 @@ DEFAULT_SPLIT_SPEC = SplitTaskSpec(
     base_task_key="mq_niah_4q",
     q1_indices=(0, 3),
     q2_indices=(1, 2),
+)
+
+MQ_NIAH_2Q_CLEAN_SPLIT_SPEC = SplitTaskSpec(
+    name="mq_niah_2q_split_2_to_1",
+    base_task_key="mq_niah_2q",
+    q1_indices=(1,),
+    q2_indices=(0,),
+)
+
+MQ_NIAH_3Q_CLEAN_SPLIT_SPEC = SplitTaskSpec(
+    name="mq_niah_3q_split_3_to_12",
+    base_task_key="mq_niah_3q",
+    q1_indices=(2,),
+    q2_indices=(0, 1),
+)
+
+MQ_NIAH_6Q_CLEAN_SPLIT_SPEC = SplitTaskSpec(
+    name="mq_niah_6q_split_456_to_123",
+    base_task_key="mq_niah_6q",
+    q1_indices=(3, 4, 5),
+    q2_indices=(0, 1, 2),
+    max_new_tokens=48,
+)
+
+MQ_NIAH_6Q_CLEAN_SPLIT_SPECS = (
+    SplitTaskSpec(
+        name="mq_niah_6q_split_156_to_234",
+        base_task_key="mq_niah_6q",
+        q1_indices=(0, 4, 5),
+        q2_indices=(1, 2, 3),
+        max_new_tokens=48,
+    ),
+    SplitTaskSpec(
+        name="mq_niah_6q_split_256_to_134",
+        base_task_key="mq_niah_6q",
+        q1_indices=(1, 4, 5),
+        q2_indices=(0, 2, 3),
+        max_new_tokens=48,
+    ),
+    SplitTaskSpec(
+        name="mq_niah_6q_split_356_to_124",
+        base_task_key="mq_niah_6q",
+        q1_indices=(2, 4, 5),
+        q2_indices=(0, 1, 3),
+        max_new_tokens=48,
+    ),
+    MQ_NIAH_6Q_CLEAN_SPLIT_SPEC,
+)
+
+MQ_NIAH_8Q_CLEAN_SPLIT_SPECS = (
+    SplitTaskSpec(
+        name="mq_niah_8q_split_5678_to_1234",
+        base_task_key="mq_niah_8q",
+        q1_indices=(4, 5, 6, 7),
+        q2_indices=(0, 1, 2, 3),
+        max_new_tokens=64,
+    ),
+    SplitTaskSpec(
+        name="mq_niah_8q_split_1678_to_2345",
+        base_task_key="mq_niah_8q",
+        q1_indices=(0, 5, 6, 7),
+        q2_indices=(1, 2, 3, 4),
+        max_new_tokens=64,
+    ),
+    SplitTaskSpec(
+        name="mq_niah_8q_split_2678_to_1345",
+        base_task_key="mq_niah_8q",
+        q1_indices=(1, 5, 6, 7),
+        q2_indices=(0, 2, 3, 4),
+        max_new_tokens=64,
+    ),
+    SplitTaskSpec(
+        name="mq_niah_8q_split_3678_to_1245",
+        base_task_key="mq_niah_8q",
+        q1_indices=(2, 5, 6, 7),
+        q2_indices=(0, 1, 3, 4),
+        max_new_tokens=64,
+    ),
+    SplitTaskSpec(
+        name="mq_niah_8q_split_4678_to_1235",
+        base_task_key="mq_niah_8q",
+        q1_indices=(3, 5, 6, 7),
+        q2_indices=(0, 1, 2, 4),
+        max_new_tokens=64,
+    ),
 )
 
 CLEAN_SPLIT_SPECS = (
@@ -80,7 +182,13 @@ TAIL_LEAKY_SPLIT_SPECS = (
 )
 
 ALL_SPLIT_SPECS = CLEAN_SPLIT_SPECS + TAIL_LEAKY_SPLIT_SPECS
-SPLIT_SPECS_BY_NAME = {spec.name: spec for spec in ALL_SPLIT_SPECS}
+EXTRA_SPLIT_SPECS = (
+    MQ_NIAH_2Q_CLEAN_SPLIT_SPEC,
+    MQ_NIAH_3Q_CLEAN_SPLIT_SPEC,
+    *MQ_NIAH_6Q_CLEAN_SPLIT_SPECS,
+    *MQ_NIAH_8Q_CLEAN_SPLIT_SPECS,
+)
+SPLIT_SPECS_BY_NAME = {spec.name: spec for spec in ALL_SPLIT_SPECS + EXTRA_SPLIT_SPECS}
 
 
 @dataclass(frozen=True)
@@ -362,37 +470,74 @@ def build_turn_n_keep_plan(
     sink_size: int,
     recency_window: int,
     pooling: str = "max",
+    initial_compressor: str = "snapkv",
 ) -> ContextKeepPlan:
     """Score the full post-Q1 cache from the generated answer tail and freeze one keep order."""
-    if int(q1_answer_ids.numel()) <= 0:
-        raise ValueError("Q1 answer ids must be non-empty so the turn-N observation window is well defined.")
     if context_len <= 0 or context_len > len(post_q1_cache):
         raise ValueError(f"context_len must lie in [1, {len(post_q1_cache)}], got {context_len}.")
+    compressor = str(initial_compressor).strip().lower()
 
-    policy = SnapKV(
-        obs_window_size=int(q1_answer_ids.numel()),
-        sink_size=0,
-        recency_window=0,
-        pooling=pooling,
-    )
-    _, importance, _ = policy.prepare_eviction_inputs(post_q1_cache)
-
-    sink_count = min(int(context_len), int(sink_size))
-    recency_count = min(int(recency_window), max(0, int(context_len) - sink_count))
-    recency_start = max(sink_count, int(context_len) - recency_count)
-    mandatory_context_positions = tuple(sorted(set(range(sink_count)) | set(range(recency_start, int(context_len)))))
-    mandatory_set = set(mandatory_context_positions)
-    ranked_candidate_positions = tuple(
-        sorted(
-            (position for position in range(int(context_len)) if position not in mandatory_set),
-            key=lambda position: (-float(importance[position].item()), position),
+    if compressor == "snapkv":
+        if int(q1_answer_ids.numel()) <= 0:
+            raise ValueError("Q1 answer ids must be non-empty so the turn-N observation window is well defined.")
+        policy = SnapKV(
+            obs_window_size=int(q1_answer_ids.numel()),
+            sink_size=0,
+            recency_window=0,
+            pooling=pooling,
         )
-    )
+        _, importance, _ = policy.prepare_eviction_inputs(post_q1_cache)
+
+        sink_count = min(int(context_len), int(sink_size))
+        recency_count = min(int(recency_window), max(0, int(context_len) - sink_count))
+        recency_start = max(sink_count, int(context_len) - recency_count)
+        mandatory_context_positions = tuple(sorted(set(range(sink_count)) | set(range(recency_start, int(context_len)))))
+        mandatory_set = set(mandatory_context_positions)
+        ranked_candidate_positions = tuple(
+            sorted(
+                (position for position in range(int(context_len)) if position not in mandatory_set),
+                key=lambda position: (-float(importance[position].item()), position),
+            )
+        )
+        importance_scores = {
+            int(position): float(importance[position].item())
+            for position in range(int(context_len))
+        }
+    elif compressor == "h2o":
+        if int(q1_answer_ids.numel()) <= 0:
+            raise ValueError("H2O-inspired compression requires non-empty recent observation ids.")
+        importance = _score_h2o_tokens(
+            post_q1_cache,
+            obs_window_size=int(q1_answer_ids.numel()),
+        )
+        sink_count = min(int(context_len), int(sink_size))
+        recency_count = min(int(recency_window), max(0, int(context_len) - sink_count))
+        recency_start = max(sink_count, int(context_len) - recency_count)
+        mandatory_context_positions = tuple(sorted(set(range(sink_count)) | set(range(recency_start, int(context_len)))))
+        mandatory_set = set(mandatory_context_positions)
+        ranked_candidate_positions = tuple(
+            sorted(
+                (position for position in range(int(context_len)) if position not in mandatory_set),
+                key=lambda position: (-float(importance[position].item()), position),
+            )
+        )
+        importance_scores = {
+            int(position): float(importance[position].item())
+            for position in range(int(context_len))
+        }
+    elif compressor == "streaming_llm":
+        sink_count = min(int(context_len), int(sink_size))
+        mandatory_context_positions = tuple(range(sink_count))
+        ranked_candidate_positions = tuple(range(int(context_len) - 1, sink_count - 1, -1))
+        denominator = max(1, int(context_len) - 1)
+        importance_scores = {
+            int(position): float(position / denominator)
+            for position in range(int(context_len))
+        }
+    else:
+        raise ValueError(f"Unsupported initial_compressor: {initial_compressor!r}.")
+
     tail_positions = tuple(range(int(context_len), len(post_q1_cache)))
-    importance_scores = {
-        int(position): float(importance[position].item())
-        for position in range(int(context_len))
-    }
     return ContextKeepPlan(
         context_len=int(context_len),
         tail_positions=tail_positions,
@@ -400,6 +545,28 @@ def build_turn_n_keep_plan(
         ranked_candidate_positions=ranked_candidate_positions,
         importance_scores=importance_scores,
     )
+
+
+def _score_h2o_tokens(
+    full_cache: PositionTrackedCache,
+    *,
+    obs_window_size: int,
+) -> torch.Tensor:
+    """Approximate H2O-inspired accumulated attention scores over the latest rows."""
+    cache = to_tuple_cache(full_cache)
+    seq_len = len(full_cache)
+    obs_len = min(max(1, int(obs_window_size)), seq_len)
+    obs_start = seq_len - obs_len
+    layer_scores: list[torch.Tensor] = []
+
+    for key, _ in cache:
+        key_float = key.detach().to(dtype=torch.float32)
+        obs_rows = key_float[:, :, obs_start:, :]
+        scores = torch.matmul(obs_rows, key_float.transpose(-2, -1)) / math.sqrt(key_float.shape[-1])
+        scores = torch.softmax(scores, dim=-1)
+        layer_scores.append(scores.sum(dim=2).mean(dim=(0, 1)))
+
+    return torch.stack(layer_scores, dim=0).mean(dim=0)
 
 
 def materialize_context_partition(
@@ -441,7 +608,12 @@ def compute_q2_query_rows(
     active_cache: PositionTrackedCache,
     question_ids: torch.Tensor,
 ) -> torch.Tensor:
-    """Encode Q2 against one active cache and return the appended query rows on CPU."""
+    """Encode Q2 and return appended attention-state rows used for repair scoring.
+
+    The current runner scores repair candidates with the appended per-token rows
+    available after the forward pass, which act as a Q2-conditioned proxy rather
+    than exact extracted Q projections.
+    """
     outputs = resume_forward(
         model,
         question_ids,
@@ -459,9 +631,80 @@ def compute_q2_query_rows(
     return torch.stack(query_rows, dim=0)
 
 
+def compute_q2_exact_query_rows(
+    model,
+    *,
+    active_cache: PositionTrackedCache,
+    question_ids: torch.Tensor,
+) -> torch.Tensor:
+    """Encode Q2 and return exact per-layer query projections after RoPE."""
+    device = model_device(model)
+    question_ids = question_ids.to(device)
+    if question_ids.ndim == 1:
+        question_ids = question_ids.unsqueeze(0)
+
+    logical_base = next_logical_position(active_cache)
+    dense_base = len(active_cache)
+    seq_len = int(question_ids.shape[1])
+    position_ids = torch.arange(logical_base, logical_base + seq_len, device=device).unsqueeze(0)
+    cache_position = torch.arange(dense_base, dense_base + seq_len, device=device)
+    model_cache = to_dynamic_cache(active_cache, config=model.config)
+
+    kwargs = {
+        "input_ids": question_ids,
+        "past_key_values": model_cache,
+        "position_ids": position_ids,
+        "cache_position": cache_position,
+        "use_cache": True,
+        "output_hidden_states": True,
+        "logits_to_keep": 1,
+    }
+    with torch.no_grad():
+        try:
+            outputs = model(**kwargs)
+        except TypeError:
+            kwargs.pop("logits_to_keep", None)
+            try:
+                outputs = model(**kwargs)
+            except TypeError:
+                kwargs.pop("cache_position", None)
+                outputs = model(**kwargs)
+
+    hidden_states = getattr(outputs, "hidden_states", None)
+    if hidden_states is None:
+        raise RuntimeError("Model did not return hidden states for exact Q-row extraction.")
+
+    query_rows: list[torch.Tensor] = []
+    for layer_index, layer in enumerate(model.model.layers):
+        layer_input = hidden_states[layer_index]
+        normalized = layer.input_layernorm(layer_input)
+        attention = layer.self_attn
+        query = attention.q_proj(normalized).view(*normalized.shape[:-1], -1, attention.head_dim).transpose(1, 2)
+        key = attention.k_proj(normalized).view(*normalized.shape[:-1], -1, attention.head_dim).transpose(1, 2)
+        cos, sin = model.model.rotary_emb(normalized, position_ids)
+        query, _ = _apply_rotary_pos_emb_for_model(model, query, key, cos, sin)
+        query_rows.append(query[0].detach().to("cpu", dtype=torch.float32).contiguous())
+    return torch.stack(query_rows, dim=0)
+
+
 def relevant_positions_for_spans(prepared: PreparedExample, span_names: Sequence[str]) -> tuple[int, ...]:
     """Return the sorted token positions for a fixed list of relevant span names."""
     positions: set[int] = set()
     for span_name in span_names:
         positions.update(int(position) for position in prepared.span_token_positions.get(span_name, []))
     return tuple(sorted(positions))
+
+
+def relevant_position_groups_for_spans(prepared: PreparedExample, span_names: Sequence[str]) -> tuple[tuple[int, ...], ...]:
+    """Return one sorted token-position tuple per relevant span name."""
+    groups: list[tuple[int, ...]] = []
+    for span_name in span_names:
+        groups.append(
+            tuple(
+                sorted(
+                    int(position)
+                    for position in prepared.span_token_positions.get(span_name, [])
+                )
+            )
+        )
+    return tuple(groups)

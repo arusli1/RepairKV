@@ -1,17 +1,94 @@
 # Project Status
 
-This repo has been kept to a minimum-viable standard through Phase 4. The first
-Phase 4 profiling pass has now been executed on the local GPU.
+IdleKV is now paper-first. Early phases established the KV-cache access,
+eviction, and offloaded-store machinery; the current work centers on
+matched-budget repair evidence, paper figures, and robustness experiments for
+dynamic between-turn cache repair.
 
 ## Current Readout
 
 | Phase | Status | Notes |
 |---|---|---|
-| P0 | Done | Baseline RULER run exists and acceptance checks pass. |
-| P1 | Done enough for smoke | The harness and key summaries exist, but the phase note is still partly a scaffold rather than a final paper table. |
+| P0 | Done | Baseline RULER validation exists. |
+| P1 | Done enough for support | Degradation harness and task generators exist; tests now collect in repo-wide pytest. |
 | P2 | Done | KV round-trip, injection, transfer profiling, and heatmap generation are in place. |
-| P3 | Done enough for smoke | Eviction policies, tests, live smoke, and pilot/full degradation runs exist. |
-| P4 | Done enough for MVP | Buffer/profiling code exists and the first live profiling pass wrote the feasibility frontier plus transfer/scoring/attention/end-to-end artifacts. |
+| P3 | Done enough for support | Eviction policies, tests, live smoke, and pilot/full degradation runs exist. |
+| P4 | Done enough for support | Host-memory eviction buffer and first profiling pass are implemented. |
+| P6 | Active foundation | Matched-budget repair runner, selectors, reporting, first-stage retention hooks, and paper exporters are implemented and tested. |
+| P7 | Main evidence | Locked 4Q/6Q matched-budget frontier data are integrated into the paper. |
+| P8 | Appendix support | Strict active-cache streaming/spill diagnostics are appendix-only coverage evidence. |
+| P9 | Main/appendix support | Operating-regime, proxy-scorer, and paper figure validation are implemented; renderer tests pass. |
+| P10 | Active expansion | Specificity controls, 2Q/8Q full frontiers, and the locked five-turn relevance-shift diagnostic are integrated; Llama-3.1-8B passed the locked `n=12` portability gate and is integrated as appendix evidence; selector variants remain staged. |
+| P11 | Done | Accumulated-attention retention inspired by H2O on the 4Q full K-grid `n=24` and Llama-3.1-8B 4Q full K-grid `n=24` both passed the main-candidate gate. |
+| P12 | Done | Sink-plus-recent policy-breadth `n=24` follow-up passed the gate and is integrated as a main figure with SnapKV and accumulated-attention rows. |
+| P13 | Done for current paper | Iterative gates, live-branch audit script, and paired uncertainty checks are implemented. The locked `n=24`, `K=80` five-turn run passed the main gate and is integrated as a main diagnostic with stale-query caveats. |
+
+## Paper State
+
+- Draft: `paper/main.tex`.
+- Built PDF: `paper/main.pdf`.
+- Figure renderer: `paper/scripts/render_paper_figures.py`.
+- Paper rules and terminology: `paper_guide.md`.
+- Active experiment queue: `phases/phase10_expansion/run_state.md`.
+- High-signal experiment map: `phases/phase10_expansion/phase10_high_signal_map.md`.
+- Main-candidate robustness plan: `phases/phase11_main_robustness/phase11_plan.md`.
+- Policy-breadth plan: `phases/phase12_policy_breadth/phase12_plan.md`.
+- Iterative closure framework: `phases/phase13_iteration_framework/phase13_plan.md`.
+- Exact prior-policy audit:
+  `phases/phase13_iteration_framework/exact_policy_audit.md`.
+
+The main paper currently uses a compact one-column matched-budget raw-score
+frontier for 2Q/4Q/6Q/8Q, a specificity-control figure, a locked five-turn
+relevance-shift figure, and a first-stage policy-breadth figure covering
+SnapKV, accumulated-attention, and sink-plus-recent rows. The 2Q and 8Q curves
+both come from full K-grid runs, not endpoint-only breadth evidence. The
+appendix contains graph-first robustness views for query-count breadth, the
+operating-regime heatmap, selection diagnostics, partition endpoints, scorer
+latency, and a cautious same-protocol Llama-3.1-8B cross-family portability
+check. The Qwen2.5-3B
+same-family transfer result remains fallback appendix evidence rather than
+the preferred paper-facing transfer check.
+
+Phase 11 found two positive robustness checks. The accumulated-attention
+retention K-grid inspired by H2O and the Llama-3.1-8B full K-grid both pass the
+numerical promotion gate and are now reflected in main prose plus appendix
+frontiers. The default placement remains appendix unless a compact robustness
+figure can be added without overclaiming broad retention-rule or model-family
+generalization.
+
+Phase 12 tested a second non-SnapKV policy because it earned the space. The
+sink-plus-recent `n=24` K-grid at `B_base=16384` passed the policy-curve gate:
+best gain `0.431` at `K=128`, three eligible adjacent positive points,
+controls near matched no-repair, and the Gold-K reference covering IdleKV.
+The main figure now shows SnapKV, accumulated-attention, and sink-plus-recent
+policy rows as a robustness check rather than a broad canonical reproduction
+claim.
+
+Phase 13 makes the remaining work explicit rather than ad hoc. Each live idea
+must state a reviewer question, diagnose failures, pass unit tests, pass a
+minimal smoke, and then pass a written promotion gate before it can enter the
+main paper. The locked multi-turn run passed: non-initial IdleKV gain is
+`0.542` with paired interval `[0.458,0.620]`, and current-query-only repair
+beats stale-query-only repair by `0.307` with paired interval `[0.240,0.370]`.
+The next model-transfer step remains a Llama 6Q smoke only if the paper needs
+stronger main-readiness evidence.
+
+## Validation
+
+From the repo root:
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+Current local result: `202 passed, 16 warnings, 304 subtests passed`.
+
+After any paper or figure edit:
+
+```bash
+.venv/bin/python paper/scripts/render_paper_figures.py
+cd paper && latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex
+```
 
 ## Canonical Saved Summaries
 
@@ -33,14 +110,8 @@ Phase 4 profiling pass has now been executed on the local GPU.
 ## Notes
 
 - The tracked `saved_results/` directory is the lightweight memory layer for
-  the project.
-- The original generated outputs are still kept in the local phase `results/`
-  directories, but those directories are ignored by git.
-- `saved_results/phase3/` also keeps the small Phase 3 launcher log/status pair
-  so there is no separate top-level `run_logs/` directory.
-- The first P4 run used the real local geometry (`32K` live fixture,
-  `k_budget=4096`) and found that the current transfer sweep saturates at the
-  measured ceiling of `K=2000`, so the next P4 refinement should extend the
-  transfer grid upward if the paper needs a wider frontier.
-- `docs/phases/` contains the human-readable phase notes in order from P0 to
-  P4.
+  early phases. Later phase result trees are mostly ignored and regenerated or
+  exported into paper CSVs/figures as needed.
+- `models/` is local-only and ignored by git.
+- Keep generated LaTeX byproducts out of the repo root. The ICML build
+  byproducts under `paper/` are ignored and can be regenerated.
