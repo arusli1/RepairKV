@@ -21,10 +21,10 @@ the same number of active context KV rows.
 - Main result set: MQ-NIAH-2Q/4Q/6Q/8Q restore-budget sweeps, specificity
   controls, a five-turn relevance-shift diagnostic, retention-rule sensitivity,
   and runtime-capacity probes.
-- Current limitation: this is not yet an end-to-end agent benchmark. Llama and
-  proxy-scorer checks are useful diagnostics, but broader model-family and
-  deployment-latency claims require additional non-saturated and trace-backed
-  evidence.
+- Current limitation: this is not yet an end-to-end agent benchmark. The
+  Llama-3.1-8B result is a same-protocol portability check, not a broad
+  model-family claim, and proxy-scorer deployment claims require controlled
+  quality evidence plus trace-backed latency evidence.
 
 ## Paper
 
@@ -107,8 +107,8 @@ open questions are:
 
 - whether the controlled proxy scorer preserves the repair effect under
   Random-K, Oldest-K, and Gold-K controls;
-- whether any non-saturated cross-model run is strong enough for a main-paper
-  model-family statement;
+- whether additional non-saturated cross-model runs can justify anything
+  beyond a cautious portability statement;
 - whether a real agentic or trace-scheduled benchmark can replace some
   synthetic evidence;
 - whether additional selector or retention-policy variants add enough signal to

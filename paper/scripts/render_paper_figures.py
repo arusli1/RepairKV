@@ -2370,13 +2370,7 @@ def render_h2o_compressor_breadth() -> bool:
 def render_model_transfer_breadth() -> bool:
     """Render the strongest locked model-transfer robustness check."""
 
-    candidates = [
-        FIGURE_DIR / "llama31_8b_6q_locked_n12_b18432_k64-96-128.csv",
-        PHASE13_DIR / "llama31_8b_6q_locked_n12_b18432_k64-96-128.csv",
-        PHASE11_DIR / "llama31_8b_4q_fullgrid_n24.csv",
-        PHASE10_DIR / "model_transfer_llama_3_1_8b_instruct__locked_n12.csv",
-        PHASE10_DIR / "model_transfer_qwen2_5_3b_instruct__locked_n12.csv",
-    ]
+    candidates = _model_transfer_candidate_paths()
     csv_path = next((path for path in candidates if path.exists()), None)
     if csv_path is None:
         for ext in ("pdf", "png"):
@@ -2430,6 +2424,19 @@ def render_model_transfer_breadth() -> bool:
     )
     save_figure(fig, "model_transfer_breadth")
     return True
+
+
+def _model_transfer_candidate_paths() -> list[Path]:
+    """Return cross-model artifacts in paper-readiness order."""
+
+    return [
+        FIGURE_DIR / "llama31_8b_4q_fullgrid_n24.csv",
+        PHASE11_DIR / "llama31_8b_4q_fullgrid_n24.csv",
+        FIGURE_DIR / "llama31_8b_6q_locked_n12_b18432_k64-96-128.csv",
+        PHASE13_DIR / "llama31_8b_6q_locked_n12_b18432_k64-96-128.csv",
+        PHASE10_DIR / "model_transfer_llama_3_1_8b_instruct__locked_n12.csv",
+        PHASE10_DIR / "model_transfer_qwen2_5_3b_instruct__locked_n12.csv",
+    ]
 
 
 def _load_policy_breadth_rows(path: Path, *, name: str) -> pd.DataFrame:

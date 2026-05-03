@@ -58,6 +58,11 @@ def _column_has_data(rows: list[dict[str, str]], column: str) -> bool:
     return any(row.get(column, "") not in ("", None) for row in rows)
 
 
+def _first_existing(paths: Iterable[Path]) -> Path:
+    paths = list(paths)
+    return next((path for path in paths if path.exists()), paths[0])
+
+
 def audit_proxy_pair(
     *,
     label: str,
@@ -264,7 +269,20 @@ def audit_all(repo_root: Path = REPO_ROOT) -> dict[str, object]:
     status = {
         "proxy_deployability": proxy,
         "specificity_refresh_boundary": audit_specificity(figures / "specificity_locked_n24_k48.csv"),
-        "llama_cross_model": audit_llama(figures / "llama31_8b_6q_locked_n12_b18432_k64-96-128.csv"),
+        "llama_cross_model": audit_llama(
+            _first_existing(
+                [
+                    figures / "llama31_8b_4q_fullgrid_n24.csv",
+                    repo_root / "phases" / "phase11_main_robustness" / "results" / "llama31_8b_4q_fullgrid_n24.csv",
+                    figures / "llama31_8b_6q_locked_n12_b18432_k64-96-128.csv",
+                    repo_root
+                    / "phases"
+                    / "phase13_iteration_framework"
+                    / "results"
+                    / "llama31_8b_6q_locked_n12_b18432_k64-96-128.csv",
+                ]
+            )
+        ),
         "policy_breadth": audit_policy_breadth(
             [
                 figures / "h2o_4q_fullgrid_n24.csv",

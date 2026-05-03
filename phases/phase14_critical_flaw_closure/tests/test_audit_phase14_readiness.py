@@ -335,6 +335,28 @@ def test_llama_audit_demotes_saturated_short_grid(tmp_path: Path) -> None:
     assert "n_below_main_claim_threshold" in result["failures"]
 
 
+def test_llama_audit_accepts_non_saturated_full_grid(tmp_path: Path) -> None:
+    path = tmp_path / "llama.csv"
+    _write_csv(
+        path,
+        [
+            {
+                "k": k,
+                "condition_a": 0.99,
+                "b_match": 0.48,
+                "idlekv": score,
+                "num_samples": 24,
+            }
+            for k, score in ((8, 0.56), (16, 0.63), (24, 0.94), (32, 0.99), (64, 1.00))
+        ],
+    )
+
+    result = audit.audit_llama(path)
+
+    assert result["status"] == "candidate_main_model_evidence"
+    assert result["failures"] == []
+
+
 def test_controlled_proxy_evaluator_rejects_high_control_lift() -> None:
     decisions = proxy_eval.evaluate_rows(
         [
