@@ -7,9 +7,9 @@ new turn text reveals what matters, the system can use the idle window to
 restore selected evicted KV rows before decoding resumes.
 
 The paper studies this under matched resumed active-cache budgets. IdleKV
-keeps evicted KV rows in an offloaded store, scores candidates after the
-next-turn relevance signal is known, restores a fixed budget `K`, and compares
-against a no-repair baseline with the same active-cache budget.
+keeps evicted KV rows in an off-device evicted-KV store, scores candidates
+after the next-turn relevance signal is known, restores a fixed budget `K`,
+and compares against a no-repair baseline with the same active-cache budget.
 
 ## Current Status
 
@@ -96,7 +96,7 @@ smoke-only data in the main paper.
 ## Evidence Conventions
 
 - `Matched` means no repair under the same resumed active-cache budget.
-- `IdleKV` means current next-turn signal conditioned restore from the
+- `IdleKV` means restore conditioned on the current next-turn signal from the
   offloaded evicted-KV store.
 - `Gold-K` is a benchmark-metadata hindsight reference, not an implementable
   algorithm.

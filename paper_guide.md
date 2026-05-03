@@ -96,8 +96,8 @@ Systems thesis:
 
 > A compressed paused KV cache can be repaired between turns once the next
 > turn supplies a new relevance signal. This uses otherwise idle time to revise
-> active memory under the same resumed active-cache budget, supporting dynamic
-> cache maintenance as a resource-adaptive inference primitive.
+> the active cache under the same resumed active-cache budget, supporting dynamic
+> cache maintenance as a tiered-KV runtime primitive.
 
 Experimental thesis:
 
@@ -111,6 +111,8 @@ Keep broader claims framed as implications or research agenda:
 
 - Good: "This suggests idle-window cache maintenance is a useful primitive for
   resource-adaptive agent inference."
+- Good: "IdleKV is a KV promotion operator for tiered-cache runtimes,
+  conditioned on the newly available next-turn signal."
 - Good: "The benchmark instantiates next-turn relevance as a query, but the
   systems problem is broader: any new turn text or tool result can change what
   past context matters."
@@ -194,11 +196,22 @@ Appendix:
 Use paper-facing terminology, not internal repo terminology.
 
 - "key-value (KV) cache": define on first use.
+- Do not open the introduction with venue-shaped phrases such as "adaptive
+  inference" unless the concrete systems problem has already been stated.
+  Lead with the KV-cache lifecycle: active GPU cache, off-device/warm tier,
+  idle window, and pre-resume promotion.
 - "active cache": KV rows resident and visible to the next decode.
 - "host-memory evicted-KV store" or "offloaded evicted-KV store": KV rows not
   active but retained for possible restoration. Use "CPU" only when describing
   this prototype's implementation or measured CPU-GPU transfers; use "host
   memory" or "offloaded store" for framework-level prose.
+- "off-device tier" or "offloaded evicted-KV store": acceptable
+  framework-level terms. In implementation prose, prefer "host-memory tier"
+  when the paper is specifically describing this prototype.
+- "promotion": preferred systems term for moving retained KV back into the
+  active cache. "Repair" remains the paper's conceptual term for fixing a stale
+  active allocation, but define it through promotion rather than leaving it as
+  a metaphor.
 - "restore budget `K`": number of evicted context tokens restored before `Q2`
   decoding. Clarify that it is not an anchor count or byte budget.
 - "matched no-repair": baseline that gives `Q2` the same number of active
