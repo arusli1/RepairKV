@@ -6,6 +6,10 @@ from pathlib import Path
 from phases.phase14_critical_flaw_closure.scripts import audit_phase14_readiness as audit
 from phases.phase14_critical_flaw_closure.scripts import evaluate_phase14_smokes as smoke_eval
 from phases.phase14_critical_flaw_closure.scripts import evaluate_proxy_controlled_smoke as proxy_eval
+from phases.phase14_critical_flaw_closure.scripts.monitor_proxy_progress import (
+    parse_proxy_log,
+    render_summary,
+)
 
 
 def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
@@ -167,6 +171,28 @@ def test_controlled_proxy_evaluator_accepts_clean_controlled_proxy() -> None:
     )
 
     assert decisions[0]["status"] == "controlled_proxy_smoke_pass"
+
+
+def test_proxy_progress_monitor_summarizes_wrapped_log_events() -> None:
+    progress, summaries = parse_proxy_log(
+        "\n".join(
+            [
+                "[mq_niah_4q_split_14_to_23:ex001] A=1.000 B=0.000 "
+                "k=48:Bm=0.000/I=1.000/R=0.000/O=0.000/Or=1.000 "
+                "k=96:Bm=0.000/I=1.000/R=0.000/O=0.000/Or=1.000",
+                "[mq_niah_4q_split_24_to_13:ex001] A=1.000 B=0.500 "
+                "k=48:Bm=0.500/I=1.000/R=0.500/O=0.500/Or=1.000 "
+                "k=96:Bm=0.500/I=1.000/R=0.500/O=0.500/Or=1.000",
+            ]
+        )
+    )
+
+    assert progress == {"mq_niah_4q": 1}
+    assert summaries[("mq_niah_4q", 48)].count == 2
+    assert summaries[("mq_niah_4q", 48)].mean("b_match") == 0.25
+    rendered = render_summary(progress, summaries)
+    assert "K=96" in rendered
+    assert "max_control_lift=0.000" in rendered
 
 
 def test_refresh_evaluator_classifies_refresh_boundary() -> None:
