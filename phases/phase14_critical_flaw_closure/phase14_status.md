@@ -64,6 +64,9 @@ Last updated: 2026-05-03 20:33 UTC.
   multi-turn result narration, demoted saturated Llama numbers out of main
   prose, and split the limitations paragraph so the trace-scheduled systems
   gap and tiered-KV scaling implication are separate.
+- Added a concise setup sentence stating why split-query MQ-NIAH is used:
+  control over annotated future-relevant spans, explicit second-turn relevance
+  shift, and shared turn-`N` history across conditions.
 
 ## Validation
 

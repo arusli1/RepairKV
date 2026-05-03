@@ -342,6 +342,9 @@ the name denotes how many key/value needles are queried across the two
 turns.
 Larger variants ask for more values and use longer decode budgets, but
 do not change the benchmark family.
+The point of this synthetic family is control rather than realism: the
+future-relevant spans are annotated, the second-turn relevance shift is
+explicit, and every condition shares the same turn-$N$ history.
 For each variant, we pool balanced, non-recency-favored partitions whose
 $Q_2$ side excludes the tail-recent needles; Appendix
 Figure~\ref{fig:app-partition-endpoints} summarizes the exact splits.
