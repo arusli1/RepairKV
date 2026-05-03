@@ -539,10 +539,10 @@ clarifies the protocol better than prose.
 
 Reference pattern:
 
-- QUEST uses Algorithm 1 only after Section 3 has introduced the page-selection
-  problem and Figure 5 has shown the workflow. The algorithm is implementation
-  facing: it lists inputs, metadata updates, and the self-attention-time
-  selection path.
+- QUEST uses Algorithm 1 only after Section 3 has introduced the
+  page-selection problem and its workflow figure has established the data path.
+  The algorithm is implementation facing: it lists inputs, metadata updates,
+  and the self-attention-time selection path.
 - ShadowKV uses Algorithm 1/2 inside the method section after observations and
   insights establish why the algorithm exists. The algorithms are paired with
   short "Pre-filling" and "Decoding" paragraphs.

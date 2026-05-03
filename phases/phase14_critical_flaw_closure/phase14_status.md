@@ -47,7 +47,7 @@ Last updated: 2026-05-03 20:50 UTC.
 - Added a peer-reviewed/archival agent-efficiency latency citation to the
   introduction and latency discussion: published web-agent measurements report
   API/environment wait components, with environment interaction up to `53.7%`
-  of total latency. The paper now frames Figure 5 as capacity evidence rather
+  of total latency. The paper now frames Figure 6 as capacity evidence rather
   than an empirical tool-call duration distribution.
 - Added a `paper_guide.md` rule for future runtime/idle-window edits: cite
   agent-efficiency measurements as web-agent API/environment-wait evidence,
