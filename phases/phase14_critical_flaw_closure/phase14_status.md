@@ -69,6 +69,9 @@ Last updated: 2026-05-03 20:33 UTC.
 - Added a concise setup sentence stating why split-query MQ-NIAH is used:
   control over annotated future-relevant spans, explicit second-turn relevance
   shift, and shared turn-`N` history across conditions.
+- Split dense runtime/discussion prose into technical run-in labels for the
+  capacity envelope, tiered-cache scaling implication, and future benchmark
+  axes.
 
 ## Validation
 
@@ -114,6 +117,9 @@ Last updated: 2026-05-03 20:33 UTC.
   log scan again found no undefined citations or overfull boxes, and the PDF
   text scan found no visible internal run vocabulary beyond bibliography
   titles.
+- Rebuilt `paper/main.pdf` after adding runtime/discussion labels; log scan
+  again found no undefined citations or overfull boxes, and paper-language
+  tests passed.
 
 ## Paper Economy Audit
 
