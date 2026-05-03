@@ -1,6 +1,6 @@
 # Phase 14 Status
 
-Last updated: 2026-05-03 20:00 UTC.
+Last updated: 2026-05-03 20:04 UTC.
 
 ## Implemented
 
@@ -41,6 +41,10 @@ Last updated: 2026-05-03 20:00 UTC.
   `paper_guide.md`: removed repeated workflow examples, shortened method-scope
   exclusions, condensed main split descriptions, trimmed redundant runtime
   caveats, and made the trace-scheduled systems-evaluation gap explicit.
+- Added a dormant, tested paper-figure hook for the controlled proxy locked
+  run. Once `proxy_controlled_locked_n100.csv` exists, `paper/scripts/
+  render_paper_figures.py` can render `proxy_controlled_frontier.pdf`, and the
+  appendix has an `\IfFileExists` block ready to include it.
 - Rebuilt `paper/main.pdf` with `latexmk -pdf -interaction=nonstopmode
   -halt-on-error main.tex`; the PDF rebuilt successfully.
 - Updated `README.md` so the active closure phase points to Phase 14.
@@ -62,6 +66,12 @@ Last updated: 2026-05-03 20:00 UTC.
     are underfull vboxes from float/page layout
 - Rebuilt `paper/main.pdf` again after the final concision trim; log scan
   again found no undefined citations or overfull boxes.
+- `.venv/bin/python -m py_compile paper/scripts/render_paper_figures.py phases/phase9_experiment_deepening/tests/test_paper_figure_renderer.py`
+- `.venv/bin/python -m pytest phases/phase9_experiment_deepening/tests/test_paper_figure_renderer.py -q`
+  - `10 passed`
+- Rebuilt `paper/main.pdf` after adding the dormant proxy-controlled appendix
+  hook; the optional figure is absent until the locked CSV exists, so the PDF
+  remains 12 pages.
 
 ## Initial Readiness Audit
 

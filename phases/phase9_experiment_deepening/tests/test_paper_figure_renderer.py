@@ -150,6 +150,30 @@ def test_runtime_repair_grid_orders_restore_budget_and_candidates() -> None:
     )
 
 
+def test_proxy_controlled_renderer_prefers_phase14_locked_csv(tmp_path, monkeypatch) -> None:
+    figure_dir = tmp_path / "figures"
+    phase14_dir = tmp_path / "phase14"
+    figure_dir.mkdir()
+    phase14_dir.mkdir()
+    csv_path = phase14_dir / "proxy_controlled_locked_n100.csv"
+    csv_path.write_text(
+        "task,k,b_match,random_k,oldest_k,idlekv,gold_k\n"
+        "clean_suite,48,0.20,0.21,0.20,0.70,0.90\n"
+        "clean_suite,96,0.22,0.23,0.22,0.85,1.00\n"
+        "mq_niah_6q_clean_suite,48,0.35,0.36,0.35,0.65,0.92\n"
+        "mq_niah_6q_clean_suite,96,0.40,0.41,0.40,0.80,1.00\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(renderer, "FIGURE_DIR", figure_dir)
+    monkeypatch.setattr(renderer, "PHASE14_DIR", phase14_dir)
+    renderer.configure_matplotlib()
+
+    assert renderer.render_proxy_controlled_frontier() is True
+    assert (figure_dir / "proxy_controlled_frontier.pdf").exists()
+    assert (figure_dir / "proxy_controlled_frontier.png").exists()
+
+
 def test_policy_breadth_renderer_requires_streamingllm_full_grid(tmp_path, monkeypatch) -> None:
     figure_dir = tmp_path / "figures"
     phase11_dir = tmp_path / "phase11"

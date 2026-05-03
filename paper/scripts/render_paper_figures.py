@@ -34,6 +34,7 @@ PHASE10_DIR = REPO_DIR / "phases" / "phase10_expansion" / "results"
 PHASE11_DIR = REPO_DIR / "phases" / "phase11_main_robustness" / "results"
 PHASE12_DIR = REPO_DIR / "phases" / "phase12_policy_breadth" / "results"
 PHASE13_DIR = REPO_DIR / "phases" / "phase13_iteration_framework" / "results"
+PHASE14_DIR = REPO_DIR / "phases" / "phase14_critical_flaw_closure" / "results"
 PHASE4_RUNTIME_DIR = REPO_DIR / "phases" / "phase4_eviction_buffer" / "results" / "runtime_capacity"
 PHASE8_STREAMING_DIR = (
     REPO_DIR / "phases" / "phase8_streaming_strict_cap" / "results" / "two_tier_snapkv"
@@ -1078,6 +1079,109 @@ def render_proxy_latency_tradeoff() -> bool:
         fontsize=5.75,
     )
     save_figure(fig, "proxy_latency_tradeoff")
+    return True
+
+
+def render_proxy_controlled_frontier() -> bool:
+    """Render locked controlled proxy scorer quality if Phase 14 results exist."""
+
+    path = (
+        FIGURE_DIR / "proxy_controlled_locked_n100.csv"
+        if (FIGURE_DIR / "proxy_controlled_locked_n100.csv").exists()
+        else PHASE14_DIR / "proxy_controlled_locked_n100.csv"
+    )
+    if not path.exists():
+        for ext in ("pdf", "png"):
+            (FIGURE_DIR / f"proxy_controlled_frontier.{ext}").unlink(missing_ok=True)
+        return False
+
+    df = load_numeric_csv(path)
+    required = {"task", "k", "b_match", "random_k", "oldest_k", "idlekv", "gold_k"}
+    if missing := required.difference(df.columns):
+        raise ValueError(f"controlled proxy CSV missing columns: {sorted(missing)}")
+
+    task_labels = {
+        "clean_suite": "4Q",
+        "mq_niah_6q_clean_suite": "6Q",
+    }
+    panels = [
+        (label, df.loc[df["task"] == task].sort_values("k"))
+        for task, label in task_labels.items()
+        if not df.loc[df["task"] == task].empty
+    ]
+    if not panels:
+        for ext in ("pdf", "png"):
+            (FIGURE_DIR / f"proxy_controlled_frontier.{ext}").unlink(missing_ok=True)
+        return False
+
+    fig, axes_raw = plt.subplots(1, len(panels), figsize=(COLUMN_WIDTH_IN, 1.72), constrained_layout=False)
+    axes = np.atleast_1d(axes_raw)
+    fig.subplots_adjust(left=0.14, right=0.985, top=0.84, bottom=0.28, wspace=0.26)
+
+    series = [
+        ("b_match", "Matched", _line_style("Matched")),
+        ("random_k", "Random-K", _line_style("Random-K")),
+        ("oldest_k", "Oldest-K", _line_style("Oldest-K")),
+        ("idlekv", "IdleKV", _line_style("IdleKV")),
+        ("gold_k", "Gold-K", _line_style("Gold-K")),
+    ]
+    handles: list[Line2D] = []
+    for ax, (label, panel) in zip(axes, panels, strict=True):
+        for column, series_label, style in series:
+            ax.plot(
+                panel["k"],
+                panel[column],
+                label=series_label,
+                color=str(style["color"]),
+                marker=str(style["marker"]),
+                linestyle=style["linestyle"],
+                linewidth=float(style["linewidth"]),
+                markersize=2.8,
+                zorder=4 if series_label == "IdleKV" else 3,
+            )
+            if ax is axes[0]:
+                handles.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color=str(style["color"]),
+                        marker=str(style["marker"]),
+                        linestyle=style["linestyle"],
+                        linewidth=float(style["linewidth"]),
+                        markersize=3.0,
+                        label=series_label,
+                    )
+                )
+        ax.text(
+            0.03,
+            0.95,
+            label,
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=6.8,
+            fontweight="bold",
+            bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.88, "pad": 0.5},
+        )
+        ax.set_xlim(44, 132)
+        ax.set_xticks([48, 64, 80, 96, 128])
+        ax.set_ylim(0.0, 1.04)
+        ax.set_yticks([0.0, 0.5, 1.0])
+        _format_axes(ax, x_label="restore budget $K$")
+    axes[0].set_ylabel("proxy $Q_2$ score", labelpad=1.0)
+    fig.legend(
+        handles=handles,
+        loc="upper center",
+        bbox_to_anchor=(0.53, 0.995),
+        ncol=5,
+        frameon=False,
+        handlelength=0.95,
+        handletextpad=0.25,
+        columnspacing=0.45,
+        borderaxespad=0.0,
+        fontsize=5.35,
+    )
+    save_figure(fig, "proxy_controlled_frontier")
     return True
 
 
@@ -2488,6 +2592,7 @@ def generated_assets() -> Iterable[Path]:
         "query_count_breadth",
         "streaming_spill_heatmap",
         "proxy_latency_tradeoff",
+        "proxy_controlled_frontier",
         "runtime_capacity_curve",
         "runtime_repair_scaling",
         "partition_endpoint_dotplot",
@@ -2509,6 +2614,7 @@ def main() -> None:
     render_query_count_breadth()
     render_streaming_spill_heatmap()
     render_proxy_latency_tradeoff()
+    render_proxy_controlled_frontier()
     render_runtime_capacity_curve()
     render_runtime_repair_scaling()
     render_partition_endpoint_dotplot()
