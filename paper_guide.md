@@ -85,6 +85,15 @@ style contract unless the venue instructions change.
 - The AdaptFM scope explicitly includes dynamic KV cache compression, runtime
   systems for flexible computation, benchmarking/profiling across resource
   budgets, and quality-resource tradeoff analysis.
+- The main venue-risk is not that KV cache systems are out of scope; the CfP
+  explicitly includes them. The risk is reader framing: avoid sounding like a
+  generic serving paper. Present IdleKV as adaptive inference-time state
+  management under a resource budget. The model weights are fixed, but the
+  runtime adapts which historical KV state is active after cross-turn relevance
+  shift.
+- Do not frame the paper as PEFT, fine-tuning, domain adaptation, or continual
+  learning. Those are adjacent meanings of "adaptation," but not this paper's
+  contribution.
 
 ## Overall Thesis And Experimental Thesis
 
