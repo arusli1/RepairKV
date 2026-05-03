@@ -1,6 +1,6 @@
 # Phase 14 Status
 
-Last updated: 2026-05-03 19:58 UTC.
+Last updated: 2026-05-03 20:00 UTC.
 
 ## Implemented
 
@@ -37,6 +37,10 @@ Last updated: 2026-05-03 19:58 UTC.
 - Added a `paper_guide.md` rule for future runtime/idle-window edits: cite
   agent-efficiency measurements as web-agent API/environment-wait evidence,
   not as a universal tool-call distribution.
+- Ran a focused ramble/hole pass against `paper/outline.md` and
+  `paper_guide.md`: removed repeated workflow examples, shortened method-scope
+  exclusions, condensed main split descriptions, trimmed redundant runtime
+  caveats, and made the trace-scheduled systems-evaluation gap explicit.
 - Rebuilt `paper/main.pdf` with `latexmk -pdf -interaction=nonstopmode
   -halt-on-error main.tex`; the PDF rebuilt successfully.
 - Updated `README.md` so the active closure phase points to Phase 14.
@@ -56,6 +60,8 @@ Last updated: 2026-05-03 19:58 UTC.
   - rebuilt `paper/main.pdf` successfully after the citation/framing edits
   - log scan found no undefined citations or overfull boxes; remaining warnings
     are underfull vboxes from float/page layout
+- Rebuilt `paper/main.pdf` again after the final concision trim; log scan
+  again found no undefined citations or overfull boxes.
 
 ## Initial Readiness Audit
 

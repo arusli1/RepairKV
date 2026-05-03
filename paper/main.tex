@@ -548,8 +548,6 @@ web-agent API and environment waits~\citep{agent_efficiency}, but they
 are capacity measurements: a real scheduler would need trace-level
 tool/environment waits, queue state, and overlap to decide when repair
 can run.
-The colorbar ticks use a 10\% slack convention and are representative
-capacity checkpoints, not an empirical tool-call distribution.
 The stage-wise component split shows that candidate scanning dominates
 large stores, while top-$K$ selection and selected-KV copy/reinsertion
 are not the bottleneck.
@@ -601,27 +599,24 @@ We also do not yet include a learned selector, a latency-normalized
 full-budget $Q_2$-time reselection frontier, or a full-prefix recompute
 baseline.
 The curves match the resumed active GPU KV budget, not total
-host-plus-device storage, because repair assumes an offloaded evicted-KV
-store.
+host-plus-device storage.
 Figure~\ref{fig:policy-breadth} gives accumulated-attention and
 sink-plus-recent first-stage retention checks, and Appendix
 Figure~\ref{fig:app-transfer-runtime} gives one same-protocol
 Llama-3.1-8B-Instruct MQ-NIAH-6Q portability check, but broader
 retention-rule and multi-model transfer remain open.
-Future systems should also treat the off-device store as finite: in our
-Qwen-shaped accounting, one BF16 KV row is 56\,KiB, so 4M searchable
-rows already imply about 240\,GB before metadata.
-Existing tiered-cache systems therefore motivate a two-level retention
-problem: a strict device-resident policy chooses the active KV budget,
-while a looser off-device policy decides which evicted rows remain
-searchable, compressed, summarized, or recomputable.
+Because repair assumes an offloaded evicted-KV store, it also creates a
+two-level retention problem.
+A strict device-resident policy chooses the active KV budget, while a
+looser off-device policy decides which evicted rows remain searchable,
+compressed, summarized, or recomputable; in our Qwen-shaped accounting,
+4M searchable rows already imply about 240\,GB before metadata.
 \idlekv{} provides evidence for the middle operation in this hierarchy:
 turn-conditioned promotion from the warm tier during an idle gap.
 This is a hardware-facing implication rather than a hardware result: the
 measurements motivate tiered-KV interfaces that expose scoring,
 promotion, and demotion, but they do not establish area, energy, or
-bandwidth claims for any SRAM/eDRAM/DRAM design.
-Nor does \idlekv{} solve the off-device retention policy itself.
+bandwidth claims, and \idlekv{} does not solve off-device retention.
 Future benchmarks should therefore vary the number, timing, and conflict
 structure of new-turn constraints: the 2Q and 8Q breadth checks suggest
 that easy regimes can saturate while stricter multi-query turns expose
