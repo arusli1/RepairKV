@@ -29,6 +29,9 @@ Last updated: 2026-05-03 20:33 UTC.
   the tmux log without touching the GPU run.
 - Extended the log monitor with a rough ETA based on completed example-split
   rows and the configured 4Q/6Q split counts.
+- Added `postprocess_proxy_controlled_locked.sh` to make the finish sequence
+  repeatable: evaluate the locked CSV, run the readiness audit, rerender paper
+  figures, rebuild `paper/main.pdf`, and scan for blocking LaTeX warnings.
 - Added pre-specified locked-run wrappers for calibrated Llama and selector
   variants, used only after their smoke gates pass.
 - Patched the shared Phase 9 artifact summarizer to export
@@ -82,6 +85,7 @@ Last updated: 2026-05-03 20:33 UTC.
 ## Validation
 
 - `bash -n phases/phase14_critical_flaw_closure/scripts/*.sh`
+- `bash -n phases/phase14_critical_flaw_closure/scripts/postprocess_proxy_controlled_locked.sh`
 - `.venv/bin/python -m py_compile phases/phase14_critical_flaw_closure/scripts/*.py phases/phase9_experiment_deepening/scripts/phase9_artifact_summary.py`
 - `.venv/bin/python -m pytest phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py -q`
   - `13 passed`
