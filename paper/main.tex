@@ -956,19 +956,13 @@ duplicated as wide tables.
     \includegraphics[width=\linewidth]{figures/proxy_latency_tradeoff.pdf}
     \centerline{\small (b) Fixed-$K$ scorer-latency probe}
   \end{minipage}
-  \caption{Supplementary portability and runtime diagnostics. Left: the
-  gray band spans matched no-repair and content-agnostic restore
-  controls; blue and orange marks show \idlekv{} and $\goldk{}$ for a
-  Llama-3.1-8B-Instruct same-protocol 6Q appendix check. Right: ``move
-  only'' places the matched no-repair score at the measured
-  transfer-and-reinjection lower bound from the same scorer artifact. In
-  paired $n{=}100$, $K=96$ probes, the proxy
-  remains above matched no-repair on both 4Q and 6Q while reducing p50
-  total scorer latency from 6.38\,s to 0.83\,s and from 6.99\,s to
-  0.71\,s, respectively. Appendix
-  Figure~\ref{fig:app-runtime-capacity} gives the larger synthetic
-  move-and-inject capacity grid, while Figure~\ref{fig:runtime-envelope}
-  reports the main runtime-capacity grid.}
+  \caption{Supplementary portability and scorer-latency diagnostics.
+  Left: Llama-3.1-8B-Instruct same-protocol 6Q check, with the gray band
+  spanning matched no-repair and content-agnostic restores. Right:
+  fixed-$K$ exact/proxy scorer probe; in paired $n{=}100$, $K=96$
+  probes, the proxy remains above matched no-repair while reducing p50
+  total scorer latency from 6.38\,s to 0.83\,s on 4Q and from
+  6.99\,s to 0.71\,s on 6Q.}
   \label{fig:app-transfer-runtime}
 \end{figure*}
 }{}}{}

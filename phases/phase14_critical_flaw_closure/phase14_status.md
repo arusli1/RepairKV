@@ -1,6 +1,6 @@
 # Phase 14 Status
 
-Last updated: 2026-05-03 20:05 UTC.
+Last updated: 2026-05-03 20:09 UTC.
 
 ## Implemented
 
@@ -48,6 +48,8 @@ Last updated: 2026-05-03 20:05 UTC.
 - Strengthened the idle-window evidence with a second agent-systems citation:
   AgentCgroup reports OS-level execution including tool calls and
   container/agent initialization as `56-74%` of coding-agent task latency.
+- Tightened an overlong appendix portability/runtime caption without changing
+  the plotted evidence.
 - Rebuilt `paper/main.pdf` with `latexmk -pdf -interaction=nonstopmode
   -halt-on-error main.tex`; the PDF rebuilt successfully.
 - Updated `README.md` so the active closure phase points to Phase 14.
@@ -77,6 +79,8 @@ Last updated: 2026-05-03 20:05 UTC.
   remains 12 pages.
 - Rebuilt `paper/main.pdf` after adding the AgentCgroup citation; log scan
   found no undefined citations or overfull boxes.
+- Rebuilt `paper/main.pdf` after the appendix caption trim; log scan found no
+  undefined citations or overfull boxes.
 
 ## Initial Readiness Audit
 
