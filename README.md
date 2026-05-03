@@ -22,9 +22,10 @@ and compares against a no-repair baseline with the same active-cache budget.
 - Critical-flaw closure and next experiments are tracked in
   `phases/phase14_critical_flaw_closure/phase14_plan.md`; promote only locked
   runs that pass written gates.
-- Active Phase 14 questions are proxy-scorer deployability, Refresh-K boundary
-  framing, calibrated Llama portability, selector variants, and whether any
-  additional evidence should replace rather than merely add to the main paper.
+- Active Phase 14 questions are scalable proxy-scorer validity, Refresh-K
+  boundary framing, calibrated Llama portability, selector variants, and
+  whether any additional evidence should replace rather than merely add to the
+  main paper.
 
 ## Repository Map
 
@@ -112,7 +113,7 @@ smoke-only data in the main paper.
   offloaded rows using the next-turn signal; it is a method-boundary reference,
   not a deployable full-prefix recompute baseline.
 - `Proxy` scoring uses appended next-turn state as a cheaper scorer. Treat it
-  as deployment-facing evidence only when it passes controlled Random-K,
+  as scalable-scorer evidence only when it passes controlled Random-K,
   Oldest-K, and Gold-K gates.
 
 ## Git Hygiene
