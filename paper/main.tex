@@ -84,7 +84,9 @@ GPU cache even when the application-visible context is much larger.
 In batch-1, local-GPU, or dedicated-tenant agent workflows, decoding is
 interleaved with file reads, tests, retrieval, remote APIs, and other
 external actions that pause generation for milliseconds to seconds while
-the KV state remains useful.
+the KV state remains useful; recent web-agent measurements find that
+environment interaction alone can account for up to 53.7\% of
+end-to-end agent latency~\citep{agent_efficiency}.
 Those pauses are usually treated as dead time, and cache compression is
 usually treated as a one-shot active-cache decision.
 We argue that the idle interval between turns exposes a different cache
@@ -99,9 +101,9 @@ compressed cache after the next-turn query is revealed but before
 decoding resumes.
 
 \paragraph{Setting.}
-For long-context agents, relevance over a fixed context can shift across
-turns after a tool result, user correction, file change, failed test,
-topic shift, or follow-up question.
+For long-context agents, the relevant subset of a fixed context can
+shift after the first answer as later turns introduce new evidence or
+constraints.
 Recent analysis shows that KV compression can sharply degrade
 instructions and facts that later become important~\citep{pitfalls}.
 The core failure is temporal: the cache is allocated before the
@@ -230,9 +232,9 @@ revealed.
 It is intentionally a mechanism study: one paused request on one GPU, a
 single host-memory tier, the full $Q_2$ signal known before resumed
 decoding, and a pre-materialized evicted-KV store.
-It excludes routing, request migration, disaggregated prefill/decode,
-remote or disk fetch, queueing, overlap with resumed generation, and
-off-device retention contention.
+Distributed-serving concerns such as routing, request migration,
+queueing, remote or disk fetch, overlap with resumed generation, and
+off-device retention contention are left to future systems work.
 
 \begin{figure}[t]
 \centering
@@ -325,10 +327,9 @@ larger variants ask for more queried values and use longer decode
 budgets, but do not change the benchmark family.
 The names 4Q/6Q/8Q mean that four, six, or eight key/value needles are
 queried across the two turns.
-For each variant, we pool balanced partitions that withhold the
-tail-recent needles from $Q_2$: three $2|2$ partitions for MQ-NIAH-4Q,
-four $3|3$ partitions for MQ-NIAH-6Q, and five $4|4$ partitions for
-MQ-NIAH-8Q.
+For each variant, we pool balanced partitions whose $Q_2$ side excludes
+the tail-recent needles: three partitions for MQ-NIAH-4Q, four for
+MQ-NIAH-6Q, and five for MQ-NIAH-8Q.
 This avoids a trivial recency advantage for the no-repair baseline while
 keeping the future-query mechanism measurable; Appendix
 Figure~\ref{fig:app-partition-endpoints} summarizes the exact splits.
@@ -527,7 +528,8 @@ The $Q_2$-appended-state proxy reduces paired 4Q/6Q p50 to
 $0.83$/$0.71$\,s while still beating $\bmatch$ in paired $n{=}100$
 probes.
 The systems question is whether a scalable score/select/promote path can
-fit inside realistic idle windows.
+fit inside realistic idle windows, not whether the current exact scorer
+is deployable.
 Figure~\ref{fig:runtime-envelope} reports that path as a single-node,
 component-summed p95 envelope: a chunked GPU selector streams
 Qwen-shaped BF16 key rows from pinned host memory, scores a length-64
@@ -541,6 +543,11 @@ at most $6.1$\,ms, so candidate-store size is the dominant scaling axis.
 At $K=5000$, p95 grows from $50.0$\,ms at 32K candidates to $1.20$\,s
 at 1M and $4.64$\,s at 4M; the 4M endpoint corresponds to about
 240\,GB of offloaded Qwen-shaped BF16 KV.
+These values sit within the seconds-scale regime reported for
+web-agent API and environment waits~\citep{agent_efficiency}, but they
+are capacity measurements: a real scheduler would need trace-level
+tool/environment waits, queue state, and overlap to decide when repair
+can run.
 The colorbar ticks use a 10\% slack convention and are representative
 capacity checkpoints, not an empirical tool-call distribution.
 The stage-wise component split shows that candidate scanning dominates
@@ -583,11 +590,16 @@ recomputation is disallowed.
 Repair should help when new turn information changes relevance, the base
 eviction policy still has real choice beyond recency, and the idle gap is
 long enough to cover repair overhead.
-The present evidence is intentionally narrow: one primary model in the
-main evaluation, one primary first-stage retention rule, one synthetic split-query
-family, fixed full-cache-generated turn-$N$ transcripts, no learned
-selector, no latency-normalized full-budget $Q_2$-time reselection
-frontier, and no full-prefix recompute baseline.
+The present evidence is intentionally narrow: the main quality figures
+use one primary model, one primary first-stage retention rule, one
+synthetic split-query family, and fixed full-cache-generated turn-$N$
+transcripts.
+The central missing systems experiment is trace-scheduled: repair should
+be tested against real tool/environment wait distributions, queue state,
+and overlap.
+We also do not yet include a learned selector, a latency-normalized
+full-budget $Q_2$-time reselection frontier, or a full-prefix recompute
+baseline.
 The curves match the resumed active GPU KV budget, not total
 host-plus-device storage, because repair assumes an offloaded evicted-KV
 store.
@@ -643,7 +655,7 @@ by how efficiently they decode, but by how well they maintain KV state
 between turns.
 
 % -----------------------------------------------------------------------
-\begin{thebibliography}{27}
+\begin{thebibliography}{28}
 
 \bibitem[Abhyankar et~al.(2024)]{infercept}
 Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and Zhang, Y.
@@ -659,6 +671,12 @@ Bai, Y., Lv, X., Zhang, J., Lyu, H., Tang, J., Huang, Z., Du, Z.,
   understanding.
 \newblock In \emph{Proceedings of the 62nd Annual Meeting of the
   Association for Computational Linguistics (ACL)}, 2024.
+
+\bibitem[Bian et~al.(2025)]{agent_efficiency}
+Bian, S., Yan, M., Jayarajan, A., Pekhimenko, G., and Venkataraman, S.
+\newblock What limits agentic systems efficiency?
+\newblock In \emph{NeurIPS 2025 Workshop on Scaling Environments for
+  Agents (SEA)}, 2025.
 
 \bibitem[Chen et~al.(2025)]{pitfalls}
 Chen, A., Geh, R., Grover, A., Van den Broeck, G., and Israel, D.

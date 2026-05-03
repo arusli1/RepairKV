@@ -310,6 +310,18 @@ Never include:
 - "bridge", "extension", "clean suite", "full suite", or run nicknames.
 - "perfect data", "best data", or hype language.
 
+Runtime/idle-window framing:
+
+- Use peer-reviewed or archival agent-efficiency measurements when arguing
+  that paused agent workflows expose nontrivial wait time. The current main
+  citation is Bian et al., "What Limits Agentic Systems Efficiency?", which
+  decomposes web-agent latency into LLM API and environment components and
+  reports environment interaction as up to 53.7% of total latency.
+- Phrase this as web-agent API/environment wait evidence, not as a measured
+  distribution of all tool-call durations.
+- Treat the runtime plots as capacity envelopes unless an experiment is driven
+  by real trace-level waits, queue state, and overlap with resumed generation.
+
 ## Figure Strategy
 
 AdaptFM short workshop papers and related KV-cache systems papers are

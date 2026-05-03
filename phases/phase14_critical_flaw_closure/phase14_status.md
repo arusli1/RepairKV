@@ -1,6 +1,6 @@
 # Phase 14 Status
 
-Last updated: 2026-05-03 19:49 UTC.
+Last updated: 2026-05-03 19:58 UTC.
 
 ## Implemented
 
@@ -29,6 +29,14 @@ Last updated: 2026-05-03 19:49 UTC.
 - Tightened the paper latency paragraph and conclusion around the distinction
   between exact research scoring, proxy scoring, and scalable tiered-KV
   score/select/promote mechanics.
+- Added a peer-reviewed/archival agent-efficiency latency citation to the
+  introduction and latency discussion: published web-agent measurements report
+  API/environment wait components, with environment interaction up to `53.7%`
+  of total latency. The paper now frames Figure 5 as capacity evidence rather
+  than an empirical tool-call duration distribution.
+- Added a `paper_guide.md` rule for future runtime/idle-window edits: cite
+  agent-efficiency measurements as web-agent API/environment-wait evidence,
+  not as a universal tool-call distribution.
 - Rebuilt `paper/main.pdf` with `latexmk -pdf -interaction=nonstopmode
   -halt-on-error main.tex`; the PDF rebuilt successfully.
 - Updated `README.md` so the active closure phase points to Phase 14.
@@ -43,6 +51,11 @@ Last updated: 2026-05-03 19:49 UTC.
   - `10 passed`
 - `.venv/bin/python -m pytest phases/phase6_repair/tests/test_runner.py phases/phase6_repair/tests/test_reporting.py -q`
   - `37 passed`
+- `latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex` from
+  `paper/`
+  - rebuilt `paper/main.pdf` successfully after the citation/framing edits
+  - log scan found no undefined citations or overfull boxes; remaining warnings
+    are underfull vboxes from float/page layout
 
 ## Initial Readiness Audit
 
@@ -115,6 +128,8 @@ Purpose:
   path.
 - Settings: 4Q and 6Q, `K={48,64,80,96,128}`, `n=100`, proxy scorer,
   `A/B/B_match/Random-K/Oldest-K/IdleKV/Oracle-K`.
+- Progress at 2026-05-03 19:57 UTC: 4Q is active, around example `19/100`
+  across three splits; 6Q has not started.
 
 Promotion decision after completion:
 
