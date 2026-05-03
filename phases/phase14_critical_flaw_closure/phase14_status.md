@@ -1,0 +1,150 @@
+# Phase 14 Status
+
+Last updated: 2026-05-03 19:49 UTC.
+
+## Implemented
+
+- Added the Phase 14 plan with an explicit idea inventory, smoke design,
+  promotion gates, and paper actions.
+- Added a readiness audit:
+  `phases/phase14_critical_flaw_closure/scripts/audit_phase14_readiness.py`.
+- Added smoke wrappers for branches that can be tested with current code:
+  proxy scorer controls, Refresh-K frontier, calibrated Llama, and selector
+  variants.
+- Added unit tests for the readiness audit.
+- Expanded the Phase 14 plan into a uniform test loop: reviewer question,
+  paper object, code readiness, minimal smoke, automated gate, locked run, and
+  paper audit.
+- Added automated Phase 14 smoke evaluators for Refresh-K frontiers, calibrated
+  Llama smokes, and selector variants.
+- Added pre-specified locked-run wrappers for calibrated Llama and selector
+  variants, used only after their smoke gates pass.
+- Patched the shared Phase 9 artifact summarizer to export
+  `IdleKV-Coverage` and `IdleKV-MMR`, because selector-variant smokes were not
+  auditable without those columns.
+- Incorporated completed expert-agent critiques: keep main text compact,
+  foreground tiered-KV promotion, treat Refresh-K as a boundary comparator, and
+  require non-saturated cross-model evidence before any main-paper model
+  generality claim.
+- Tightened the paper latency paragraph and conclusion around the distinction
+  between exact research scoring, proxy scoring, and scalable tiered-KV
+  score/select/promote mechanics.
+- Rebuilt `paper/main.pdf` with `latexmk -pdf -interaction=nonstopmode
+  -halt-on-error main.tex`; the PDF rebuilt successfully.
+- Updated `README.md` so the active closure phase points to Phase 14.
+- Added `paper/.latexmkrc` and removed regenerated LaTeX intermediates from
+  `paper/`; future rebuilds keep aux/log files in `paper/aux/`.
+
+## Validation
+
+- `bash -n phases/phase14_critical_flaw_closure/scripts/*.sh`
+- `.venv/bin/python -m py_compile phases/phase14_critical_flaw_closure/scripts/*.py phases/phase9_experiment_deepening/scripts/phase9_artifact_summary.py`
+- `.venv/bin/python -m pytest phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py -q`
+  - `10 passed`
+- `.venv/bin/python -m pytest phases/phase6_repair/tests/test_runner.py phases/phase6_repair/tests/test_reporting.py -q`
+  - `37 passed`
+
+## Initial Readiness Audit
+
+Command:
+
+```bash
+.venv/bin/python phases/phase14_critical_flaw_closure/scripts/audit_phase14_readiness.py
+```
+
+Result:
+
+- `4q_proxy`: needs controlled proxy smoke or locked run. Existing n=100 proxy
+  has strong retained gain and speedup, but lacks Random-K, Oldest-K, and Gold-K
+  controls and only has two K points.
+- `6q_proxy`: needs controlled proxy smoke or locked run. Existing n=100 proxy
+  has large speedup but narrowly misses the strict retained-gain gate and also
+  lacks controls.
+- `specificity`: boundary result. IdleKV beats stale/donor controls, but
+  Refresh-K exceeds IdleKV by `+0.458`, so the paper must frame Refresh-K
+  explicitly as full-budget reselection/headroom.
+- `llama`: appendix-only portability. The current Llama run has `n=12`, only
+  three K values, and saturates at `1.0`.
+- `policy breadth`: protocol-matched breadth only, not a faithful named
+  prior-policy reproduction. If needed, exact Scissorhands is the next branch.
+
+## Completed Runs
+
+### `phase14_proxy_smoke`
+
+Completed: 2026-05-03 19:42 UTC.
+
+Output:
+
+- `phases/phase14_critical_flaw_closure/results/proxy_controlled_smoke_n4.csv`
+
+Evaluator:
+
+```bash
+.venv/bin/python phases/phase14_critical_flaw_closure/scripts/evaluate_proxy_controlled_smoke.py \
+  --summary-csv phases/phase14_critical_flaw_closure/results/proxy_controlled_smoke_n4.csv
+```
+
+Result:
+
+- 4Q controlled proxy smoke passed. At K=96, proxy IdleKV gain is `+0.833`;
+  max Random-K/Oldest-K control lift is `+0.042`.
+- 6Q controlled proxy smoke passed. At K=96, proxy IdleKV gain is `+0.500`;
+  max Random-K/Oldest-K control lift is `+0.042`.
+
+Decision:
+
+- The controlled smoke supports running a locked proxy frontier.
+- Before launching the longer locked proxy run, test the Refresh-K boundary
+  smoke because it is short and changes paper framing.
+
+## Active Run
+
+`phase14_proxy_locked` is running in tmux.
+
+Command:
+
+```bash
+tmux new-session -d -s phase14_proxy_locked \
+  'cd /home/ubuntu/IdleKV && bash phases/phase14_critical_flaw_closure/scripts/run_proxy_controlled_locked.sh'
+```
+
+Purpose:
+
+- Produce controlled, locked proxy-scorer evidence for the scalable repair
+  path.
+- Settings: 4Q and 6Q, `K={48,64,80,96,128}`, `n=100`, proxy scorer,
+  `A/B/B_match/Random-K/Oldest-K/IdleKV/Oracle-K`.
+
+Promotion decision after completion:
+
+- If it passes the controlled proxy evaluator, use it as the primary
+  deployment-facing quality/latency bridge.
+- If it fails because content-agnostic controls close the gap, demote proxy
+  scoring and keep exact scoring as mechanistic evidence only.
+
+### `phase14_refresh_smoke`
+
+Completed: 2026-05-03 19:46 UTC.
+
+Output:
+
+- `phases/phase14_critical_flaw_closure/results/refresh_frontier_smoke_n2.csv`
+
+Evaluator:
+
+```bash
+.venv/bin/python phases/phase14_critical_flaw_closure/scripts/evaluate_phase14_smokes.py \
+  --kind refresh \
+  --summary-csv phases/phase14_critical_flaw_closure/results/refresh_frontier_smoke_n2.csv
+```
+
+Result:
+
+- Status: `refresh_boundary_confirmed`.
+- IdleKV improves over matched at every tested K, but Refresh-K dominates
+  IdleKV across the frontier.
+- At high K, stale/donor controls get close or equal to IdleKV, so this smoke
+  should not become a new main figure. It supports text framing: IdleKV is an
+  incremental pre-resume promotion primitive, while Refresh-K is full-budget
+  Q2-time reselection headroom.

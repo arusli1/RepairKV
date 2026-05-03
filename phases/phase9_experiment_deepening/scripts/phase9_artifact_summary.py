@@ -90,6 +90,8 @@ def frontier_rows_for_artifact(artifact: Mapping[str, Any], *, artifact_path: st
             ("condition_b", "mean_condition_b"),
             ("b_match", "mean_b_match"),
             ("idlekv", "mean_idlekv"),
+            ("idlekv_coverage", "mean_idlekv_coverage"),
+            ("idlekv_mmr", "mean_idlekv_mmr"),
             ("wrong_q_k", "mean_wrong_q_k"),
             ("stale_q_k", "mean_stale_q_k"),
             ("contrastive_q_k", "mean_contrastive_q_k"),
@@ -103,6 +105,16 @@ def frontier_rows_for_artifact(artifact: Mapping[str, Any], *, artifact_path: st
                 row[out_key] = value
         if b_match is not None and idlekv is not None:
             row["idlekv_lift"] = idlekv - b_match
+        idlekv_coverage = _optional_float(metrics, "mean_idlekv_coverage")
+        idlekv_mmr = _optional_float(metrics, "mean_idlekv_mmr")
+        if b_match is not None and idlekv_coverage is not None:
+            row["idlekv_coverage_lift"] = idlekv_coverage - b_match
+        if b_match is not None and idlekv_mmr is not None:
+            row["idlekv_mmr_lift"] = idlekv_mmr - b_match
+        if idlekv is not None and idlekv_coverage is not None:
+            row["coverage_minus_idlekv"] = idlekv_coverage - idlekv
+        if idlekv is not None and idlekv_mmr is not None:
+            row["mmr_minus_idlekv"] = idlekv_mmr - idlekv
         if b_match is not None and wrong_q is not None:
             row["wrong_q_lift"] = wrong_q - b_match
         if b_match is not None and stale_q is not None:

@@ -520,47 +520,32 @@ reference.
 \paragraph{Latency accounting.}
 We separate quality-linked scorer diagnostics from systems-capacity
 measurements.
-Here p50 denotes the median over measured probes, while p95 and p99
-report tail latency for the same probe set.
-The current exact answer scorer is a research implementation: at
-$K=96$, p50 ranges from $6.08$\,s on MQ-NIAH-2Q to $7.62$\,s on
-MQ-NIAH-8Q, almost all in scoring.
-The $Q_2$-appended-state proxy is faster, reducing paired 4Q/6Q p50 to
-$0.83$\,s and $0.71$\,s while remaining above $\bmatch$ in paired
-$n{=}100$ probes.
-The deployment-facing question is whether a scalable selector and state
-movement can fit into idle windows.
-Figure~\ref{fig:runtime-envelope} therefore reports a systems-capacity
-grid: a chunked GPU selector streams Qwen-shaped BF16 key rows from
-pinned host memory with full source-pool coverage, scores a length-64
-query, selects $K$ rows, and combines that selector p95 with the
-measured 32K-active move-and-inject p95 for the same $K$.
-This is a conservative component-summed service-time estimate rather
-than a joined end-to-end latency distribution.
-It is also a single-node component model over a pre-materialized pinned
-host pool; it does not include router decisions, remote or disk fetch,
-cross-worker transfer, queueing, or overlap between repair and resumed
-decoding.
-The full $K\in\{96,512,1024,5000\}$ sweep changes the length-64 p95
-curve by at most $6.1$\,ms, so candidate-store size, not restored-row
-budget, is the dominant scaling axis.
-At $K=5000$, p95 repair time for the length-64 query is
-$50.0$\,ms for 32K offloaded candidates, $88.9$\,ms for 64K,
-$161.6$\,ms for 128K, $308.9$\,ms for 256K, $601.0$\,ms for 512K,
-$1.20$\,s for 1M, $2.38$\,s for 2M, and $4.64$\,s for 4M.
-The 4M endpoint corresponds to about 240\,GB of offloaded
-Qwen-shaped BF16 KV.
-Under a 10\% slack convention, the corresponding continuous idle-budget
-requirement is p95$/0.9$; the colorbar ticks are only representative
-checkpoints, not an empirical tool-call distribution.
-The measured distributions are tight under this synthetic probe: over
-the displayed length-64 grid, stage-summed p99 is at most 2.9\% above
-p95.
+The exact scorer used in the quality curves is a research diagnostic,
+not a deployable implementation: at $K=96$, p50 is $6.08$--$7.62$\,s
+across MQ-NIAH-2Q/4Q/6Q/8Q and is dominated by scoring.
+The $Q_2$-appended-state proxy reduces paired 4Q/6Q p50 to
+$0.83$/$0.71$\,s while still beating $\bmatch$ in paired $n{=}100$
+probes.
+The systems question is whether a scalable score/select/promote path can
+fit inside realistic idle windows.
+Figure~\ref{fig:runtime-envelope} reports that path as a single-node,
+component-summed p95 envelope: a chunked GPU selector streams
+Qwen-shaped BF16 key rows from pinned host memory, scores a length-64
+query, selects $K$ rows, and adds the measured 32K-active
+move-and-inject p95 for the same $K$.
+The probe is not a joined end-to-end latency distribution and excludes
+router decisions, remote or disk fetch, queueing, generation, and
+overlap with resumed decoding.
+Across $K\in\{96,512,1024,5000\}$, the length-64 p95 curve changes by
+at most $6.1$\,ms, so candidate-store size is the dominant scaling axis.
+At $K=5000$, p95 grows from $50.0$\,ms at 32K candidates to $1.20$\,s
+at 1M and $4.64$\,s at 4M; the 4M endpoint corresponds to about
+240\,GB of offloaded Qwen-shaped BF16 KV.
+The colorbar ticks use a 10\% slack convention and are representative
+capacity checkpoints, not an empirical tool-call distribution.
 The stage-wise component split shows that candidate scanning dominates
-at large stores, while top-$K$ selection and selected-KV
-copy/reinsertion are not the bottleneck.
-The probe excludes generation and is not the exact scorer used in the
-quality curves.
+large stores, while top-$K$ selection and selected-KV copy/reinsertion
+are not the bottleneck.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/runtime_repair_scaling.pdf}
@@ -643,9 +628,9 @@ the same matched-budget controls.
 
 Pauses between agent turns can be treated as part of the inference budget
 rather than as dead time.
-\idlekv{} contributes a concrete way to spend that budget: revise a
-compressed cache before the next turn under the same resumed-cache
-budget.
+\idlekv{} studies one concrete way to spend that budget: promote
+off-device KV back into the active GPU cache before the next turn under
+a matched resumed-cache budget.
 On calibrated pooled split-query MQ-NIAH-4Q/6Q/8Q panels, the final
 exact evaluations show that idle-window repair can substantially
 outperform matched no-repair retention while random and oldest-token

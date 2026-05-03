@@ -19,9 +19,12 @@ and compares against a no-repair baseline with the same active-cache budget.
 - Locked main evidence currently covers MQ-NIAH-2Q/4Q/6Q/8Q on
   Qwen2.5-7B-Instruct, plus specificity, multi-turn, and first-stage
   retention-policy diagnostics.
-- Cross-model and additional algorithm branches are tracked in
-  `phases/phase13_iteration_framework/phase13_plan.md`; promote only locked
+- Critical-flaw closure and next experiments are tracked in
+  `phases/phase14_critical_flaw_closure/phase14_plan.md`; promote only locked
   runs that pass written gates.
+- Active Phase 14 questions are proxy-scorer deployability, Refresh-K boundary
+  framing, calibrated Llama portability, selector variants, and whether any
+  additional evidence should replace rather than merely add to the main paper.
 
 ## Repository Map
 
@@ -41,6 +44,8 @@ and compares against a no-repair baseline with the same active-cache budget.
 - `phases/phase12_policy_breadth/`: sink-plus-recent retention breadth runs.
 - `phases/phase13_iteration_framework/`: closure framework, promotion gates,
   and active next-run scripts.
+- `phases/phase14_critical_flaw_closure/`: current critical-flaw closure
+  phase, smoke evaluators, and locked-run wrappers for promoted branches.
 - `saved_results/`: small retained summaries from earlier phases.
 - `models/`: local model weights only; ignored by git.
 - `ruler/`: vendored RULER checkout; treated as external benchmark code.
@@ -55,9 +60,10 @@ cd paper
 latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex
 ```
 
-`paper/main.pdf` should rebuild without LaTeX errors. Underfull box warnings
-from float placement are acceptable; overfull text or figure overlap should be
-fixed before a paper snapshot.
+`paper/main.pdf` should rebuild without LaTeX errors. LaTeX intermediates are
+kept under `paper/aux/` by `paper/.latexmkrc`. Underfull box warnings from
+float placement are acceptable; overfull text or figure overlap should be fixed
+before a paper snapshot.
 
 ## Test Commands
 
@@ -65,6 +71,7 @@ Targeted paper/closure tests:
 
 ```bash
 .venv/bin/python -m pytest \
+  phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py \
   phases/phase13_iteration_framework/tests/test_paper_language.py \
   phases/phase13_iteration_framework/tests/test_framework.py \
   phases/phase10_expansion/tests/test_multiturn.py \
@@ -104,6 +111,9 @@ smoke-only data in the main paper.
 - `Refresh-buffered` reselects the whole resumed active budget from active plus
   offloaded rows using the next-turn signal; it is a method-boundary reference,
   not a deployable full-prefix recompute baseline.
+- `Proxy` scoring uses appended next-turn state as a cheaper scorer. Treat it
+  as deployment-facing evidence only when it passes controlled Random-K,
+  Oldest-K, and Gold-K gates.
 
 ## Git Hygiene
 
