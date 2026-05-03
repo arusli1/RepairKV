@@ -51,10 +51,11 @@
 Long-context agent workflows often pause between turns while
 tools or users respond, but key-value (KV) cache compression is usually
 a one-shot decision made before the next turn is known.
-Each new turn can induce a relevance shift; we frame pre-resume cache
-repair as test-time adaptation of active KV state, where model weights
-are fixed but the runtime revises which past context remains active
-under a memory budget.
+Each new turn can induce a relevance shift: a distributional change in
+which historical tokens matter for the next decode; we frame pre-resume
+cache repair as test-time adaptation of active KV state, where model
+weights are fixed but the runtime revises which past context remains
+active under a memory budget.
 We evaluate repair against no-repair under the same number of active
 context KV rows and introduce \idlekv{}, a pre-resume KV promotion
 operator that retains evicted KV in an off-device tier, scores it after
@@ -68,10 +69,11 @@ stay near the matched baseline.
 A fixed five-turn revisit diagnostic further shows repeated repair
 across relevance shifts, with non-initial-turn gain $0.542$ over matched
 no-repair at $K=80$ and paired bootstrap interval $[0.458,0.620]$.
-These controlled diagnostics do not establish end-to-end agent gains,
-but they support pre-resume cache promotion as a useful operator for
-runtimes with active GPU and off-device KV tiers; faster approximate
-scoring remains necessary for deployment.
+Together, the matched-budget frontier, repeated-shift diagnostic, and
+retention-rule checks identify pre-resume KV repair as a useful
+cache-state adaptation operator for runtimes with active GPU and
+off-device KV tiers; faster approximate scoring remains necessary for
+deployment.
 \end{abstract}
 
 % -----------------------------------------------------------------------
@@ -93,13 +95,13 @@ initialization can account for 56--74\% of coding-agent task
 latency~\citep{agent_efficiency,agentcgroup}.
 Those pauses are usually treated as dead time, and cache compression is
 usually treated as a one-shot active-cache decision.
-We argue that the idle interval between turns exposes a different cache
-management point: state can be compressed to the active budget, retained
+We argue that the idle interval between turns exposes a test-time
+adaptation point: state can be compressed to the active budget, retained
 in an off-device tier, and promoted back into the active cache when new
-turn information arrives.
-The broader systems problem is not limited to question answering: any
-next-turn text, tool result, test failure, or user correction can change
-which past context should remain active.
+turn information changes the distribution of relevant context.
+This problem is not limited to question answering: any next-turn text,
+tool result, test failure, or user correction can change which past
+context should remain active.
 We study a minimal controlled instance of that problem: revising a
 compressed cache after the next-turn query is revealed but before
 decoding resumes.
@@ -127,7 +129,7 @@ retrieval query so that the effect is measurable; the intended workflow
 claim is broader than query answering.
 
 \paragraph{Contributions.}
-\idlekv{} is a KV promotion operator for tiered-cache runtimes,
+\idlekv{} is a test-time adaptation operator for tiered KV state,
 conditioned on the newly available next-turn signal.
 After turn $N$, the runtime compresses the evictable context portion to a
 base active budget and retains evicted rows in a host-memory off-device
@@ -148,18 +150,18 @@ We contribute:
   relevance shift that isolates better cache selection from simply
   keeping more active tokens;
   \item calibrated evidence on pooled split-query multi-query
-  needle-in-a-haystack (MQ-NIAH) 4Q/6Q/8Q evaluations, where \idlekv{}
-  substantially exceeds the matched
-  no-repair baseline and content-agnostic restore controls;
+  needle-in-a-haystack (MQ-NIAH) 4Q/6Q/8Q evaluations, a five-turn
+  revisit diagnostic, and three first-stage retention rules, where
+  \idlekv{} substantially exceeds the matched no-repair baseline and
+  content-agnostic restore controls;
   \item a repair prototype with transfer/reinjection feasibility results
   and an instrumented latency probe that separates cheap state movement
   and proxy scoring from the current exact Q$_2$ attention-query scorer.
 \end{itemize}
-The empirical claim remains narrow: one model, one primary first-stage
-retention rule in the main evaluation, one synthetic task family, and calibrated
-settings within that family.
-Its broader implication is systems-facing: long-context agents may need
-between-turn KV cache maintenance, not only pre-generation pruning.
+The controlled scope is one primary model and one synthetic task family,
+with targeted portability and retention-rule checks.
+The implication is adaptation-facing: long-context agents may need
+between-turn KV state updates, not only pre-generation pruning.
 
 % -----------------------------------------------------------------------
 \section{Related Work}
@@ -491,8 +493,10 @@ controlled relevance shifts, but not end-to-end agent validation.
 \end{figure}
 
 \paragraph{Retention-rule sensitivity.}
-The effect persists under two protocol-matched retention heuristics
-beyond the primary SnapKV-style rule.
+The adaptation effect persists under two protocol-matched retention
+heuristics beyond the primary SnapKV-style rule.
+This matters because the first compression decision controls which rows
+remain active and which evicted rows remain searchable at repair time.
 To compare policies with different matched no-repair baselines, the
 figure reports score gain over each policy's own matched baseline.
 The SnapKV and accumulated-attention rules show large mid-to-high
@@ -612,12 +616,12 @@ are not the bottleneck.
 
 \paragraph{Positioning.}
 \idlekv{} is not a standalone serving stack.
-It is a cache-management operator and benchmark primitive for
+It is a test-time adaptation operator over active KV state for
 resource-adaptive tiered-KV runtimes.
 It is complementary to serving systems that preserve, route, offload, or
 resume paused requests efficiently~\citep{vllm,infercept,lmcache,ttkv,
-continuum,agentserve}: here the question is what quality-improving
-promotion policy can run during the interruption.
+continuum,agentserve}: here the question is how the runtime should adapt
+the active memory state during the interruption.
 The setting is also distinct from within-turn query-aware eviction
 because the request has already been compressed and full-prefix
 recomputation is disallowed.
@@ -626,13 +630,11 @@ recomputation is disallowed.
 Repair should help when new turn information changes relevance, the base
 eviction policy still has real choice beyond recency, and the idle gap is
 long enough to cover repair overhead.
-The present evidence is intentionally narrow: the main quality figures
-use one primary model, one primary first-stage retention rule, one
-synthetic split-query family, and fixed full-cache-generated turn-$N$
-transcripts.
-The central missing systems experiment is trace-scheduled: repair should
-be tested against real tool/environment wait distributions, queue state,
-and overlap.
+The present evidence is controlled: the main quality figures use one
+primary model, one primary first-stage retention rule, one synthetic
+split-query family, and fixed full-cache-generated turn-$N$ transcripts.
+The next systems experiment is trace-scheduled repair against real
+tool/environment wait distributions, queue state, and overlap.
 The main algorithmic gaps are also clear: a learned or page-level
 selector, a latency-normalized $Q_2$-time reselection frontier, and a
 full-prefix recompute baseline.
@@ -680,7 +682,8 @@ a matched resumed-cache budget.
 On calibrated pooled split-query MQ-NIAH-4Q/6Q/8Q panels, the final
 exact evaluations show that idle-window repair can substantially
 outperform matched no-repair retention while random and oldest-token
-restores stay near baseline.
+restores stay near baseline, with targeted checks across first-stage
+retention rules.
 The remaining work is to broaden the evidence beyond this synthetic
 family and to close the gap between the current repair selection rule
 and the $\goldk$ reference.
