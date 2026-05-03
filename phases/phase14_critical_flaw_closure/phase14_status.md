@@ -104,6 +104,10 @@ Last updated: 2026-05-03 21:08 UTC.
   a cautious same-protocol portability check rather than a model-family claim.
 - Updated the figure renderer and readiness audit so non-saturated cross-model
   full grids are preferred over older saturated short-grid artifacts.
+- Added `real_agentic_task_design.md`, a promotion-gated design for a
+  real-repository, tool-event relevance-shift diagnostic to address the
+  remaining "synthetic-only" reviewer gap without overclaiming end-to-end agent
+  success.
 
 ## Validation
 

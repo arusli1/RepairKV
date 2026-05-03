@@ -191,6 +191,8 @@ candidate is a code/repo-style key-value retrieval task where Q1 asks about one
 module and Q2 asks about a later module or revisits an earlier module after a
 tool-output-like inserted segment. The smoke must prove the full-context model
 can solve it and matched no-repair fails before any locked run.
+The concrete RepoDelta-Retrieval design is recorded in
+`real_agentic_task_design.md`.
 
 **Promotion gate.** Main paper only if it adds a distinct claim beyond MQ-NIAH:
 dynamic relevance after a tool/repo-like context update. Otherwise it belongs
@@ -309,6 +311,7 @@ less convincing than the controlled relevance-shift diagnostic.
 **Smoke.** CPU/design first: define a repo/tool-style retrieval task with a
 known answer, prove full context succeeds, and prove matched no-repair fails.
 Only then run a GPU smoke.
+The proposed artifact and gates are in `real_agentic_task_design.md`.
 
 **Promotion gate.** Main paper only if it demonstrates a qualitatively new
 dynamic-workflow behavior rather than another MQ-NIAH-shaped retrieval shift.
