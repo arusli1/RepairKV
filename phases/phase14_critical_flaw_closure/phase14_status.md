@@ -20,6 +20,9 @@ Last updated: 2026-05-03 20:33 UTC.
 - Updated the readiness audit so that, once the locked controlled-proxy CSV
   exists, P0 uses that CSV for controlled quality and Random/Oldest/Gold checks
   while still using the existing fixed-K proxy reference for latency speedup.
+- Tightened the P0 status logic so a completed controlled proxy artifact that
+  fails retained-gain/quality/speed gates is reported as `needs_proxy_redesign`,
+  not as another request for a controlled run.
 - Added a log monitor:
   `phases/phase14_critical_flaw_closure/scripts/monitor_proxy_progress.py`,
   which reports live controlled-proxy progress and partial per-$K$ means from
@@ -81,10 +84,10 @@ Last updated: 2026-05-03 20:33 UTC.
 - `bash -n phases/phase14_critical_flaw_closure/scripts/*.sh`
 - `.venv/bin/python -m py_compile phases/phase14_critical_flaw_closure/scripts/*.py phases/phase9_experiment_deepening/scripts/phase9_artifact_summary.py`
 - `.venv/bin/python -m pytest phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py -q`
-  - `12 passed`
+  - `13 passed`
 - `.venv/bin/python -m py_compile phases/phase14_critical_flaw_closure/scripts/monitor_proxy_progress.py`
 - `.venv/bin/python -m pytest phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py -q`
-  - `12 passed` after adding monitor ETA coverage and controlled-proxy
+  - `13 passed` after adding monitor ETA coverage and controlled-proxy
     readiness coverage
 - `.venv/bin/python -m pytest phases/phase6_repair/tests/test_runner.py phases/phase6_repair/tests/test_reporting.py -q`
   - `37 passed`

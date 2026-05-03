@@ -118,7 +118,7 @@ def audit_proxy_pair(
 
     if not failures:
         status = "main_ready_proxy_evidence"
-    elif set(failures) <= {"missing_random_oldest_gold_controls", "too_few_proxy_k_points", "retained_gain_below_gate"}:
+    elif not has_controls or k_points < 3:
         status = "needs_controlled_proxy_smoke_or_locked_run"
     else:
         status = "needs_proxy_redesign"

@@ -169,6 +169,48 @@ def test_proxy_audit_uses_controlled_quality_with_separate_latency_source(tmp_pa
     assert result["latency_source"] == str(latency)
 
 
+def test_proxy_audit_does_not_request_controlled_run_after_controlled_quality_fails(tmp_path: Path) -> None:
+    exact = tmp_path / "exact.csv"
+    controlled = tmp_path / "controlled.csv"
+    latency = tmp_path / "latency.csv"
+    _write_csv(
+        exact,
+        [
+            {"k": 96, "b_match": 0.25, "idlekv": 0.95, "p50_total_ms": 7000, "p50_score_ms": 6500},
+        ],
+    )
+    _write_csv(
+        controlled,
+        [
+            {
+                "k": k,
+                "b_match": 0.25,
+                "idlekv": value,
+                "random_k": 0.25,
+                "oldest_k": 0.24,
+                "gold_k": 1.0,
+            }
+            for k, value in ((48, 0.30), (96, 0.70), (128, 0.76))
+        ],
+    )
+    _write_csv(
+        latency,
+        [
+            {"k": 96, "p50_total_ms": 700, "p50_score_ms": 650},
+        ],
+    )
+
+    result = audit.audit_proxy_pair(
+        label="6q_proxy",
+        exact_csv=exact,
+        proxy_csv=controlled,
+        latency_proxy_csv=latency,
+    )
+
+    assert result["status"] == "needs_proxy_redesign"
+    assert "retained_gain_below_gate" in result["failures"]
+
+
 def test_specificity_audit_flags_refresh_boundary(tmp_path: Path) -> None:
     path = tmp_path / "specificity.csv"
     _write_csv(
