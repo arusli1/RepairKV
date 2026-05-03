@@ -1,6 +1,6 @@
 # Phase 14 Status
 
-Last updated: 2026-05-03 20:33 UTC.
+Last updated: 2026-05-03 20:50 UTC.
 
 ## Implemented
 
@@ -81,6 +81,17 @@ Last updated: 2026-05-03 20:33 UTC.
 - Split dense runtime/discussion prose into technical run-in labels for the
   capacity envelope, tiered-cache scaling implication, and future benchmark
   axes.
+- Added the Figure 6 runtime decomposition
+  `T_repair ~= T_scan + T_topK + T_promote`, with explicit wording that the
+  candidate scan is linear in offloaded candidate rows for fixed query/model
+  shape, while promotion is independent of candidate-store size but depends on
+  restored rows and the reinsertion path.
+- Accepted the latest AdaptFM/KV-runtime reviewer audits: proxy wording now
+  says preliminary fixed-`K` until the controlled run finishes, runtime
+  evidence is framed as a capacity envelope consistent with multi-second
+  tool/environment components rather than a measured idle-window trace,
+  retention-rule evidence is scoped to protocol-matched heuristics, Llama is
+  appendix-only, and the overlap diagnostic is a short mechanism check.
 
 ## Validation
 
@@ -133,6 +144,11 @@ Last updated: 2026-05-03 20:33 UTC.
 - Rebuilt `paper/main.pdf` after adding runtime/discussion labels; log scan
   again found no undefined citations or overfull boxes, and paper-language
   tests passed.
+- Rebuilt `paper/main.pdf` after the Figure 6 complexity and reviewer-economy
+  edits; log scan again found no undefined citations or overfull boxes, and
+  paper-language tests passed.
+- `.venv/bin/python -m pytest -q`
+  - `234 passed, 16 warnings, 304 subtests passed` at 2026-05-03 20:49 UTC.
 
 ## Paper Economy Audit
 
@@ -146,14 +162,13 @@ The remaining over-detail risks are:
   stale-query audit because reviewers could otherwise attribute the result to
   reused old queries, but it avoids walking through every condition.
 - Runtime prose: the latency paragraph should not read like a systems trace
-  result. The paper now calls Figure 5 a capacity envelope rather than a
+  result. The paper now calls Figure 6 a capacity envelope rather than a
   measured tool-call trace and names the missing scheduler evidence.
 - Method exclusions: implementation limits should be concise in Method and
   expanded only in Discussion. The latest edit shortened the distributed
   systems exclusion list without hiding the assumption.
-- Saturated portability checks: the Llama result is now summarized as
-  preliminary portability in main prose, with exact numbers left to the
-  appendix so it does not read like a broad model-family claim.
+- Saturated portability checks: the Llama result is now appendix-only and is
+  explicitly not used for model-family claims.
 
 The reviewer holes that remain material are:
 
@@ -262,6 +277,8 @@ Purpose:
   example `10/100` across four splits. Early 6Q partial means still separate
   proxy IdleKV from matched, Random-K, and Oldest-K, but the final CSV and
   evaluator remain the decision point.
+- Progress at 2026-05-03 20:50 UTC: 6Q is active, around example `15/100`
+  across four splits; the rough monitor ETA is about 58 minutes.
 
 Promotion decision after completion:
 
