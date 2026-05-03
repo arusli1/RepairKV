@@ -1,0 +1,382 @@
+"""Synthetic KV movement capacity profiling helpers.
+
+These helpers measure the systems path that does not require answer scoring:
+moving Qwen-shaped restored KV rows from host memory to GPU and reinserting
+them into an active position-tracked cache.  The tensors are synthetic, but the
+shape, dtype, transfer direction, and current ``inject_kv`` implementation are
+real.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import csv
+import time
+from pathlib import Path
+from typing import Iterable, Sequence
+
+import numpy as np
+import torch
+
+from phases.phase2_kv_cache.src.kv_utils import PositionTrackedCache, inject_kv
+
+
+@dataclass(frozen=True)
+class KVRuntimeSpec:
+    """KV tensor shape for one model family."""
+
+    n_layers: int = 28
+    n_query_heads: int = 28
+    n_kv_heads: int = 4
+    head_dim: int = 128
+    dtype: torch.dtype = torch.bfloat16
+
+    @property
+    def bytes_per_token(self) -> int:
+        return int(
+            self.n_layers
+            * 2
+            * self.n_kv_heads
+            * self.head_dim
+            * torch.empty((), dtype=self.dtype).element_size()
+        )
+
+
+def parse_dtype(name: str) -> torch.dtype:
+    """Parse a small CLI-facing dtype vocabulary."""
+    normalized = name.lower().replace("torch.", "")
+    if normalized in {"bf16", "bfloat16"}:
+        return torch.bfloat16
+    if normalized in {"fp16", "float16", "half"}:
+        return torch.float16
+    if normalized in {"fp32", "float32"}:
+        return torch.float32
+    raise ValueError(f"Unsupported dtype: {name}")
+
+
+def percentile_summary(values_ms: Sequence[float]) -> dict[str, float]:
+    """Return p50/p95/p99/mean for millisecond samples."""
+    if not values_ms:
+        raise ValueError("Cannot summarize an empty timing sample.")
+    values = np.asarray([float(value) for value in values_ms], dtype=np.float64)
+    return {
+        "p50_ms": float(np.percentile(values, 50)),
+        "p95_ms": float(np.percentile(values, 95)),
+        "p99_ms": float(np.percentile(values, 99)),
+        "mean_ms": float(np.mean(values)),
+    }
+
+
+def synchronize(device: str | torch.device) -> None:
+    """Synchronize CUDA timings when needed."""
+    target = torch.device(device)
+    if target.type == "cuda":
+        torch.cuda.synchronize(target)
+
+
+def make_synthetic_cache(
+    *,
+    seq_len: int,
+    positions: Sequence[int],
+    spec: KVRuntimeSpec,
+    device: str | torch.device,
+    pin_memory: bool = False,
+) -> PositionTrackedCache:
+    """Build a zero-valued position-tracked KV cache with real model shape."""
+    if len(positions) != int(seq_len):
+        raise ValueError(f"positions length {len(positions)} does not match seq_len {seq_len}")
+    target = torch.device(device)
+    layers = []
+    for _ in range(spec.n_layers):
+        key = torch.zeros((1, spec.n_kv_heads, int(seq_len), spec.head_dim), dtype=spec.dtype, device=target)
+        value = torch.zeros((1, spec.n_kv_heads, int(seq_len), spec.head_dim), dtype=spec.dtype, device=target)
+        if pin_memory and target.type == "cpu":
+            try:
+                key = key.pin_memory()
+                value = value.pin_memory()
+            except RuntimeError:
+                pass
+        layers.append((key, value))
+    return PositionTrackedCache(tuple(layers), list(positions))
+
+
+def interleaved_active_positions(active_tokens: int) -> list[int]:
+    """Use even absolute positions so restored rows can be interleaved."""
+    return [2 * index for index in range(int(active_tokens))]
+
+
+def interleaved_restore_positions(k_tokens: int) -> list[int]:
+    """Use odd absolute positions to stress non-append reinsertion."""
+    return [2 * index + 1 for index in range(int(k_tokens))]
+
+
+def profile_transfer_inject_capacity(
+    *,
+    active_tokens: int,
+    k_tokens: int,
+    spec: KVRuntimeSpec,
+    device: str | torch.device = "cuda",
+    trials: int = 20,
+    warmup_trials: int = 2,
+    pin_memory: bool = True,
+) -> dict[str, float | int | str]:
+    """Measure host-to-device transfer and reinjection for one operating point."""
+    target = torch.device(device)
+    if target.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for cuda runtime-capacity profiling.")
+    if int(active_tokens) <= 0 or int(k_tokens) <= 0:
+        raise ValueError("active_tokens and k_tokens must both be positive.")
+    if int(trials) <= 0:
+        raise ValueError("trials must be positive.")
+
+    active_cache = make_synthetic_cache(
+        seq_len=int(active_tokens),
+        positions=interleaved_active_positions(int(active_tokens)),
+        spec=spec,
+        device=target,
+    )
+    host_restore = make_synthetic_cache(
+        seq_len=int(k_tokens),
+        positions=interleaved_restore_positions(int(k_tokens)),
+        spec=spec,
+        device="cpu",
+        pin_memory=pin_memory,
+    )
+
+    transfer_ms: list[float] = []
+    inject_ms: list[float] = []
+    total_ms: list[float] = []
+
+    for trial_idx in range(int(warmup_trials) + int(trials)):
+        synchronize(target)
+        total_start = time.perf_counter()
+        transfer_start = total_start
+        restored = host_restore.to_device(target, non_blocking=pin_memory and target.type == "cuda")
+        synchronize(target)
+        transfer_elapsed_ms = (time.perf_counter() - transfer_start) * 1000.0
+
+        inject_start = time.perf_counter()
+        repaired = inject_kv(active_cache, restored, restored.positions)
+        synchronize(target)
+        inject_elapsed_ms = (time.perf_counter() - inject_start) * 1000.0
+        total_elapsed_ms = (time.perf_counter() - total_start) * 1000.0
+
+        if trial_idx >= int(warmup_trials):
+            transfer_ms.append(transfer_elapsed_ms)
+            inject_ms.append(inject_elapsed_ms)
+            total_ms.append(total_elapsed_ms)
+
+        del repaired
+        del restored
+
+    if target.type == "cuda":
+        torch.cuda.empty_cache()
+
+    transfer = percentile_summary(transfer_ms)
+    inject = percentile_summary(inject_ms)
+    total = percentile_summary(total_ms)
+    return {
+        "active_tokens": int(active_tokens),
+        "k": int(k_tokens),
+        "trials": int(trials),
+        "device": str(target),
+        "dtype": str(spec.dtype).replace("torch.", ""),
+        "bytes_per_token": int(spec.bytes_per_token),
+        "restore_bytes": int(spec.bytes_per_token * int(k_tokens)),
+        "active_bytes": int(spec.bytes_per_token * int(active_tokens)),
+        "p50_transfer_ms": transfer["p50_ms"],
+        "p95_transfer_ms": transfer["p95_ms"],
+        "p99_transfer_ms": transfer["p99_ms"],
+        "p50_inject_ms": inject["p50_ms"],
+        "p95_inject_ms": inject["p95_ms"],
+        "p99_inject_ms": inject["p99_ms"],
+        "p50_total_ms": total["p50_ms"],
+        "p95_total_ms": total["p95_ms"],
+        "p99_total_ms": total["p99_ms"],
+    }
+
+
+def _pin_tensor_if_requested(tensor: torch.Tensor, *, pin_memory: bool) -> torch.Tensor:
+    if not pin_memory:
+        return tensor
+    try:
+        return tensor.pin_memory()
+    except RuntimeError:
+        return tensor
+
+
+def profile_chunked_selection_capacity(
+    *,
+    candidate_tokens: int,
+    k_tokens: int,
+    spec: KVRuntimeSpec,
+    query_len: int = 64,
+    chunk_tokens: int = 16_384,
+    device: str | torch.device = "cuda",
+    trials: int = 10,
+    warmup_trials: int = 1,
+    pin_memory: bool = True,
+) -> dict[str, float | int | str]:
+    """Measure chunked Q2-key scanning and top-K selection over a large store.
+
+    The measured operation is the scalable selection part of repair: stream
+    Qwen-shaped offloaded key rows in chunks, score them against synthetic
+    exact-Q-shaped query rows with GPU matmuls, and select the top K rows.  It
+    does not materialize the full offloaded KV store in GPU memory and does not
+    include final KV row movement or reinsertion.
+    """
+    target = torch.device(device)
+    if target.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for cuda selection-capacity profiling.")
+    if int(candidate_tokens) <= 0 or int(k_tokens) <= 0:
+        raise ValueError("candidate_tokens and k_tokens must both be positive.")
+    if int(k_tokens) > int(candidate_tokens):
+        raise ValueError("k_tokens cannot exceed candidate_tokens.")
+    if int(query_len) <= 0 or int(chunk_tokens) <= 0:
+        raise ValueError("query_len and chunk_tokens must both be positive.")
+    if int(trials) <= 0:
+        raise ValueError("trials must be positive.")
+    if int(spec.n_query_heads) % int(spec.n_kv_heads) != 0:
+        raise ValueError("n_query_heads must be divisible by n_kv_heads.")
+
+    heads_per_kv = int(spec.n_query_heads) // int(spec.n_kv_heads)
+    max_chunk = min(int(chunk_tokens), int(candidate_tokens))
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(17)
+    host_key_chunk = torch.randn(
+        (int(spec.n_kv_heads), max_chunk, int(spec.head_dim)),
+        generator=generator,
+        dtype=spec.dtype,
+        device="cpu",
+    )
+    host_key_chunk = _pin_tensor_if_requested(host_key_chunk, pin_memory=pin_memory)
+
+    query_layers = []
+    for layer_idx in range(int(spec.n_layers)):
+        layer_generator = torch.Generator(device="cpu")
+        layer_generator.manual_seed(10_000 + layer_idx)
+        query_layer = torch.randn(
+            (int(spec.n_query_heads), int(query_len), int(spec.head_dim)),
+            generator=layer_generator,
+            dtype=torch.float32,
+            device="cpu",
+        ).to(target)
+        query_layers.append(
+            query_layer.reshape(int(spec.n_kv_heads), heads_per_kv, int(query_len), int(spec.head_dim))
+        )
+
+    total_ms: list[float] = []
+    for trial_idx in range(int(warmup_trials) + int(trials)):
+        synchronize(target)
+        start_time = time.perf_counter()
+        scores = torch.zeros(int(candidate_tokens), dtype=torch.float32, device=target)
+        for layer_query in query_layers:
+            for start in range(0, int(candidate_tokens), max_chunk):
+                stop = min(start + max_chunk, int(candidate_tokens))
+                current = stop - start
+                key_chunk = host_key_chunk[:, :current, :].to(
+                    device=target,
+                    dtype=torch.float32,
+                    non_blocking=pin_memory and target.type == "cuda",
+                )
+                logits = torch.einsum("hgqd,htd->hgqt", layer_query, key_chunk)
+                pooled = logits.amax(dim=2).mean(dim=(0, 1))
+                scores[start:stop].add_(pooled)
+        scores.div_(float(spec.n_layers))
+        torch.topk(scores, k=int(k_tokens), largest=True, sorted=False)
+        synchronize(target)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        if trial_idx >= int(warmup_trials):
+            total_ms.append(elapsed_ms)
+        del scores
+
+    if target.type == "cuda":
+        torch.cuda.empty_cache()
+
+    total = percentile_summary(total_ms)
+    key_bytes_per_token = int(
+        spec.n_layers
+        * spec.n_kv_heads
+        * spec.head_dim
+        * torch.empty((), dtype=spec.dtype).element_size()
+    )
+    return {
+        "candidate_tokens": int(candidate_tokens),
+        "k": int(k_tokens),
+        "query_len": int(query_len),
+        "chunk_tokens": int(chunk_tokens),
+        "trials": int(trials),
+        "device": str(target),
+        "dtype": str(spec.dtype).replace("torch.", ""),
+        "n_layers": int(spec.n_layers),
+        "n_query_heads": int(spec.n_query_heads),
+        "n_kv_heads": int(spec.n_kv_heads),
+        "head_dim": int(spec.head_dim),
+        "key_bytes_per_token": int(key_bytes_per_token),
+        "streamed_key_bytes": int(key_bytes_per_token * int(candidate_tokens)),
+        "offloaded_kv_bytes": int(spec.bytes_per_token * int(candidate_tokens)),
+        "selected_kv_bytes": int(spec.bytes_per_token * int(k_tokens)),
+        "p50_total_ms": total["p50_ms"],
+        "p95_total_ms": total["p95_ms"],
+        "p99_total_ms": total["p99_ms"],
+        "mean_total_ms": total["mean_ms"],
+    }
+
+
+def feasibility_rows(
+    rows: Sequence[dict[str, float | int | str]],
+    *,
+    idle_windows_s: Iterable[float] = (0.1, 0.5, 1.0, 2.0, 5.0),
+    budget_fraction: float = 0.90,
+    percentile_field: str = "p95_total_ms",
+) -> list[dict[str, float | int]]:
+    """Summarize the largest measured K that fits each idle-window budget."""
+    if not 0.0 < float(budget_fraction) <= 1.0:
+        raise ValueError("budget_fraction must lie in (0, 1].")
+    output: list[dict[str, float | int]] = []
+    active_values = sorted({int(row["active_tokens"]) for row in rows})
+    for active_tokens in active_values:
+        subset = [row for row in rows if int(row["active_tokens"]) == active_tokens]
+        for idle_window_s in idle_windows_s:
+            budget_ms = float(idle_window_s) * 1000.0 * float(budget_fraction)
+            fitting = [
+                int(row["k"])
+                for row in subset
+                if float(row.get(percentile_field, float("inf"))) <= budget_ms
+            ]
+            output.append(
+                {
+                    "active_tokens": active_tokens,
+                    "idle_window_s": float(idle_window_s),
+                    "budget_ms": budget_ms,
+                    "max_measured_k": max(fitting) if fitting else 0,
+                }
+            )
+    return output
+
+
+def write_rows_csv(rows: Sequence[dict[str, object]], path: str | Path) -> None:
+    """Write a non-empty row set to CSV."""
+    if not rows:
+        raise ValueError("Cannot write an empty CSV.")
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = list(rows[0].keys())
+    with output.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+__all__ = [
+    "KVRuntimeSpec",
+    "feasibility_rows",
+    "interleaved_active_positions",
+    "interleaved_restore_positions",
+    "make_synthetic_cache",
+    "parse_dtype",
+    "percentile_summary",
+    "profile_chunked_selection_capacity",
+    "profile_transfer_inject_capacity",
+    "write_rows_csv",
+]

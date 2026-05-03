@@ -34,6 +34,7 @@ PHASE10_DIR = REPO_DIR / "phases" / "phase10_expansion" / "results"
 PHASE11_DIR = REPO_DIR / "phases" / "phase11_main_robustness" / "results"
 PHASE12_DIR = REPO_DIR / "phases" / "phase12_policy_breadth" / "results"
 PHASE13_DIR = REPO_DIR / "phases" / "phase13_iteration_framework" / "results"
+PHASE4_RUNTIME_DIR = REPO_DIR / "phases" / "phase4_eviction_buffer" / "results" / "runtime_capacity"
 PHASE8_STREAMING_DIR = (
     REPO_DIR / "phases" / "phase8_streaming_strict_cap" / "results" / "two_tier_snapkv"
 )
@@ -620,47 +621,38 @@ def render_specificity_panel() -> bool:
     matched_row = row_by_condition.get("Matched")
     if matched_row is None or pd.isna(matched_row.mean_score):
         return False
-    matched_score = float(matched_row.mean_score)
     y_positions = np.arange(len(condition_order))[::-1]
     fig, ax = plt.subplots(figsize=(COLUMN_WIDTH_IN, 1.42), constrained_layout=False)
-    fig.subplots_adjust(left=0.30, right=0.925, top=0.93, bottom=0.27)
+    fig.subplots_adjust(left=0.30, right=0.985, top=0.93, bottom=0.27)
 
-    near_width = 0.05
-    ax.axvspan(
-        max(0.0, matched_score - near_width),
-        min(1.0, matched_score + near_width),
-        color="#EFEFEF",
-        alpha=0.78,
-        zorder=0,
-    )
+    ax.axvspan(-0.025, 0.025, color="#EFEFEF", alpha=0.82, zorder=0)
     ax.axhline(2.5, color=PALETTE["grid"], linewidth=0.35, alpha=0.7, zorder=1)
     ax.axhline(0.5, color=PALETTE["grid"], linewidth=0.35, alpha=0.7, zorder=1)
-    ax.axvline(matched_score, color=PALETTE["matched"], linewidth=0.95, linestyle=(0, (1.0, 1.3)), zorder=2)
+    ax.axvline(0.0, color=PALETTE["matched"], linewidth=0.95, linestyle=(0, (1.0, 1.3)), zorder=2)
 
     for y, condition in zip(y_positions, condition_order, strict=True):
         row = row_by_condition.get(condition)
         if row is None or pd.isna(row.mean_score):
             continue
-        score = float(row.mean_score)
         gain = float(row.mean_gain_vs_matched)
         ax.hlines(
             y,
-            min(matched_score, score),
-            max(matched_score, score),
+            min(0.0, gain),
+            max(0.0, gain),
             color=colors[condition],
             linewidth=4.4,
             alpha=0.22 if condition in {"StaleQ-K", "WrongQ-K"} else 0.30,
             zorder=2,
         )
-        if not pd.isna(row.score_ci95_low) and not pd.isna(row.score_ci95_high):
-            lo = float(row.score_ci95_low)
-            hi = float(row.score_ci95_high)
+        if not pd.isna(row.gain_ci95_low) and not pd.isna(row.gain_ci95_high):
+            lo = float(row.gain_ci95_low)
+            hi = float(row.gain_ci95_high)
             ax.errorbar(
-                score,
+                gain,
                 y,
                 xerr=[
-                    [max(score - lo, 0.0)],
-                    [max(hi - score, 0.0)],
+                    [max(gain - lo, 0.0)],
+                    [max(hi - gain, 0.0)],
                 ],
                 fmt="none",
                 ecolor=colors[condition],
@@ -672,7 +664,7 @@ def render_specificity_panel() -> bool:
             )
         facecolor = "white" if condition in {"Refresh-K", "Gold-K"} else colors[condition]
         ax.scatter(
-            score,
+            gain,
             y,
             s=20 if condition == "IdleKV" else 17,
             marker=markers[condition],
@@ -681,23 +673,23 @@ def render_specificity_panel() -> bool:
             linewidth=0.82 if condition in {"Refresh-K", "Gold-K"} else 0.32,
             zorder=4,
         )
-        ax.text(
-            1.025,
-            y,
-            f"+{gain:.2f}",
-            ha="left",
-            va="center",
-            fontsize=5.6,
-            color=colors[condition],
-            fontweight="bold" if condition == "IdleKV" else "normal",
-            clip_on=False,
-        )
+        if condition not in {"StaleQ-K", "WrongQ-K"}:
+            ax.text(
+                gain + 0.025,
+                y,
+                f"+{gain:.2f}",
+                ha="left",
+                va="center",
+                fontsize=5.6,
+                color=colors[condition],
+                fontweight="bold" if condition == "IdleKV" else "normal",
+                clip_on=False,
+            )
 
-    ax.text(1.025, len(condition_order) - 0.40, "$\\Delta$", ha="left", va="bottom", fontsize=5.4, color=PALETTE["text"], clip_on=False)
-    ax.set_xlim(0.0, 1.10)
-    ax.set_xticks([0.0, 0.5, 1.0])
+    ax.set_xlim(-0.07, 0.86)
+    ax.set_xticks([0.0, 0.4, 0.8])
     ax.set_ylim(-0.55, len(condition_order) - 0.45)
-    _format_axes(ax, x_label="exact $Q_2$ score at $K=48$", y_label=None)
+    _format_axes(ax, x_label="score gain over matched no-repair", y_label=None)
     ax.grid(axis="x", color=PALETTE["grid"], linewidth=0.42, alpha=0.8)
     ax.grid(axis="y", visible=False)
     ax.set_yticks(y_positions, [labels[value] for value in condition_order])
@@ -1082,6 +1074,188 @@ def render_proxy_latency_tradeoff() -> bool:
         fontsize=5.75,
     )
     save_figure(fig, "proxy_latency_tradeoff")
+    return True
+
+
+def render_runtime_capacity_curve() -> bool:
+    """Render move+inject capacity from the synthetic Qwen-shaped KV profiler."""
+
+    robust_path = (
+        FIGURE_DIR / "runtime_capacity_8k_32k_100k.csv"
+        if (FIGURE_DIR / "runtime_capacity_8k_32k_100k.csv").exists()
+        else next(iter(sorted(PHASE4_RUNTIME_DIR.glob("runtime_capacity_robust_*.csv"))), None)
+    )
+    large_path = (
+        FIGURE_DIR / "runtime_capacity_250k_500k_k5000.csv"
+        if (FIGURE_DIR / "runtime_capacity_250k_500k_k5000.csv").exists()
+        else next(iter(sorted(PHASE4_RUNTIME_DIR.glob("runtime_capacity_large_*.csv"))), None)
+    )
+    if robust_path is None or not robust_path.exists() or large_path is None or not large_path.exists():
+        for ext in ("pdf", "png"):
+            (FIGURE_DIR / f"runtime_capacity_curve.{ext}").unlink(missing_ok=True)
+        return False
+
+    robust = load_numeric_csv(robust_path)
+    large = load_numeric_csv(large_path)
+    combined = pd.concat([robust, large], ignore_index=True)
+    k5000 = combined[combined["k"].astype(int) == 5000].copy()
+    if robust.empty or k5000.empty:
+        return False
+
+    fig, axes_raw = plt.subplots(1, 2, figsize=(COLUMN_WIDTH_IN, 1.58), constrained_layout=False)
+    axes = np.atleast_1d(axes_raw)
+    fig.subplots_adjust(left=0.15, right=0.99, top=0.94, bottom=0.31, wspace=0.36)
+
+    active_styles = {
+        8192: {"label": "8k active", "color": "#56B4E9", "marker": "o"},
+        32768: {"label": "32k active", "color": PALETTE["idlekv"], "marker": "s"},
+        100000: {"label": "100k active", "color": PALETTE["proxy"], "marker": "^"},
+    }
+    ax = axes[0]
+    for active_tokens, style in active_styles.items():
+        subset = robust[robust["active_tokens"].astype(int) == active_tokens].sort_values("k")
+        if subset.empty:
+            continue
+        ax.plot(
+            subset["k"].astype(float),
+            subset["p95_total_ms"].astype(float),
+            color=str(style["color"]),
+            marker=str(style["marker"]),
+            linewidth=1.15,
+            markersize=3.1,
+            label=str(style["label"]),
+        )
+    ax.set_xscale("log")
+    ax.set_xticks([96, 500, 1000, 5000], ["96", "500", "1k", "5k"])
+    ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
+    ax.set_ylim(0, 30)
+    ax.set_yticks([0, 10, 20, 30])
+    ax.legend(
+        loc="upper left",
+        frameon=False,
+        handlelength=1.0,
+        borderaxespad=0.0,
+        labelspacing=0.15,
+        fontsize=5.7,
+    )
+    _format_axes(ax, x_label="restored rows $K$", y_label="p95 move+inject (ms)")
+
+    ax = axes[1]
+    k5000 = k5000.sort_values("active_tokens")
+    active_k = k5000["active_tokens"].astype(float)
+    p95 = k5000["p95_total_ms"].astype(float)
+    ax.plot(
+        active_k,
+        p95,
+        color=PALETTE["idlekv"],
+        marker="o",
+        linewidth=1.25,
+        markersize=3.2,
+    )
+    for x_value, y_value in zip(active_k, p95, strict=True):
+        label = f"{int(round(y_value))}ms"
+        ax.text(x_value * 1.035, y_value, label, ha="left", va="center", fontsize=5.1, color=PALETTE["idlekv"])
+    ax.axhline(100.0, color=PALETTE["matched"], linestyle=(0, (2, 1.4)), linewidth=0.8)
+    ax.axhline(500.0, color=PALETTE["wrong"], linestyle=(0, (2, 1.4)), linewidth=0.65)
+    ax.text(9_000, 104.0, "0.1s", ha="left", va="bottom", fontsize=5.6, color=PALETTE["matched"])
+    ax.text(9_000, 504.0, "0.5s", ha="left", va="bottom", fontsize=5.6, color=PALETTE["wrong"])
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(7_000, 720_000)
+    ax.set_ylim(5, 700)
+    ax.set_xticks([10_000, 100_000, 500_000], ["10k", "100k", "500k"])
+    ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
+    ax.set_yticks([10, 100, 500], ["10", "100", "500"])
+    ax.yaxis.set_minor_locator(mpl.ticker.NullLocator())
+    ax.text(0.98, 0.08, "$K=5000$", transform=ax.transAxes, ha="right", va="bottom", fontsize=5.8)
+    _format_axes(ax, x_label="active cache rows", y_label=None)
+
+    save_figure(fig, "runtime_capacity_curve")
+    return True
+
+
+def render_runtime_repair_scaling() -> bool:
+    """Render measured repair time as offloaded candidate context grows."""
+
+    select_path = (
+        FIGURE_DIR / "runtime_chunked_select_32k_1m.csv"
+        if (FIGURE_DIR / "runtime_chunked_select_32k_1m.csv").exists()
+        else next(iter(sorted(PHASE4_RUNTIME_DIR.glob("runtime_chunked_select_*.csv"))), None)
+    )
+    move_path = (
+        FIGURE_DIR / "runtime_capacity_8k_32k_100k.csv"
+        if (FIGURE_DIR / "runtime_capacity_8k_32k_100k.csv").exists()
+        else next(iter(sorted(PHASE4_RUNTIME_DIR.glob("runtime_capacity_robust_*.csv"))), None)
+    )
+    if select_path is None or not select_path.exists() or move_path is None or not move_path.exists():
+        for ext in ("pdf", "png"):
+            (FIGURE_DIR / f"runtime_repair_scaling.{ext}").unlink(missing_ok=True)
+        return False
+
+    select_df = load_numeric_csv(select_path)
+    move_df = load_numeric_csv(move_path)
+    move_32k = move_df[move_df["active_tokens"].astype(int) == 32768]
+    if select_df.empty or move_32k.empty:
+        return False
+
+    fig, ax = plt.subplots(1, 1, figsize=(COLUMN_WIDTH_IN, 1.72), constrained_layout=False)
+    fig.subplots_adjust(left=0.13, right=0.985, top=0.93, bottom=0.285)
+    styles = {
+        96: {"label": "$K=96$", "color": PALETTE["idlekv"], "marker": "o"},
+        5000: {"label": "$K=5000$", "color": PALETTE["proxy"], "marker": "s"},
+    }
+    for k_value, style in styles.items():
+        selected = select_df[select_df["k"].astype(int) == int(k_value)].sort_values("candidate_tokens")
+        moved = move_32k[move_32k["k"].astype(int) == int(k_value)]
+        if selected.empty or moved.empty:
+            continue
+        move_p95 = float(moved["p95_total_ms"].iloc[0])
+        y_seconds = (selected["p95_total_ms"].astype(float) + move_p95) / 1000.0
+        ax.plot(
+            selected["candidate_tokens"].astype(float),
+            y_seconds,
+            label=str(style["label"]),
+            color=str(style["color"]),
+            marker=str(style["marker"]),
+            linewidth=1.35,
+            markersize=3.2,
+        )
+
+    ax.axhline(0.5, color=PALETTE["wrong"], linestyle=(0, (2, 1.5)), linewidth=0.75)
+    ax.axhline(1.0, color=PALETTE["matched"], linestyle=(0, (2, 1.5)), linewidth=0.75)
+    ax.text(1_170_000, 0.515, "0.5s", ha="right", va="bottom", fontsize=5.6, color=PALETTE["wrong"])
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(28_000, 1_250_000)
+    ax.set_ylim(0.025, 1.65)
+    ax.set_xticks([32_768, 100_000, 250_000, 500_000, 1_000_000], ["32k", "100k", "250k", "500k", "1M"])
+    ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
+    ax.set_yticks([0.05, 0.1, 0.5, 1.0], ["0.05", "0.1", "0.5", "1"])
+    ax.yaxis.set_minor_locator(mpl.ticker.NullLocator())
+    _format_axes(ax, x_label="offloaded candidate KV rows", y_label="p95 repair time (s)")
+    ax.legend(
+        loc="upper left",
+        frameon=False,
+        ncol=2,
+        handlelength=1.0,
+        borderaxespad=0.1,
+        handletextpad=0.25,
+        columnspacing=0.65,
+        fontsize=5.9,
+    )
+    ax.text(880_000, 1.23, "1.19s", ha="left", va="center", fontsize=5.7, color=PALETTE["text"])
+    ax.text(
+        0.98,
+        0.06,
+        "chunked GPU scoring + 32k-active move/inject",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=5.55,
+        color=PALETTE["text"],
+    )
+    save_figure(fig, "runtime_repair_scaling")
     return True
 
 
@@ -1957,6 +2131,8 @@ def generated_assets() -> Iterable[Path]:
         "query_count_breadth",
         "streaming_spill_heatmap",
         "proxy_latency_tradeoff",
+        "runtime_capacity_curve",
+        "runtime_repair_scaling",
         "partition_endpoint_dotplot",
         "multiturn_hard_trajectory",
         "h2o_compressor_breadth",
@@ -1976,6 +2152,8 @@ def main() -> None:
     render_query_count_breadth()
     render_streaming_spill_heatmap()
     render_proxy_latency_tradeoff()
+    render_runtime_capacity_curve()
+    render_runtime_repair_scaling()
     render_partition_endpoint_dotplot()
     render_multiturn_hard_trajectory()
     render_h2o_compressor_breadth()

@@ -169,6 +169,25 @@ On the systems side, PagedAttention/vLLM improves KV-memory efficiency
 during serving~\citep{vllm}, while InferCept preserves paused requests
 to avoid recomputing prefixes when augmented generation
 resumes~\citep{infercept}.
+Recent agent-serving measurements and systems studies further treat
+tool-call pauses as a first-class scheduling signal: production traces
+include many tool turns with second-scale and long-tail waits, and
+agent-serving systems now explicitly reason about resume prefills,
+offloading, and KV retention across tool gaps~\citep{appliedcompute,
+continuum,agentserve}.
+KV-cache layers and tiered-cache systems already expose off-device KV as
+a managed resource across GPU, host memory, storage, and network
+tiers~\citep{lmcache,ttkv}.
+Our focus is complementary: when a later turn reveals a new retrieval
+target, the runtime must decide which off-device rows should be promoted
+back into the active cache.
+Million-token context windows are also becoming a practical product
+interface rather than only a research target: current OpenAI, Google,
+and Anthropic documentation list roughly 1M-token model windows, while
+Meta reports a 10M-token context window for Llama 4
+Scout~\citep{openai41,gemini25pro,claudecontext,llama4}.
+This trend increases the pressure on runtime memory management even
+when the application-visible context length fits the model API.
 On the efficient-decoding side, SnapKV, StreamingLLM, and H$_2$O
 compress the cache under a fixed budget, while query-aware methods such
 as QUEST emphasize that token criticality depends on the
@@ -389,8 +408,8 @@ Figure~\ref{fig:specificity-control} fixes the operating point and tests
 whether the repair gain comes from the newly revealed $Q_2$ signal rather
 than from restoring any additional cached tokens or any query-like text.
 At $K=48$, stale-query and donor-query repairs remain near matched
-no-repair ($0.243$ versus $0.215$), while \idlekv{} reaches $0.542$
-with a positive paired gain confidence interval.
+no-repair (gain $0.028$), while \idlekv{} reaches gain $0.326$
+with a positive paired confidence interval.
 The same panel also shows the method boundary.
 Refresh-buffered, which reselects the whole resumed active budget from
 the active cache plus offloaded evicted-KV store using $Q_2$ scores,
@@ -404,9 +423,9 @@ room for stronger selection policies.
   \includegraphics[width=\columnwidth]{figures/specificity_control_dotplot.pdf}
   \caption{Next-turn signal specificity at $K=48$ on MQ-NIAH-4Q
   ($n{=}24$ examples across three partitions; $72$ paired cases, one
-  case per example-partition pair). Points show raw exact $Q_2$ score
-  with bootstrap $95\%$ confidence intervals; horizontal segments and
-  right-side labels show gain over matched no-repair. Stale and donor
+  case per example-partition pair). Points show exact $Q_2$ score gain
+  over matched no-repair with bootstrap $95\%$ confidence intervals;
+  the matched no-repair raw score is $0.215$. Stale and donor
   controls test whether any query-like signal suffices; Refresh is a
   full-budget reselector and \goldk{} uses benchmark metadata.}
   \label{fig:specificity-control}
@@ -511,36 +530,57 @@ saturate quality before final-active overlap reaches the $\goldk$
 reference.
 
 \paragraph{Latency accounting.}
-Earlier transfer-and-reinjection measurements on the same target
-hardware, excluding exact scoring, reach $46.94$\,ms p50 at $K=500$.
-Here p50 denotes the median over measured repair probes; p95/p99 in the
-appendix report the corresponding tail latencies.
+Table~\ref{tab:runtime-audit} separates scorer cost from state movement.
+Here p50 denotes the median over measured probes, while p95 reports the
+95th-percentile tail latency for the same probe set.
 The exact scorer is much slower because it scores the evicted pool
 directly: p50 is $6.38$\,s for MQ-NIAH-4Q and $6.99$\,s for
 MQ-NIAH-6Q, almost all in scoring.
 At $K=96$, the $Q_2$-appended-state proxy reduces p50 to $0.83$\,s and
-$0.71$\,s, respectively, giving $7.7{\times}$ and $9.9{\times}$ p50
-speedups over exact scoring while remaining above $\bmatch$ in paired
+$0.71$\,s, respectively, while remaining above $\bmatch$ in paired
 $n{=}100$ probes.
-Thus the exact curves are mechanistic evidence, and deployment requires
-a faster approximate scorer.
+By contrast, synthetic Qwen-shaped BF16 move-and-inject probes on the
+same GPU fit $K=5000$ rows into $12.9$\,ms p95 at 32K active rows and
+$108.5$\,ms p95 at 500K active rows.
+For a longer-store stress test, we also profile a chunked GPU candidate
+scorer that streams Qwen-shaped key rows from pinned host memory without
+materializing the full offloaded store on device.
+With query length 64, 32K active rows, and $K=5000$, chunked
+scoring plus move/inject takes $50.0$\,ms p95 at 32K offloaded
+candidate rows, $749.0$\,ms at 500K rows, and $1.17$\,s at 1M rows
+(Appendix Figure~\ref{fig:app-runtime-scaling}).
+This is an optimized synthetic scoring microbenchmark, not the current
+exact scorer used in the quality curves.
+We stop the measured active-cache stress test at 500K rows because a
+1M-row Qwen-shaped BF16 KV cache is already about 57\,GB before the
+current Python reinsertion path materializes transient merged and sorted
+copies.
+These probes exclude scoring and generation, so they do not by
+themselves show end-to-end agent speedups; they show that state movement
+is not the dominant bottleneck for the tested repair sizes.
 \begin{table}[t]
-  \caption{Runtime audit at $K=96$ unless noted. Scores are exact
-  $Q_2$ scores for the repaired cache; move-only measures KV transfer
-  and reinjection at $K=500$ and excludes scoring.}
+  \caption{Runtime accounting on the same RTX PRO 6000 Blackwell GPU.
+  Exact/proxy rows are answer-score probes at $K=96$; move+inject
+  settings are active-cache rows / restored rows and use synthetic
+  Qwen-shaped BF16 KV, pinned host memory, the current reinsertion path,
+  and exclude scoring and generation. The select+move row streams
+  offloaded key rows with a chunked GPU scorer and then adds the measured
+  32K-active move+inject p95.}
   \label{tab:runtime-audit}
   \centering
-  \footnotesize
-  \setlength{\tabcolsep}{3.0pt}
-  \begin{tabular}{llccc}
+  \scriptsize
+  \setlength{\tabcolsep}{1.55pt}
+  \begin{tabular}{lllccc}
     \toprule
-    setting & path & score & p50 total & p50 scoring \\
+    path & setting & score & p50 & p95 & score p50 \\
     \midrule
-    4Q & exact & 0.910 & 6.38\,s & 6.29\,s \\
-    4Q & proxy & 0.970 & 0.83\,s & 0.63\,s \\
-    6Q & exact & 0.989 & 6.99\,s & 6.90\,s \\
-    6Q & proxy & 0.894 & 0.71\,s & 0.54\,s \\
-    -- & move only & -- & 46.94\,ms & -- \\
+    exact & 4Q & 0.910 & 6.38\,s & 6.49\,s & 6.29\,s \\
+    proxy & 4Q & 0.970 & 0.83\,s & 1.00\,s & 0.63\,s \\
+    exact & 6Q & 0.989 & 6.99\,s & 7.28\,s & 6.90\,s \\
+    proxy & 6Q & 0.894 & 0.71\,s & 0.89\,s & 0.54\,s \\
+    move+inj & 32K/5K & -- & 12.8\,ms & 12.9\,ms & -- \\
+    move+inj & 500K/5K & -- & 105.6\,ms & 108.5\,ms & -- \\
+    select+move & 1M/5K & -- & 1.14\,s & 1.17\,s & -- \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -576,7 +616,15 @@ sink-plus-recent first-stage retention checks, and Appendix
 Figure~\ref{fig:app-transfer-runtime} gives one same-protocol
 Llama-3.1-8B-Instruct MQ-NIAH-6Q portability check, but broader
 retention-rule and multi-model transfer remain open.
-Future benchmarks should also vary the number, timing, and conflict
+Future systems should also treat the off-device store as finite.
+Existing tiered-cache systems motivate a hierarchy with hot active GPU
+KV, warm off-device KV that can be promoted during idle gaps, and colder
+compressed, summarized, or recomputable state.
+\idlekv{} provides evidence for turn-conditioned promotion from the
+warm tier, but it does not solve the next eviction problem: deciding
+which off-device KV should remain searchable when host memory or remote
+storage is also under pressure.
+Future benchmarks should therefore vary the number, timing, and conflict
 structure of new-turn constraints: the 2Q and 8Q breadth checks suggest
 that easy regimes can saturate while stricter multi-query turns expose
 how quickly eviction failures accumulate.
@@ -609,7 +657,7 @@ by how efficiently they decode, but by how well they maintain memory
 between turns.
 
 % -----------------------------------------------------------------------
-\begin{thebibliography}{12}
+\begin{thebibliography}{21}
 
 \bibitem[Abhyankar et~al.(2024)]{infercept}
 Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and Zhang, Y.
@@ -618,11 +666,27 @@ Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and Zhang, Y.
 \newblock In \emph{Proceedings of the 41st International Conference on
   Machine Learning (ICML)}, 2024.
 
+\bibitem[Applied Compute(2026)]{appliedcompute}
+Applied Compute.
+\newblock Benchmarking inference engines on agentic workloads.
+\newblock Technical report, 2026.
+\newblock \url{https://www.appliedcompute.com/research/inference-benchmark}.
+
+\bibitem[Anthropic(2026)]{claudecontext}
+Anthropic.
+\newblock Context windows.
+\newblock \url{https://docs.claude.com/en/docs/build-with-claude/context-windows}.
+
 \bibitem[Hsieh et~al.(2024)]{ruler}
 Hsieh, C.-Y., Sun, S., Kriman, S., Acharya, S., Rekesh, D., Jia, F.,
   Zhang, Y., and Ginsburg, B.
 \newblock RULER: What's the real context window size of your LLM?
 \newblock \emph{arXiv:2404.06654}, 2024.
+
+\bibitem[Google Cloud(2025)]{gemini25pro}
+Google Cloud.
+\newblock Gemini 2.5 Pro model documentation.
+\newblock \url{https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-pro}.
 
 \bibitem[Kwon et~al.(2023)]{vllm}
 Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C. H.,
@@ -644,6 +708,31 @@ Li, Y., Jiang, H., Wu, Q., Luo, X., Ahn, S., Zhang, C., Abdi, A. H.,
 \newblock SCBench: A KV cache-centric analysis of long-context methods.
 \newblock In \emph{International Conference on Learning Representations
   (ICLR)}, 2025.
+
+\bibitem[Li et~al.(2026)]{continuum}
+Li, H., Mang, Q., He, R., Zhang, Q., Mao, H., Chen, X., Zhou, H.,
+  Cheung, A., Gonzalez, J., and Stoica, I.
+\newblock Continuum: Efficient and robust multi-turn LLM agent
+  scheduling with KV cache time-to-live.
+\newblock \emph{arXiv:2511.02230}, 2026.
+
+\bibitem[Liu et~al.(2025)]{lmcache}
+Liu, Y., Cheng, Y., Yao, J., An, Y., Chen, X., Feng, S., Huang, Y.,
+  Shen, S., Zhang, R., Du, K., and Jiang, J.
+\newblock LMCache: An efficient KV cache layer for enterprise-scale LLM
+  inference.
+\newblock \emph{arXiv:2510.09665}, 2025.
+
+\bibitem[Meta AI(2025)]{llama4}
+Meta AI.
+\newblock The Llama 4 herd: The beginning of a new era of natively
+  multimodal AI innovation.
+\newblock \url{https://ai.meta.com/blog/llama-4-multimodal-intelligence/}.
+
+\bibitem[OpenAI(2026)]{openai41}
+OpenAI.
+\newblock GPT-4.1 model documentation.
+\newblock \url{https://platform.openai.com/docs/models/gpt-4.1}.
 
 \bibitem[Chen et~al.(2025)]{pitfalls}
 Chen, A., Geh, R., Grover, A., Van den Broeck, G., and Israel, D.
@@ -676,6 +765,12 @@ Xiao, G., Tang, Y., Zuo, J., Guo, J., Yang, S., Tang, H., Fu, Y.,
 \newblock In \emph{International Conference on Learning Representations
   (ICLR)}, 2024.
 
+\bibitem[Dzikanyanga et~al.(2026)]{ttkv}
+Dzikanyanga, G., Yang, W., Huang, H., Wu, D., Wang, S., Xia, W., and
+  K~C, S.
+\newblock TTKV: Temporal-tiered KV cache for long-context LLM inference.
+\newblock \emph{arXiv:2604.19769}, 2026.
+
 \bibitem[Zhang et~al.(2023)]{h2o}
 Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song, Z.,
   Tian, Y., R{\'e}, C., Barrett, C., Wang, Z., and Chen, B.
@@ -683,6 +778,12 @@ Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song, Z.,
   of large language models.
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2023.
+
+\bibitem[Zhang et~al.(2026)]{agentserve}
+Zhang, Y., Yan, Y., Yang, N., and Yuan, D.
+\newblock AgentServe: Algorithm-system co-design for efficient agentic
+  AI serving on a consumer-grade GPU.
+\newblock \emph{arXiv:2603.10342}, 2026.
 
 \end{thebibliography}
 
@@ -796,6 +897,35 @@ duplicated as wide tables.
 \end{figure}
 }{}
 
+\IfFileExists{figures/runtime_capacity_curve.pdf}{%
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/runtime_capacity_curve.pdf}
+  \caption{Synthetic move-and-inject capacity for Qwen-shaped BF16 KV
+  on the evaluation GPU. Left: p95 latency across restored rows $K$ for
+  active caches up to 100K rows. Right: p95 latency for $K=5000$ as the
+  active cache grows to 500K rows. These measurements use pinned
+  host-memory restored blocks and the current reinsertion path, and
+  exclude scorer time and generation.}
+  \label{fig:app-runtime-capacity}
+\end{figure}
+}{}
+
+\IfFileExists{figures/runtime_repair_scaling.pdf}{%
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/runtime_repair_scaling.pdf}
+  \caption{Measured high-context repair scaling for a compressed active
+  cache. The y-axis adds chunked GPU candidate scoring over an
+  offloaded Qwen-shaped key store to the measured 32K-active
+  move-and-inject p95. The scorer streams pinned host-memory key chunks,
+  uses query length 64, and does not materialize the full candidate
+  store on GPU; it is an optimized synthetic scoring probe rather than
+  the exact scorer used for the quality curves.}
+  \label{fig:app-runtime-scaling}
+\end{figure}
+}{}
+
 \IfFileExists{figures/model_transfer_breadth.pdf}{%
 \IfFileExists{figures/proxy_latency_tradeoff.pdf}{%
 \begin{figure*}[t]
@@ -815,12 +945,15 @@ duplicated as wide tables.
   gray band spans matched no-repair and content-agnostic restore
   controls; blue and orange marks show \idlekv{} and $\goldk{}$ for a
   Llama-3.1-8B-Instruct same-protocol 6Q appendix check. Right: ``move
-  only'' places the matched no-repair score at measured KV transfer and
-  reinjection latency. In paired $n{=}100$, $K=96$ probes, the proxy
+  only'' places the matched no-repair score at the measured
+  transfer-and-reinjection lower bound from the same scorer artifact. In
+  paired $n{=}100$, $K=96$ probes, the proxy
   remains above matched no-repair on both 4Q and 6Q while reducing p50
   total scorer latency from 6.38\,s to 0.83\,s and from 6.99\,s to
-  0.71\,s, respectively. Transfer and reinjection alone are 46.94\,ms
-  p50 and 53.47\,ms p99 at $K=500$.}
+  0.71\,s, respectively. Appendix
+  Figures~\ref{fig:app-runtime-capacity} and
+  \ref{fig:app-runtime-scaling} give the larger synthetic
+  movement and candidate-scoring capacity grids.}
   \label{fig:app-transfer-runtime}
 \end{figure*}
 }{}}{}
