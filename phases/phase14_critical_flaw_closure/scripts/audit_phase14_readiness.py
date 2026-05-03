@@ -289,7 +289,8 @@ def _print_text(report: dict[str, object]) -> None:
     print("[phase14 readiness]")
     for item in report["proxy_deployability"]:
         print(
-            "{label}: {status}; retained_gain={retained_gain}; "
+            "{label}: {status}; retained_gain={retained_gain} "
+            "(gate={retention_gate}); "
             "speedup={p50_total_speedup}x; failures={failures}".format(**item)
         )
     spec = report["specificity_refresh_boundary"]
