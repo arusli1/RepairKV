@@ -2,6 +2,13 @@
 
 **Storage, Selection, and Profiling**
 
+> Historical note (2026-05-03): this file is a planning/spec memo for the
+> original log-backed Phase 4 prototype. The current paper runtime evidence is
+> produced by `src/buffer/runtime_capacity.py` and
+> `scripts/run_runtime_capacity_profile.py`, then frozen into CSV snapshots
+> under `paper/figures/`. Treat older P6/tool-call frontier examples below as
+> historical context unless that path is explicitly rerun and revalidated.
+
 > **Goal:** Build the `EvictionBuffer` class that stores evicted token KV pairs on CPU, implements four candidate selection strategies, and profiles every operation that will run during the tool call idle window. The profiling table produced here determines the maximum repair budget K for every tool call duration in P6 — it is load-bearing infrastructure, not optional characterization.
 
 ---
@@ -595,7 +602,7 @@ def compute_feasibility_frontier(
     return frontier
 ```
 
-**Print the frontier table clearly:**
+**Historical frontier-table format:**
 
 | Tool call duration | Repair budget | Max K (tokens restored)        |
 |--------------------|---------------|---------------------------------|
@@ -607,9 +614,12 @@ def compute_feasibility_frontier(
 | 8.0s               | 7.2s          | ~[measure]                      |
 | 15s (pytest)       | 13.5s         | ~[measure]                      |
 | 30s                | 27s           | ~[measure]                      |
-| 60s (pip)          | 54s           | oracle feasible                 |
+| 60s (pip)          | 54s           | ~[measure]                      |
 
-This table goes directly into the paper. The shape of it — zero benefit at sub-0.5s tool calls, significant benefit at pytest/pip durations — contextualizes the repair algorithm within the real SWE-bench tool call distribution discussed earlier.
+This format was the intended paper table for the original log-backed Phase 4
+plan. Do not use it as current paper evidence unless the log-backed profiling
+path is rerun and the resulting numbers are reconciled with the current
+runtime-capacity profiler.
 
 ---
 

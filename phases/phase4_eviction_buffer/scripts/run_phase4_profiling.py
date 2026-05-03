@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""CLI scaffold for the log-based Phase 4 profiling path."""
+"""Historical CLI scaffold for the log-based Phase 4 profiling path.
+
+The current paper runtime-capacity evidence is produced by
+``run_runtime_capacity_profile.py``. This script is retained for the older
+Phase 3 log-backed prototype and should be rerun/validated before its outputs
+are used in paper claims.
+"""
 
 from __future__ import annotations
 
