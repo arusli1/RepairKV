@@ -25,12 +25,12 @@
 
 \usepackage{icml2026}
 
-\icmltitlerunning{IdleKV: Exploiting Idle Time to Repair KV Caches}
+\icmltitlerunning{IdleKV: Repairing Long-Context Agent Memory}
 
 \begin{document}
 
 \twocolumn[
-  \icmltitle{IdleKV: Exploiting Idle Time to Repair KV Caches for Long-Context Agents}
+  \icmltitle{IdleKV: Repairing Long-Context Agent Memory Between Turns}
 
   \begin{icmlauthorlist}
     \icmlauthor{Andrew Rusli}{equal,harvard}
@@ -169,25 +169,26 @@ On the systems side, PagedAttention/vLLM improves KV-memory efficiency
 during serving~\citep{vllm}, while InferCept preserves paused requests
 to avoid recomputing prefixes when augmented generation
 resumes~\citep{infercept}.
-Recent agent-serving measurements and systems studies further treat
-tool-call pauses as a first-class scheduling signal: production traces
-include many tool turns with second-scale and long-tail waits, and
-agent-serving systems now explicitly reason about resume prefills,
-offloading, and KV retention across tool gaps~\citep{appliedcompute,
-continuum,agentserve}.
+Agent and tool-use benchmarks increasingly make external actions part of
+the workload: ToolLLM studies single- and multi-tool API use, WebArena
+evaluates long-horizon web interactions with tools and external
+knowledge bases, SWE-bench requires repository edits evaluated by tests,
+and AgentBench evaluates agents in interactive
+environments~\citep{toollm,webarena,swebench,agentbench}.
+These benchmarks motivate paused, stateful workflows, while
+agent-serving systems explicitly reason about resume prefills,
+offloading, and KV retention across turn gaps~\citep{continuum,
+agentserve}.
 KV-cache layers and tiered-cache systems already expose off-device KV as
 a managed resource across GPU, host memory, storage, and network
 tiers~\citep{lmcache,ttkv}.
 Our focus is complementary: when a later turn reveals a new retrieval
 target, the runtime must decide which off-device rows should be promoted
 back into the active cache.
-Million-token context windows are also becoming a practical product
-interface rather than only a research target: current OpenAI, Google,
-and Anthropic documentation list roughly 1M-token model windows, while
-Meta reports a 10M-token context window for Llama 4
-Scout~\citep{openai41,gemini25pro,claudecontext,llama4}.
-This trend increases the pressure on runtime memory management even
-when the application-visible context length fits the model API.
+Long-context benchmarks now stress contexts from ordinary long documents
+to 100K-token and KV-lifecycle regimes, showing that application-visible
+context length does not remove the need for memory-management
+mechanisms~\citep{longbench,inftybench,ruler,scbench}.
 On the efficient-decoding side, SnapKV, StreamingLLM, and H$_2$O
 compress the cache under a fixed budget, while query-aware methods such
 as QUEST emphasize that token criticality depends on the
@@ -530,60 +531,46 @@ saturate quality before final-active overlap reaches the $\goldk$
 reference.
 
 \paragraph{Latency accounting.}
-Table~\ref{tab:runtime-audit} separates scorer cost from state movement.
-Here p50 denotes the median over measured probes, while p95 reports the
-95th-percentile tail latency for the same probe set.
-The exact scorer is much slower because it scores the evicted pool
-directly: p50 is $6.38$\,s for MQ-NIAH-4Q and $6.99$\,s for
-MQ-NIAH-6Q, almost all in scoring.
-At $K=96$, the $Q_2$-appended-state proxy reduces p50 to $0.83$\,s and
-$0.71$\,s, respectively, while remaining above $\bmatch$ in paired
+We separate quality-linked scorer diagnostics from systems-capacity
+measurements.
+Here p50 denotes the median over measured probes, while p95 and p99
+report tail latency for the same probe set.
+The current exact answer scorer is a research implementation: at
+$K=96$, p50 ranges from $6.08$\,s on MQ-NIAH-2Q to $7.62$\,s on
+MQ-NIAH-8Q, almost all in scoring.
+The $Q_2$-appended-state proxy is faster, reducing paired 4Q/6Q p50 to
+$0.83$\,s and $0.71$\,s while remaining above $\bmatch$ in paired
 $n{=}100$ probes.
-By contrast, synthetic Qwen-shaped BF16 move-and-inject probes on the
-same GPU fit $K=5000$ rows into $12.9$\,ms p95 at 32K active rows and
-$108.5$\,ms p95 at 500K active rows.
-For a longer-store stress test, we also profile a chunked GPU candidate
-scorer that streams Qwen-shaped key rows from pinned host memory without
-materializing the full offloaded store on device.
-With query length 64, 32K active rows, and $K=5000$, chunked
-scoring plus move/inject takes $50.0$\,ms p95 at 32K offloaded
-candidate rows, $749.0$\,ms at 500K rows, and $1.17$\,s at 1M rows
-(Appendix Figure~\ref{fig:app-runtime-scaling}).
-This is an optimized synthetic scoring microbenchmark, not the current
-exact scorer used in the quality curves.
-We stop the measured active-cache stress test at 500K rows because a
-1M-row Qwen-shaped BF16 KV cache is already about 57\,GB before the
-current Python reinsertion path materializes transient merged and sorted
-copies.
-These probes exclude scoring and generation, so they do not by
-themselves show end-to-end agent speedups; they show that state movement
-is not the dominant bottleneck for the tested repair sizes.
-\begin{table}[t]
-  \caption{Runtime accounting on the same RTX PRO 6000 Blackwell GPU.
-  Exact/proxy rows are answer-score probes at $K=96$; move+inject
-  settings are active-cache rows / restored rows and use synthetic
-  Qwen-shaped BF16 KV, pinned host memory, the current reinsertion path,
-  and exclude scoring and generation. The select+move row streams
-  offloaded key rows with a chunked GPU scorer and then adds the measured
-  32K-active move+inject p95.}
-  \label{tab:runtime-audit}
+The load-bearing systems question is whether a scalable selector and
+state movement can fit into idle windows.
+Figure~\ref{fig:runtime-envelope} therefore reports a single latency
+envelope: a chunked GPU selector streams Qwen-shaped BF16 key rows from
+pinned host memory with full source-pool coverage, scores a length-64
+query, selects $K$ rows, and adds the measured 32K-active
+move-and-inject latency for the same $K$.
+At the conservative $K=5000$ stress budget, p95 repair time is
+$50.0$\,ms for 32K offloaded candidates, $88.9$\,ms for 64K,
+$161.6$\,ms for 128K, $308.9$\,ms for 256K, $601.0$\,ms for 512K,
+and $1.20$\,s for 1M.
+Under a 10\% slack convention, the corresponding continuous idle-budget
+requirement is p95$/0.9$; the horizontal guides in the figure are only
+representative checkpoints, not an empirical tool-call distribution.
+The probe excludes generation and is not the exact scorer used in the
+quality curves, but it shows that the mechanical repair path is not the
+dominant bottleneck at the tested scales.
+\begin{figure}[t]
   \centering
-  \scriptsize
-  \setlength{\tabcolsep}{1.55pt}
-  \begin{tabular}{lllccc}
-    \toprule
-    path & setting & score & p50 & p95 & score p50 \\
-    \midrule
-    exact & 4Q & 0.910 & 6.38\,s & 6.49\,s & 6.29\,s \\
-    proxy & 4Q & 0.970 & 0.83\,s & 1.00\,s & 0.63\,s \\
-    exact & 6Q & 0.989 & 6.99\,s & 7.28\,s & 6.90\,s \\
-    proxy & 6Q & 0.894 & 0.71\,s & 0.89\,s & 0.54\,s \\
-    move+inj & 32K/5K & -- & 12.8\,ms & 12.9\,ms & -- \\
-    move+inj & 500K/5K & -- & 105.6\,ms & 108.5\,ms & -- \\
-    select+move & 1M/5K & -- & 1.14\,s & 1.17\,s & -- \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+  \includegraphics[width=\columnwidth]{figures/runtime_repair_scaling.pdf}
+  \caption{Measured repair-latency envelope on the evaluation GPU.
+  Lines show p95 service time over 80 trials after five warmups with
+  32K active rows, query length 64, pinned host memory, full
+  source-pool coverage, and Qwen-shaped BF16 KV. Latency includes
+  chunked candidate-key scoring, top-$K$ selection, selected-KV
+  host-to-device transfer, and reinsertion; it excludes generation and
+  the research exact answer scorer. Dashed lines are representative
+  continuous idle-budget checkpoints.}
+  \label{fig:runtime-envelope}
+\end{figure}
 
 % -----------------------------------------------------------------------
 \section{Discussion and Limitations}
@@ -657,7 +644,7 @@ by how efficiently they decode, but by how well they maintain memory
 between turns.
 
 % -----------------------------------------------------------------------
-\begin{thebibliography}{21}
+\begin{thebibliography}{27}
 
 \bibitem[Abhyankar et~al.(2024)]{infercept}
 Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and Zhang, Y.
@@ -666,27 +653,19 @@ Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and Zhang, Y.
 \newblock In \emph{Proceedings of the 41st International Conference on
   Machine Learning (ICML)}, 2024.
 
-\bibitem[Applied Compute(2026)]{appliedcompute}
-Applied Compute.
-\newblock Benchmarking inference engines on agentic workloads.
-\newblock Technical report, 2026.
-\newblock \url{https://www.appliedcompute.com/research/inference-benchmark}.
-
-\bibitem[Anthropic(2026)]{claudecontext}
-Anthropic.
-\newblock Context windows.
-\newblock \url{https://docs.claude.com/en/docs/build-with-claude/context-windows}.
+\bibitem[Bai et~al.(2024)]{longbench}
+Bai, Y., Lv, X., Zhang, J., Lyu, H., Tang, J., Huang, Z., Du, Z.,
+  Liu, X., Zeng, A., Hou, L., Dong, Y., Tang, J., and Li, J.
+\newblock LongBench: A bilingual, multitask benchmark for long context
+  understanding.
+\newblock In \emph{Proceedings of the 62nd Annual Meeting of the
+  Association for Computational Linguistics (ACL)}, 2024.
 
 \bibitem[Hsieh et~al.(2024)]{ruler}
 Hsieh, C.-Y., Sun, S., Kriman, S., Acharya, S., Rekesh, D., Jia, F.,
   Zhang, Y., and Ginsburg, B.
 \newblock RULER: What's the real context window size of your LLM?
-\newblock \emph{arXiv:2404.06654}, 2024.
-
-\bibitem[Google Cloud(2025)]{gemini25pro}
-Google Cloud.
-\newblock Gemini 2.5 Pro model documentation.
-\newblock \url{https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-pro}.
+\newblock In \emph{Conference on Language Modeling (COLM)}, 2024.
 
 \bibitem[Kwon et~al.(2023)]{vllm}
 Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C. H.,
@@ -723,16 +702,20 @@ Liu, Y., Cheng, Y., Yao, J., An, Y., Chen, X., Feng, S., Huang, Y.,
   inference.
 \newblock \emph{arXiv:2510.09665}, 2025.
 
-\bibitem[Meta AI(2025)]{llama4}
-Meta AI.
-\newblock The Llama 4 herd: The beginning of a new era of natively
-  multimodal AI innovation.
-\newblock \url{https://ai.meta.com/blog/llama-4-multimodal-intelligence/}.
+\bibitem[Liu et~al.(2024)]{agentbench}
+Liu, X., Yu, H., Zhang, H., Xu, Y., Lei, X., Lai, H., Gu, Y.,
+  Ding, H., Men, K., Yang, K., Zhang, S., Deng, X., and others.
+\newblock AgentBench: Evaluating LLMs as agents.
+\newblock In \emph{International Conference on Learning
+  Representations (ICLR)}, 2024.
 
-\bibitem[OpenAI(2026)]{openai41}
-OpenAI.
-\newblock GPT-4.1 model documentation.
-\newblock \url{https://platform.openai.com/docs/models/gpt-4.1}.
+\bibitem[Qin et~al.(2024)]{toollm}
+Qin, Y., Liang, S., Ye, Y., Zhu, K., Yan, L., Lu, Y., Lin, Y.,
+  Cong, X., Tang, X., Qian, B., Zhao, S., Hong, L., and others.
+\newblock ToolLLM: Facilitating large language models to master
+  16000+ real-world APIs.
+\newblock In \emph{International Conference on Learning
+  Representations (ICLR)}, 2024.
 
 \bibitem[Chen et~al.(2025)]{pitfalls}
 Chen, A., Geh, R., Grover, A., Van den Broeck, G., and Israel, D.
@@ -743,6 +726,14 @@ Chen, A., Geh, R., Grover, A., Van den Broeck, G., and Israel, D.
 Qwen Team.
 \newblock Qwen2.5 technical report.
 \newblock \emph{arXiv:2412.15115}, 2024.
+
+\bibitem[Jimenez et~al.(2024)]{swebench}
+Jimenez, C. E., Yang, J., Wettig, A., Yao, S., Pei, K., Press, O.,
+  and Narasimhan, K.
+\newblock SWE-bench: Can language models resolve real-world GitHub
+  issues?
+\newblock In \emph{International Conference on Learning
+  Representations (ICLR)}, 2024.
 
 \bibitem[Tang et~al.(2024)]{quest}
 Tang, J., Zhao, Y., Zhu, K., Xiao, G., Kasikci, B., and Han, S.
@@ -765,6 +756,14 @@ Xiao, G., Tang, Y., Zuo, J., Guo, J., Yang, S., Tang, H., Fu, Y.,
 \newblock In \emph{International Conference on Learning Representations
   (ICLR)}, 2024.
 
+\bibitem[Zhang et~al.(2024)]{inftybench}
+Zhang, X., Chen, Y., Hu, S., Xu, Z., Chen, J., Hao, M. K., Han, X.,
+  Thai, Z. L., Wang, S., Liu, Z., and Sun, M.
+\newblock $\infty$Bench: Extending long context evaluation beyond 100K
+  tokens.
+\newblock In \emph{Proceedings of the 62nd Annual Meeting of the
+  Association for Computational Linguistics (ACL)}, 2024.
+
 \bibitem[Dzikanyanga et~al.(2026)]{ttkv}
 Dzikanyanga, G., Yang, W., Huang, H., Wu, D., Wang, S., Xia, W., and
   K~C, S.
@@ -778,6 +777,14 @@ Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song, Z.,
   of large language models.
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2023.
+
+\bibitem[Zhou et~al.(2024)]{webarena}
+Zhou, S., Xu, F. F., Zhu, H., Zhou, X., Lo, R., Sridhar, A.,
+  Cheng, X., Ou, T., Bisk, Y., Fried, D., Alon, U., and Neubig, G.
+\newblock WebArena: A realistic web environment for building autonomous
+  agents.
+\newblock In \emph{International Conference on Learning
+  Representations (ICLR)}, 2024.
 
 \bibitem[Zhang et~al.(2026)]{agentserve}
 Zhang, Y., Yan, Y., Yang, N., and Yuan, D.
@@ -911,21 +918,6 @@ duplicated as wide tables.
 \end{figure}
 }{}
 
-\IfFileExists{figures/runtime_repair_scaling.pdf}{%
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\columnwidth]{figures/runtime_repair_scaling.pdf}
-  \caption{Measured high-context repair scaling for a compressed active
-  cache. The y-axis adds chunked GPU candidate scoring over an
-  offloaded Qwen-shaped key store to the measured 32K-active
-  move-and-inject p95. The scorer streams pinned host-memory key chunks,
-  uses query length 64, and does not materialize the full candidate
-  store on GPU; it is an optimized synthetic scoring probe rather than
-  the exact scorer used for the quality curves.}
-  \label{fig:app-runtime-scaling}
-\end{figure}
-}{}
-
 \IfFileExists{figures/model_transfer_breadth.pdf}{%
 \IfFileExists{figures/proxy_latency_tradeoff.pdf}{%
 \begin{figure*}[t]
@@ -951,9 +943,9 @@ duplicated as wide tables.
   remains above matched no-repair on both 4Q and 6Q while reducing p50
   total scorer latency from 6.38\,s to 0.83\,s and from 6.99\,s to
   0.71\,s, respectively. Appendix
-  Figures~\ref{fig:app-runtime-capacity} and
-  \ref{fig:app-runtime-scaling} give the larger synthetic
-  movement and candidate-scoring capacity grids.}
+  Figure~\ref{fig:app-runtime-capacity} gives the larger synthetic
+  move-and-inject capacity grid, while Figure~\ref{fig:runtime-envelope}
+  reports the main candidate-scoring latency envelope.}
   \label{fig:app-transfer-runtime}
 \end{figure*}
 }{}}{}

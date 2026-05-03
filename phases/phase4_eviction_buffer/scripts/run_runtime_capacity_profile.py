@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Profile host-to-GPU KV transfer and reinjection capacity.
+"""Profile host-to-GPU KV repair capacity.
 
-This script intentionally excludes answer scoring.  It measures whether the
-mechanical repair path can fit inside idle windows once a scorer has selected
-which rows to restore.
+The modes separate mechanical movement, chunked candidate selection, and an
+integrated synthetic repair path that scans an offloaded candidate store,
+selects top-K rows, moves selected KV, and reinserts it.
 """
 
 from __future__ import annotations
@@ -24,6 +24,9 @@ from phases.phase4_eviction_buffer.src.buffer.runtime_capacity import (  # noqa:
     feasibility_rows,
     parse_dtype,
     profile_chunked_selection_capacity,
+    profile_chunked_selection_capacity_multi_k,
+    profile_end_to_end_repair_capacity,
+    profile_end_to_end_repair_capacity_multi_k,
     profile_transfer_inject_capacity,
     write_rows_csv,
 )
@@ -41,15 +44,27 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=("move_inject", "chunked_select"),
+        choices=(
+            "move_inject",
+            "chunked_select",
+            "chunked_select_multi_k",
+            "end_to_end_repair",
+            "end_to_end_repair_multi_k",
+        ),
         default="move_inject",
-        help="Profile KV movement/reinsertion or chunked candidate scoring.",
+        help="Profile movement, candidate scoring, or integrated synthetic repair.",
     )
     parser.add_argument("--active-tokens", default="8192,32768,100000")
     parser.add_argument("--candidate-tokens", default="32768,100000,250000,500000,1000000")
     parser.add_argument("--k", default="96,500,1000,2000,5000")
     parser.add_argument("--query-len", type=int, default=64)
     parser.add_argument("--chunk-tokens", type=int, default=16384)
+    parser.add_argument(
+        "--source-pool-chunks",
+        type=int,
+        default=1,
+        help="Distinct pinned host chunks cycled by chunked_select mode.",
+    )
     parser.add_argument("--trials", type=int, default=20)
     parser.add_argument("--warmup-trials", type=int, default=2)
     parser.add_argument("--device", default="cuda")
@@ -123,7 +138,7 @@ def main() -> int:
                     f"p99={float(row['p99_total_ms']):.2f}ms",
                     flush=True,
                 )
-    else:
+    elif args.mode == "chunked_select":
         for candidates in candidate_tokens:
             for k in k_values:
                 if k > candidates:
@@ -139,6 +154,7 @@ def main() -> int:
                     spec=spec,
                     query_len=int(args.query_len),
                     chunk_tokens=int(args.chunk_tokens),
+                    source_pool_chunks=int(args.source_pool_chunks),
                     device=args.device,
                     trials=trials,
                     warmup_trials=warmup_trials,
@@ -152,6 +168,112 @@ def main() -> int:
                     f"p99={float(row['p99_total_ms']):.2f}ms",
                     flush=True,
                 )
+    elif args.mode == "chunked_select_multi_k":
+        for candidates in candidate_tokens:
+            fitting_k = tuple(k for k in k_values if k <= candidates)
+            if not fitting_k:
+                continue
+            print(
+                f"[runtime-capacity] candidates={candidates} k={','.join(str(k) for k in fitting_k)} "
+                f"q_len={args.query_len} chunk={args.chunk_tokens} "
+                f"pool={args.source_pool_chunks} trials={trials}",
+                flush=True,
+            )
+            candidate_rows = profile_chunked_selection_capacity_multi_k(
+                candidate_tokens=candidates,
+                k_tokens_values=fitting_k,
+                spec=spec,
+                query_len=int(args.query_len),
+                chunk_tokens=int(args.chunk_tokens),
+                source_pool_chunks=int(args.source_pool_chunks),
+                device=args.device,
+                trials=trials,
+                warmup_trials=warmup_trials,
+                pin_memory=not args.no_pin_memory,
+            )
+            rows.extend(candidate_rows)
+            for row in candidate_rows:
+                print(
+                    "[runtime-capacity] "
+                    f"k={int(row['k'])} "
+                    f"p50={float(row['p50_total_ms']):.2f}ms "
+                    f"p95={float(row['p95_total_ms']):.2f}ms "
+                    f"p99={float(row['p99_total_ms']):.2f}ms",
+                    flush=True,
+                )
+    elif args.mode == "end_to_end_repair":
+        for active in active_tokens:
+            for candidates in candidate_tokens:
+                for k in k_values:
+                    if k > candidates:
+                        continue
+                    print(
+                        f"[runtime-capacity] active={active} candidates={candidates} k={k} "
+                        f"q_len={args.query_len} chunk={args.chunk_tokens} "
+                        f"pool={args.source_pool_chunks} trials={trials}",
+                        flush=True,
+                    )
+                    row = profile_end_to_end_repair_capacity(
+                        active_tokens=active,
+                        candidate_tokens=candidates,
+                        k_tokens=k,
+                        spec=spec,
+                        query_len=int(args.query_len),
+                        chunk_tokens=int(args.chunk_tokens),
+                        source_pool_chunks=int(args.source_pool_chunks),
+                        device=args.device,
+                        trials=trials,
+                        warmup_trials=warmup_trials,
+                        pin_memory=not args.no_pin_memory,
+                    )
+                    rows.append(row)
+                    print(
+                        "[runtime-capacity] "
+                        f"p50={float(row['p50_total_ms']):.2f}ms "
+                        f"p95={float(row['p95_total_ms']):.2f}ms "
+                        f"p99={float(row['p99_total_ms']):.2f}ms "
+                        f"(select p95={float(row['p95_select_ms']):.2f}ms, "
+                        f"move+inject p95={float(row['p95_move_inject_ms']):.2f}ms)",
+                        flush=True,
+                    )
+    else:
+        for active in active_tokens:
+            for candidates in candidate_tokens:
+                fitting_k = tuple(k for k in k_values if k <= candidates)
+                if not fitting_k:
+                    continue
+                print(
+                    f"[runtime-capacity] active={active} candidates={candidates} "
+                    f"k={','.join(str(k) for k in fitting_k)} "
+                    f"q_len={args.query_len} chunk={args.chunk_tokens} "
+                    f"pool={args.source_pool_chunks} trials={trials}",
+                    flush=True,
+                )
+                candidate_rows = profile_end_to_end_repair_capacity_multi_k(
+                    active_tokens=active,
+                    candidate_tokens=candidates,
+                    k_tokens_values=fitting_k,
+                    spec=spec,
+                    query_len=int(args.query_len),
+                    chunk_tokens=int(args.chunk_tokens),
+                    source_pool_chunks=int(args.source_pool_chunks),
+                    device=args.device,
+                    trials=trials,
+                    warmup_trials=warmup_trials,
+                    pin_memory=not args.no_pin_memory,
+                )
+                rows.extend(candidate_rows)
+                for row in candidate_rows:
+                    print(
+                        "[runtime-capacity] "
+                        f"k={int(row['k'])} "
+                        f"p50={float(row['p50_total_ms']):.2f}ms "
+                        f"p95={float(row['p95_total_ms']):.2f}ms "
+                        f"p99={float(row['p99_total_ms']):.2f}ms "
+                        f"(scan p95={float(row['p95_scan_ms']):.2f}ms, "
+                        f"move+inject p95={float(row['p95_move_inject_ms']):.2f}ms)",
+                        flush=True,
+                    )
 
     prefix = Path(args.out_prefix)
     capacity_csv = prefix.with_suffix(".csv")
@@ -164,6 +286,14 @@ def main() -> int:
             rows,
             idle_windows_s=idle_windows_s,
             budget_fraction=float(args.budget_fraction),
+        )
+        write_rows_csv(fit_rows, feasibility_csv)
+    elif args.mode in {"end_to_end_repair", "end_to_end_repair_multi_k"}:
+        fit_rows = feasibility_rows(
+            rows,
+            idle_windows_s=idle_windows_s,
+            budget_fraction=float(args.budget_fraction),
+            group_fields=("active_tokens", "candidate_tokens"),
         )
         write_rows_csv(fit_rows, feasibility_csv)
     metadata_json.parent.mkdir(parents=True, exist_ok=True)
@@ -184,6 +314,7 @@ def main() -> int:
                 "head_dim": args.head_dim,
                 "query_len": args.query_len,
                 "chunk_tokens": args.chunk_tokens,
+                "source_pool_chunks": args.source_pool_chunks,
                 "bytes_per_token": spec.bytes_per_token,
                 "idle_windows_s": list(idle_windows_s),
                 "budget_fraction": float(args.budget_fraction),

@@ -523,6 +523,32 @@ Use tables for:
   than the quality/latency tradeoff shape.
 - Appendix reproducibility details.
 
+Runtime table rules:
+
+- Do not mix fundamentally different latency paths as if they are one protocol.
+  If exact answer scoring, proxy answer scoring, KV movement, and
+  offloaded-store scans all appear, separate them by role: quality-linked
+  scorer diagnostics versus systems-capacity measurements.
+- A "latency envelope" plot should put offloaded candidate-store size or
+  context/KV rows on the x-axis and p95 repair service time on the y-axis.
+  Horizontal idle-window thresholds are acceptable only when the caption states
+  the budget fraction, the active-cache size, query length, restore budget, and
+  whether generation is excluded.
+- Idle-window gaps are continuous, not categorical. In main text, prefer a
+  continuous latency-envelope figure plus a few prose anchor numbers. If
+  discrete thresholds appear, call them representative idle-budget checkpoints
+  and state the slack convention. Do not use an "idle" table column in the main
+  paper unless it is explicitly tied to a measured idle-window distribution.
+- For the main runtime claim, prefer one measured envelope: fixed hardware,
+  fixed model-shaped KV layout, fixed active-cache size, fixed query length,
+  explicit restored-row budget `K`, and p50/p95/p99 over enough trials.
+- Report whether source data covered the whole measured candidate store,
+  whether host memory was pinned, and whether the row includes scoring,
+  transfer, reinsertion, and/or generation.
+- Idle-window claims need an idle-window distribution. Without an empirical
+  trace, write threshold statements such as "fits within a 1s idle window with
+  10% slack" rather than "covers X% of tool calls."
+
 Avoid main-text tables for:
 
 - Full `K` sweeps already shown by a line plot.
@@ -536,7 +562,8 @@ ICML table rules:
 
 - Caption/title above table.
 - Center tables.
-- Make rows and columns legible.
+- Make rows and columns legible. A narrow table may sit at its natural width;
+  do not stretch a small table to the column edge merely for appearance.
 - Use booktabs style where possible.
 - Put two-column tables at the top or bottom only if unavoidable.
 

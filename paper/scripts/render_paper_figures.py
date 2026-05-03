@@ -1174,46 +1174,200 @@ def render_runtime_capacity_curve() -> bool:
     return True
 
 
+def _runtime_select_with_move(
+    select_df: pd.DataFrame,
+    move_df: pd.DataFrame,
+    *,
+    active_tokens: int = 32768,
+    percentile_field: str = "p95_total_ms",
+) -> pd.DataFrame:
+    """Combine chunked-selection latency with measured move/inject latency."""
+    required_select = {"candidate_tokens", "k", percentile_field}
+    required_move = {"active_tokens", "k", percentile_field}
+    if not required_select.issubset(select_df.columns):
+        missing = sorted(required_select.difference(select_df.columns))
+        raise ValueError(f"selection CSV missing columns: {missing}")
+    if not required_move.issubset(move_df.columns):
+        missing = sorted(required_move.difference(move_df.columns))
+        raise ValueError(f"move CSV missing columns: {missing}")
+
+    move_subset = move_df[move_df["active_tokens"].astype(int) == int(active_tokens)]
+    records: list[dict[str, float | int]] = []
+    for row in select_df.itertuples(index=False):
+        k_value = int(getattr(row, "k"))
+        move_row = move_subset[move_subset["k"].astype(int) == k_value]
+        if move_row.empty:
+            continue
+        select_ms = float(getattr(row, percentile_field))
+        move_ms = float(move_row.iloc[0][percentile_field])
+        records.append(
+            {
+                "candidate_tokens": int(getattr(row, "candidate_tokens")),
+                "k": k_value,
+                "select_ms": select_ms,
+                "move_ms": move_ms,
+                "repair_ms": select_ms + move_ms,
+                "repair_s": (select_ms + move_ms) / 1000.0,
+            }
+        )
+    return pd.DataFrame.from_records(records)
+
+
+def _runtime_e2e_repair_frame(
+    e2e_df: pd.DataFrame,
+    *,
+    active_tokens: int = 32768,
+    query_len: int = 64,
+    percentile_field: str = "p95_total_ms",
+) -> pd.DataFrame:
+    """Normalize integrated end-to-end repair rows for plotting."""
+    required = {"active_tokens", "candidate_tokens", "k", percentile_field}
+    if not required.issubset(e2e_df.columns):
+        missing = sorted(required.difference(e2e_df.columns))
+        raise ValueError(f"end-to-end runtime CSV missing columns: {missing}")
+    subset = e2e_df[e2e_df["active_tokens"].astype(int) == int(active_tokens)].copy()
+    if "query_len" in subset.columns:
+        subset = subset[subset["query_len"].astype(int) == int(query_len)].copy()
+    records: list[dict[str, float | int]] = []
+    for row in subset.itertuples(index=False):
+        repair_ms = float(getattr(row, percentile_field))
+        records.append(
+            {
+                "candidate_tokens": int(getattr(row, "candidate_tokens")),
+                "k": int(getattr(row, "k")),
+                "repair_ms": repair_ms,
+                "repair_s": repair_ms / 1000.0,
+            }
+        )
+    return pd.DataFrame.from_records(records)
+
+
+def _max_measured_candidates_by_idle(
+    repair_df: pd.DataFrame,
+    *,
+    k_value: int,
+    idle_windows_s: Iterable[float] = (0.1, 0.5, 1.0, 2.0, 5.0),
+    budget_fraction: float = 0.90,
+) -> pd.DataFrame:
+    """Return largest measured candidate store fitting each idle-window budget."""
+    if not 0.0 < float(budget_fraction) <= 1.0:
+        raise ValueError("budget_fraction must lie in (0, 1].")
+    subset = repair_df[repair_df["k"].astype(int) == int(k_value)].copy()
+    records: list[dict[str, float | int]] = []
+    for idle_s in idle_windows_s:
+        budget_s = float(idle_s) * float(budget_fraction)
+        fitting = subset[subset["repair_s"].astype(float) <= budget_s]
+        records.append(
+            {
+                "idle_window_s": float(idle_s),
+                "budget_s": float(budget_s),
+                "max_candidate_tokens": int(fitting["candidate_tokens"].max()) if not fitting.empty else 0,
+            }
+        )
+    return pd.DataFrame.from_records(records)
+
+
 def render_runtime_repair_scaling() -> bool:
     """Render measured repair time as offloaded candidate context grows."""
 
-    select_path = (
-        FIGURE_DIR / "runtime_chunked_select_32k_1m.csv"
-        if (FIGURE_DIR / "runtime_chunked_select_32k_1m.csv").exists()
-        else next(iter(sorted(PHASE4_RUNTIME_DIR.glob("runtime_chunked_select_*.csv"))), None)
+    e2e_path = next(
+        (
+            path
+            for path in (
+                FIGURE_DIR / "runtime_e2e_frontier_32k.csv",
+                FIGURE_DIR / "runtime_e2e_frontier.csv",
+            )
+            if path.exists()
+        ),
+        next(iter(sorted(PHASE4_RUNTIME_DIR.glob("runtime_e2e_frontier_*.csv"), reverse=True)), None),
     )
-    move_path = (
-        FIGURE_DIR / "runtime_capacity_8k_32k_100k.csv"
-        if (FIGURE_DIR / "runtime_capacity_8k_32k_100k.csv").exists()
-        else next(iter(sorted(PHASE4_RUNTIME_DIR.glob("runtime_capacity_robust_*.csv"))), None)
+    select_path = next(
+        (
+            path
+            for path in (
+                FIGURE_DIR / "runtime_latency_envelope_select.csv",
+                FIGURE_DIR / "runtime_chunked_select_fullpool_32k_1m.csv",
+                FIGURE_DIR / "runtime_chunked_select_32k_1m.csv",
+            )
+            if path.exists()
+        ),
+        next(
+            iter(
+                sorted(PHASE4_RUNTIME_DIR.glob("runtime_latency_envelope_[0-9]*_select.csv"), reverse=True)
+                + sorted(PHASE4_RUNTIME_DIR.glob("runtime_chunked_select_fullpool_*.csv"), reverse=True)
+            ),
+            None,
+        ),
     )
-    if select_path is None or not select_path.exists() or move_path is None or not move_path.exists():
+    move_path = next(
+        (
+            path
+            for path in (
+                FIGURE_DIR / "runtime_latency_envelope_move.csv",
+                FIGURE_DIR / "runtime_move_inject_32k.csv",
+                FIGURE_DIR / "runtime_capacity_8k_32k_100k.csv",
+            )
+            if path.exists()
+        ),
+        next(
+            iter(
+                sorted(PHASE4_RUNTIME_DIR.glob("runtime_latency_envelope_[0-9]*_move.csv"), reverse=True)
+                + sorted(PHASE4_RUNTIME_DIR.glob("runtime_move_inject_32k_*.csv"), reverse=True)
+            ),
+            None,
+        ),
+    )
+    has_e2e = e2e_path is not None and e2e_path.exists()
+    has_decomposed = (
+        select_path is not None
+        and select_path.exists()
+        and move_path is not None
+        and move_path.exists()
+    )
+    if not has_e2e and not has_decomposed:
         for ext in ("pdf", "png"):
             (FIGURE_DIR / f"runtime_repair_scaling.{ext}").unlink(missing_ok=True)
         return False
 
-    select_df = load_numeric_csv(select_path)
-    move_df = load_numeric_csv(move_path)
-    move_32k = move_df[move_df["active_tokens"].astype(int) == 32768]
-    if select_df.empty or move_32k.empty:
+    repair_df = pd.DataFrame()
+    if has_decomposed:
+        select_df = load_numeric_csv(select_path)
+        move_df = load_numeric_csv(move_path)
+        if "query_len" in select_df.columns:
+            select_df = select_df[select_df["query_len"].astype(int) == 64].copy()
+        if "host_pool_coverage" in select_df.columns and float(select_df["host_pool_coverage"].min()) < 0.999:
+            return False
+        move_32k = move_df[move_df["active_tokens"].astype(int) == 32768]
+        if select_df.empty or move_32k.empty:
+            return False
+        repair_df = _runtime_select_with_move(select_df, move_df, active_tokens=32768, percentile_field="p95_total_ms")
+    else:
+        e2e_df = load_numeric_csv(e2e_path)
+        if "host_pool_coverage" in e2e_df.columns and float(e2e_df["host_pool_coverage"].min()) < 0.999:
+            return False
+        repair_df = _runtime_e2e_repair_frame(
+            e2e_df,
+            active_tokens=32768,
+            query_len=64,
+            percentile_field="p95_total_ms",
+        )
+    if repair_df.empty:
         return False
 
-    fig, ax = plt.subplots(1, 1, figsize=(COLUMN_WIDTH_IN, 1.72), constrained_layout=False)
-    fig.subplots_adjust(left=0.13, right=0.985, top=0.93, bottom=0.285)
+    fig, ax = plt.subplots(1, 1, figsize=(COLUMN_WIDTH_IN, 1.84), constrained_layout=False)
+    fig.subplots_adjust(left=0.13, right=0.985, top=0.93, bottom=0.275)
+
     styles = {
         96: {"label": "$K=96$", "color": PALETTE["idlekv"], "marker": "o"},
         5000: {"label": "$K=5000$", "color": PALETTE["proxy"], "marker": "s"},
     }
     for k_value, style in styles.items():
-        selected = select_df[select_df["k"].astype(int) == int(k_value)].sort_values("candidate_tokens")
-        moved = move_32k[move_32k["k"].astype(int) == int(k_value)]
-        if selected.empty or moved.empty:
+        selected = repair_df[repair_df["k"].astype(int) == int(k_value)].sort_values("candidate_tokens")
+        if selected.empty:
             continue
-        move_p95 = float(moved["p95_total_ms"].iloc[0])
-        y_seconds = (selected["p95_total_ms"].astype(float) + move_p95) / 1000.0
         ax.plot(
             selected["candidate_tokens"].astype(float),
-            y_seconds,
+            selected["repair_s"].astype(float),
             label=str(style["label"]),
             color=str(style["color"]),
             marker=str(style["marker"]),
@@ -1221,40 +1375,44 @@ def render_runtime_repair_scaling() -> bool:
             markersize=3.2,
         )
 
-    ax.axhline(0.5, color=PALETTE["wrong"], linestyle=(0, (2, 1.5)), linewidth=0.75)
-    ax.axhline(1.0, color=PALETTE["matched"], linestyle=(0, (2, 1.5)), linewidth=0.75)
-    ax.text(1_170_000, 0.515, "0.5s", ha="right", va="bottom", fontsize=5.6, color=PALETTE["wrong"])
+    budget_lines = [
+        (0.1, "#BDBDBD", "0.1s"),
+        (0.5, PALETTE["wrong"], "0.5s"),
+        (1.0, PALETTE["matched"], "1s"),
+        (2.0, PALETTE["grid"], "2s"),
+    ]
+    for y_value, color, label in budget_lines:
+        ax.axhline(y_value, color=color, linestyle=(0, (2, 1.5)), linewidth=0.68)
+        ax.text(
+            1_170_000,
+            y_value * 1.035,
+            label,
+            ha="right",
+            va="bottom",
+            fontsize=5.2,
+            color=color,
+        )
 
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(28_000, 1_250_000)
-    ax.set_ylim(0.025, 1.65)
-    ax.set_xticks([32_768, 100_000, 250_000, 500_000, 1_000_000], ["32k", "100k", "250k", "500k", "1M"])
+    ax.set_ylim(0.025, 2.65)
+    ax.set_xticks([32_768, 65_536, 131_072, 262_144, 524_288, 1_048_576])
+    ax.set_xticklabels(["32k", "64k", "128k", "256k", "512k", "1M"])
     ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
-    ax.set_yticks([0.05, 0.1, 0.5, 1.0], ["0.05", "0.1", "0.5", "1"])
+    ax.set_yticks([0.05, 0.1, 0.5, 1.0, 2.0], ["0.05", "0.1", "0.5", "1", "2"])
     ax.yaxis.set_minor_locator(mpl.ticker.NullLocator())
-    _format_axes(ax, x_label="offloaded candidate KV rows", y_label="p95 repair time (s)")
+    _format_axes(ax, x_label="offloaded candidate rows", y_label="p95 repair (s)")
     ax.legend(
-        loc="upper left",
+        loc="lower right",
         frameon=False,
-        ncol=2,
+        ncol=1,
         handlelength=1.0,
         borderaxespad=0.1,
         handletextpad=0.25,
-        columnspacing=0.65,
         fontsize=5.9,
     )
-    ax.text(880_000, 1.23, "1.19s", ha="left", va="center", fontsize=5.7, color=PALETTE["text"])
-    ax.text(
-        0.98,
-        0.06,
-        "chunked GPU scoring + 32k-active move/inject",
-        transform=ax.transAxes,
-        ha="right",
-        va="bottom",
-        fontsize=5.55,
-        color=PALETTE["text"],
-    )
+
     save_figure(fig, "runtime_repair_scaling")
     return True
 

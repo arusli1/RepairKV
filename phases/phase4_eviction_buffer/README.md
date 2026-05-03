@@ -17,7 +17,8 @@ The paper-backed runtime evidence now comes from `runtime_capacity.py` and
 `scripts/run_runtime_capacity_profile.py`.
 
 - `runtime_capacity.py` is the active profiler for synthetic Qwen-shaped BF16
-  KV move/reinsertion and chunked offloaded-store candidate scanning.
+  KV move/reinsertion, chunked offloaded-store candidate scanning, and the
+  integrated select-move-inject repair envelope.
 - Runtime CSVs used by the paper are copied into `paper/figures/` so figure
   rendering is reproducible from a stable snapshot.
 - `instructions.md`, `eviction_buffer.py`, `profiling.py`, and
@@ -43,6 +44,10 @@ The paper-backed runtime evidence now comes from `runtime_capacity.py` and
   - historical CLI for the log-backed prototype path
 - `scripts/run_runtime_capacity_profile.py`
   - active CLI for paper runtime-capacity runs
+- `scripts/run_runtime_latency_envelope.sh`
+  - reproducible sweep for the paper runtime-envelope claim. It profiles
+    powers-of-two offloaded candidate stores, multiple restore budgets, query
+    lengths, and active-cache sizes, then writes a combined selection CSV.
 
 ## Design Notes
 
@@ -54,6 +59,12 @@ The paper-backed runtime evidence now comes from `runtime_capacity.py` and
 - The chunked-selection profiler streams synthetic key rows from pinned host
   memory to GPU and performs real GPU scoring/top-K operations. Synthetic values
   are used only because random key contents do not affect latency.
+- The integrated repair profiler is the preferred paper-facing runtime path:
+  it measures candidate scanning, top-K selection, selected KV movement, and
+  reinsertion inside one timed trial.
+- Headline offloaded-store scans should use enough distinct source chunks to
+  cover the measured candidate store (`host_pool_coverage = 1.0`). Smaller
+  source pools are acceptable for smokes only.
 - The historical log-ingestion helpers recurse through nested Phase 3 eviction-log trees,
   so they can point at the benchmark log root or one task-specific leaf
   directory.
@@ -68,6 +79,8 @@ Current runtime-capacity runs write generated artifacts under:
 
 Paper-frozen CSV snapshots live under:
 
+- `paper/figures/runtime_latency_envelope_select.csv`
+- `paper/figures/runtime_latency_envelope_move.csv`
 - `paper/figures/runtime_capacity_8k_32k_100k.csv`
 - `paper/figures/runtime_capacity_250k_500k_k5000.csv`
 - `paper/figures/runtime_chunked_select_32k_1m.csv`
@@ -92,6 +105,24 @@ Run the active runtime-capacity tests with:
 
 ```bash
 .venv/bin/python -m pytest phases/phase4_eviction_buffer/tests/test_runtime_capacity.py -q
+```
+
+Run a cheap CUDA smoke for the final runtime-envelope path with:
+
+```bash
+TRIALS=2 WARMUP_TRIALS=1 CANDIDATE_TOKENS=32768,65536 QUERY_LENGTHS=64 \
+  ACTIVE_TOKENS=32768 K_VALUES=96,512,1024,5000 \
+  phases/phase4_eviction_buffer/scripts/run_runtime_latency_envelope.sh
+```
+
+Run the robust paper sweep in tmux with:
+
+```bash
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+tmux new-session -d -s runtime_latency_envelope \
+  "cd /home/ubuntu/IdleKV && IDLEKV_RUNTIME_STAMP=${STAMP} TRIALS=80 WARMUP_TRIALS=5 \
+   phases/phase4_eviction_buffer/scripts/run_runtime_latency_envelope.sh \
+   2>&1 | tee phases/phase4_eviction_buffer/results/runtime_capacity/logs/runtime_latency_envelope_${STAMP}.log"
 ```
 
 Run the full Phase 4 test slice with:

@@ -35,6 +35,47 @@ def test_line_styles_use_distinct_marker_channels() -> None:
     assert styles["Oldest-K"]["color"] != styles["Random-K"]["color"]
 
 
+def test_runtime_opportunity_helpers_use_measured_fit_only() -> None:
+    select = pd.DataFrame(
+        [
+            {"candidate_tokens": 32_768, "k": 5000, "p95_total_ms": 35.0},
+            {"candidate_tokens": 250_000, "k": 5000, "p95_total_ms": 340.0},
+            {"candidate_tokens": 500_000, "k": 5000, "p95_total_ms": 730.0},
+            {"candidate_tokens": 1_000_000, "k": 5000, "p95_total_ms": 1160.0},
+        ]
+    )
+    move = pd.DataFrame(
+        [
+            {"active_tokens": 32768, "k": 5000, "p95_total_ms": 12.0},
+            {"active_tokens": 100000, "k": 5000, "p95_total_ms": 24.0},
+        ]
+    )
+
+    combined = renderer._runtime_select_with_move(select, move)
+    assert combined.loc[combined["candidate_tokens"] == 32_768, "repair_ms"].iloc[0] == 47.0
+
+    fit = renderer._max_measured_candidates_by_idle(
+        combined,
+        k_value=5000,
+        idle_windows_s=(0.1, 0.5, 1.0, 2.0),
+        budget_fraction=0.9,
+    )
+    assert fit["max_candidate_tokens"].tolist() == [32_768, 250_000, 500_000, 1_000_000]
+
+
+def test_runtime_e2e_helper_uses_integrated_total() -> None:
+    e2e = pd.DataFrame(
+        [
+            {"active_tokens": 32768, "candidate_tokens": 32_768, "k": 96, "p95_total_ms": 55.0},
+            {"active_tokens": 32768, "candidate_tokens": 1_000_000, "k": 5000, "p95_total_ms": 1180.0},
+            {"active_tokens": 100000, "candidate_tokens": 1_000_000, "k": 5000, "p95_total_ms": 1300.0},
+        ]
+    )
+    combined = renderer._runtime_e2e_repair_frame(e2e)
+    assert combined["repair_ms"].tolist() == [55.0, 1180.0]
+    assert combined["repair_s"].tolist() == [0.055, 1.18]
+
+
 def test_policy_breadth_renderer_requires_streamingllm_full_grid(tmp_path, monkeypatch) -> None:
     figure_dir = tmp_path / "figures"
     phase11_dir = tmp_path / "phase11"
