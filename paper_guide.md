@@ -829,3 +829,15 @@ Before editing `paper/main.tex`:
    `cd paper && latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex`
 6. Inspect the log for undefined references, overfull boxes, and figure/table
    placement problems.
+
+## Optional System Diagram Backlog
+
+- A future manually designed system diagram could show the tiered-KV lifecycle:
+  strict GPU-resident retention, looser searchable off-device retention,
+  colder compressed/summarized/recomputable state, and idle-window promotion
+  back to the active cache. Do not add this as a generated filler figure in the
+  main paper unless it is polished enough to replace or materially extend
+  Figure 1.
+- Keep the current claim boundary: IdleKV motivates scoring/promotion/demotion
+  interfaces for tiered KV systems, but it does not make chip-level area,
+  energy, or bandwidth claims.

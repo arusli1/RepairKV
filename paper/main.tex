@@ -614,19 +614,20 @@ sink-plus-recent first-stage retention checks, and Appendix
 Figure~\ref{fig:app-transfer-runtime} gives one same-protocol
 Llama-3.1-8B-Instruct MQ-NIAH-6Q portability check, but broader
 retention-rule and multi-model transfer remain open.
-Future systems should also treat the off-device store as finite.
-Existing tiered-cache systems motivate a hierarchy with hot active GPU
-KV, warm off-device KV that can be promoted during idle gaps, and colder
-compressed, summarized, or recomputable state.
-\idlekv{} provides evidence for turn-conditioned promotion from the
-warm tier.
+Future systems should also treat the off-device store as finite: in our
+Qwen-shaped accounting, one BF16 KV row is 56\,KiB, so 4M searchable
+rows already imply about 240\,GB before metadata.
+Existing tiered-cache systems therefore motivate a two-level retention
+problem: a strict device-resident policy chooses the active KV budget,
+while a looser off-device policy decides which evicted rows remain
+searchable, compressed, summarized, or recomputable.
+\idlekv{} provides evidence for the middle operation in this hierarchy:
+turn-conditioned promotion from the warm tier during an idle gap.
 This is a hardware-facing implication rather than a hardware result: the
 measurements motivate tiered-KV interfaces that expose scoring,
 promotion, and demotion, but they do not establish area, energy, or
 bandwidth claims for any SRAM/eDRAM/DRAM design.
-Nor does \idlekv{} solve the next eviction problem: deciding which
-off-device KV should remain searchable when host memory or remote storage
-is also under pressure.
+Nor does \idlekv{} solve the off-device retention policy itself.
 Future benchmarks should therefore vary the number, timing, and conflict
 structure of new-turn constraints: the 2Q and 8Q breadth checks suggest
 that easy regimes can saturate while stricter multi-query turns expose
