@@ -50,9 +50,9 @@
 - Model/context: Qwen2.5-7B-Instruct, 32K.
 - Compressor: context-only SnapKV; appendix H2O-inspired accumulated-attention
   retention check.
-- Conditions: full, base, matched no-repair, Random-K, Oldest-K, IdleKV, Gold-K.
+- Conditions: full, base, matched no-repair, Random-K, Oldest-K, IdleKV, SpanRef-K.
 - Specificity controls: stale cue, donor cue, refresh-buffered.
-- Metrics: Q2 score, repair gain over matched, Gold-K recovery, latency.
+- Metrics: Q2 score, repair gain over matched, SpanRef-K recovery, latency.
 
 ## 6. Results
 - Q1: Does repair beat matched no-repair?
@@ -62,7 +62,7 @@
 - Q3: Where does repair help?
   - Stale-but-recoverable regime; not all-zero or saturated regimes.
 - Q4: What remains unsolved?
-  - Gold-K gap shows selector headroom.
+  - SpanRef-K gap shows selector headroom over annotated answer-span groups.
 - Q5: What is the systems cost?
   - KV movement cheap; exact scoring slow; proxy path reduces latency.
 - Q6: Is result robust?
@@ -85,7 +85,7 @@
 
 ## Appendix
 - Protocol details, prompts, splits.
-- Gold-K definition and caveats.
+- SpanRef-K definition and caveats.
 - Query-count breadth.
 - Specificity/control details.
 - Selection/overlap diagnostics.

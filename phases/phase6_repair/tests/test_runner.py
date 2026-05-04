@@ -22,6 +22,8 @@ from phases.phase6_repair.src.runner import (
     _jaccard_fraction,
     _needs_q2_candidate_scores,
     _restore_positions,
+    _select_anchor_window_positions,
+    _select_segment_positions,
     _wrong_query_ids_by_split,
     build_config,
     summarize_rows,
@@ -338,6 +340,25 @@ class Phase6RunnerTests(unittest.TestCase):
         self.assertEqual(_jaccard_fraction([], []), 1.0)
         self.assertAlmostEqual(_jaccard_fraction([1, 2, 3], [2, 3, 4]), 0.5)
 
+    def test_select_segment_positions_backfills_to_keep_budget_matched(self) -> None:
+        selected = _select_segment_positions(
+            evicted_positions=[1, 2, 3, 4, 5],
+            segment_token_ranges=[("file:target.py", 3, 5)],
+            segment_name="file:target.py",
+            k=4,
+        )
+
+        self.assertEqual(selected, [3, 4, 1, 2])
+
+    def test_select_anchor_window_positions_prefers_nearest_evicted_rows(self) -> None:
+        selected = _select_anchor_window_positions(
+            evicted_positions=[1, 2, 10, 11, 12, 20],
+            anchor_positions=[11],
+            k=4,
+        )
+
+        self.assertEqual(selected, [11, 10, 12, 2])
+
     def test_summarize_rows_reports_lifts_and_overlap(self) -> None:
         rows = [
             {
@@ -360,6 +381,7 @@ class Phase6RunnerTests(unittest.TestCase):
                 "wrong_q_k_score": 0.0,
                 "refresh_k_score": 1.0,
                 "refresh_k_overlap_fraction": 0.75,
+                "anchor_window_k_score": 0.5,
                 "oracle_k_score": 1.0,
             },
             {
@@ -382,6 +404,7 @@ class Phase6RunnerTests(unittest.TestCase):
                 "wrong_q_k_score": 0.5,
                 "refresh_k_score": 0.75,
                 "refresh_k_overlap_fraction": 0.5,
+                "anchor_window_k_score": 1.0,
                 "oracle_k_score": 1.0,
             },
         ]
@@ -407,6 +430,8 @@ class Phase6RunnerTests(unittest.TestCase):
         self.assertEqual(k100["mean_refresh_k"], 0.875)
         self.assertEqual(k100["mean_refresh_lift"], 0.625)
         self.assertEqual(k100["mean_refresh_overlap_fraction"], 0.625)
+        self.assertEqual(k100["mean_anchor_window_k"], 0.75)
+        self.assertEqual(k100["mean_anchor_window_lift"], 0.5)
         self.assertEqual(k100["mean_oracle_k"], 1.0)
 
     def test_summarize_rows_groups_multi_split_runs(self) -> None:

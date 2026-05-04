@@ -8,11 +8,23 @@ from pathlib import Path
 from typing import Iterable
 
 COMMON_CALLEES = {
+    "Exception",
+    "ImportError",
+    "IOError",
+    "KeyError",
+    "RuntimeError",
+    "SystemExit",
+    "TypeError",
+    "ValueError",
     "add",
     "append",
+    "array",
+    "asarray",
     "close",
     "copy",
+    "clear",
     "extend",
+    "fixture",
     "format",
     "get",
     "items",
@@ -20,15 +32,19 @@ COMMON_CALLEES = {
     "keys",
     "len",
     "list",
+    "loads",
     "open",
     "print",
     "range",
     "read",
     "run",
     "set",
+    "setattr",
     "split",
+    "startswith",
     "str",
     "update",
+    "urandom",
     "values",
     "write",
 }
@@ -42,9 +58,16 @@ IGNORED_DIR_PARTS = {
     "__pycache__",
     "build",
     "dist",
+    "doc",
     "docs",
+    "example",
+    "examples",
+    "externals",
     "node_modules",
     "site-packages",
+    "test",
+    "tests",
+    "testing",
     "vendor",
     "vendored",
 }
@@ -135,6 +158,8 @@ def _is_good_identifier(name: str) -> bool:
     if name.startswith("__") and name.endswith("__"):
         return False
     if name.startswith("test_"):
+        return False
+    if name.startswith("assert"):
         return False
     return name not in COMMON_CALLEES
 
@@ -235,6 +260,161 @@ def _leaf_callee_span(func: ast.AST, line: str) -> tuple[str, int, int] | None:
     return None
 
 
+def _leaf_expr_span(expr: ast.AST, line: str) -> tuple[str, int, int] | None:
+    if isinstance(expr, ast.Name):
+        if expr.end_col_offset is None:
+            return None
+        return str(expr.id), int(expr.col_offset), int(expr.end_col_offset)
+    if isinstance(expr, ast.Attribute):
+        if expr.end_col_offset is None:
+            return None
+        answer = str(expr.attr)
+        start = line.rfind(answer, 0, int(expr.end_col_offset))
+        if start < int(expr.col_offset):
+            return None
+        return answer, start, start + len(answer)
+    return None
+
+
+def _exception_expr_span(expr: ast.AST | None, line: str) -> tuple[str, int, int] | None:
+    if expr is None:
+        return None
+    if isinstance(expr, ast.Call):
+        return _leaf_expr_span(expr.func, line)
+    return _leaf_expr_span(expr, line)
+
+
+def _assert_raises_exception_span(call: ast.Call, line: str) -> tuple[str, int, int] | None:
+    callee = _leaf_callee_span(call.func, line)
+    if callee is None:
+        return None
+    callee_name, _start, _end = callee
+    if callee_name not in {"assertRaises", "assertRaisesRegex", "assertRaisesMessage", "raises"}:
+        return None
+    if not call.args:
+        return None
+    return _exception_expr_span(call.args[0], line)
+
+
+class _ExceptionVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.stack: list[tuple[str, int]] = []
+        self.nodes: list[tuple[ast.AST, str, int]] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.stack.append((str(node.name), int(node.lineno)))
+        self.generic_visit(node)
+        self.stack.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.stack.append((str(node.name), int(node.lineno)))
+        self.generic_visit(node)
+        self.stack.pop()
+
+    def _record(self, node: ast.AST) -> None:
+        anchor_name, anchor_line = self.stack[-1] if self.stack else ("module_scope", 1)
+        self.nodes.append((node, anchor_name, anchor_line))
+
+    def visit_Raise(self, node: ast.Raise) -> None:
+        self._record(node)
+        self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        self._record(node)
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        self._record(node)
+        self.generic_visit(node)
+
+
+def extract_exception_edges(path: str, text: str) -> list[EdgeCandidate]:
+    """Extract raise/except/assert-raises -> exception identifier candidates."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    lines = text.splitlines()
+    visitor = _ExceptionVisitor()
+    visitor.visit(tree)
+    candidates: list[EdgeCandidate] = []
+    for node, anchor_name, anchor_line in visitor.nodes:
+        span: tuple[str, int, int] | None = None
+        edge_kind = ""
+        line_no = int(getattr(node, "lineno", -1))
+        if line_no < 1 or line_no > len(lines):
+            continue
+        line = lines[line_no - 1]
+        if isinstance(node, ast.Raise):
+            span = _exception_expr_span(node.exc, line)
+            edge_kind = "raised_exception_identifier"
+        elif isinstance(node, ast.ExceptHandler):
+            span = _exception_expr_span(node.type, line)
+            edge_kind = "handled_exception_identifier"
+        elif isinstance(node, ast.Call):
+            span = _assert_raises_exception_span(node, line)
+            edge_kind = "expected_exception_identifier"
+        if span is None:
+            continue
+        answer, start, end = span
+        if not _is_good_identifier(answer) or answer == anchor_name:
+            continue
+        candidates.append(
+            EdgeCandidate(
+                path=path,
+                edge_type="exception_identifier",
+                answer_kind=edge_kind,
+                answer=answer,
+                line_no=line_no,
+                line_text=line,
+                answer_start_in_line=int(start),
+                answer_end_in_line=int(end),
+                anchor_name=anchor_name,
+                anchor_line_no=int(anchor_line),
+            )
+        )
+    return sorted(candidates, key=lambda item: (item.path, item.line_no, item.answer))
+
+
+def extract_class_base_edges(path: str, text: str) -> list[EdgeCandidate]:
+    """Extract class declaration -> leaf base-class identifier candidates."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    lines = text.splitlines()
+    candidates: list[EdgeCandidate] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or len(node.bases) != 1:
+            continue
+        base = node.bases[0]
+        if int(getattr(base, "lineno", -1)) < 1 or int(getattr(base, "lineno", -1)) > len(lines):
+            continue
+        line = lines[int(base.lineno) - 1]
+        leaf = _leaf_expr_span(base, line)
+        if leaf is None:
+            continue
+        answer, start, end = leaf
+        anchor_name = str(node.name)
+        if not _is_good_identifier(answer) or answer == anchor_name:
+            continue
+        candidates.append(
+            EdgeCandidate(
+                path=path,
+                edge_type="class_base_identifier",
+                answer_kind="base_class_identifier",
+                answer=answer,
+                line_no=int(base.lineno),
+                line_text=line,
+                answer_start_in_line=int(start),
+                answer_end_in_line=int(end),
+                anchor_name=anchor_name,
+                anchor_line_no=int(node.lineno),
+            )
+        )
+    return sorted(candidates, key=lambda item: (item.path, item.line_no, item.answer))
+
+
 def extract_callsite_edges(path: str, text: str) -> list[EdgeCandidate]:
     """Extract single-line callsite -> leaf callee identifier candidates."""
     try:
@@ -295,7 +475,19 @@ def first_pair_by_files(
 ) -> tuple[DeclarationCandidate, EdgeCandidate]:
     """Choose the first deterministic Q1/Q2 pair from different files."""
     q1_list = list(q1_candidates)
-    q2_list = list(q2_candidates)
+    q2_list = sorted(
+        q2_candidates,
+        key=lambda item: (
+            {
+                "callsite_leaf_callee": 0,
+                "class_base_identifier": 1,
+                "exception_identifier": 2,
+            }.get(item.edge_type, 3),
+            item.path,
+            item.line_no,
+            item.answer,
+        ),
+    )
     for q2 in q2_list:
         for q1 in q1_list:
             if q1.path != q2.path and q1.answer != q2.answer:

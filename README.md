@@ -50,11 +50,12 @@ can directly attend to.
   sensitivity, and runtime-capacity probes.
 - Breadth checks: same-protocol Llama-3.1-8B portability probes,
   protocol-matched retention-rule variants, and active selector variants.
-- Open gap: the current paper is still controlled/synthetic. Phase 15 now has
-  CPU-tested scaffolding for a stricter RepoDelta-Edge real-repository
-  relevance-shift diagnostic, but it is not paper evidence until a frozen
-  third-party-repo manifest, GPU ability smoke, and repair smoke pass the
-  written gates.
+- Appendix external-validity check: a controlled real-repository
+  relevance-shift diagnostic over pinned third-party repositories drawn from
+  the SWE-bench repository pool. It is not a SWE-bench issue-resolution
+  benchmark. The finished v13 run is strong against deployable/content-agnostic
+  controls but remains appendix evidence because a label-assisted locality
+  reference is stronger.
 
 ## Paper
 
@@ -76,6 +77,14 @@ Undefined references, undefined citations, overfull boxes, or figure overlap
 should be fixed before a paper snapshot.
 
 ## Reproducing Checks
+
+Run the focused active diagnostic tests:
+
+```bash
+.venv/bin/python -m pytest \
+  phases/phase15_real_repo_relevance_shift/tests \
+  phases/phase6_repair/tests/test_runner.py -q
+```
 
 Run focused paper and closure tests:
 
@@ -107,8 +116,8 @@ design, then move to a locked run only after the smoke passes a written gate.
 - `phases/phase9_experiment_deepening/` through
   `phases/phase14_critical_flaw_closure/`: completed experiment expansions,
   smoke evaluators, locked-run wrappers, and paper-readiness audits.
-- `phases/phase15_real_repo_relevance_shift/`: active plan for the RepoDelta-Edge
-  real-repository relevance-shift diagnostic.
+- `phases/phase15_real_repo_relevance_shift/`: completed appendix diagnostic
+  for real-repository relevance shifts.
 - `docs/`: project status and result-retention notes.
 - `saved_results/`: retained summaries from earlier runs.
 - `models/`: local model weights; ignored by git.
@@ -138,8 +147,8 @@ design, then move to a locked run only after the smoke passes a written gate.
 
 ## Active Questions
 
-- Can the Phase 15 RepoDelta-Edge diagnostic become credible non-synthetic
-  relevance-shift evidence after frozen-manifest CPU gates and GPU smokes?
+- What cleaner real-repository benchmark or deployable locality-aware selector
+  would close the remaining gap to the label-assisted AnchorWindow reference?
 - Does the Coverage selector deserve a future full K-grid, or should it remain
   algorithmic-selection-gap appendix/future-work evidence?
 - Which selector or retention-policy variants add enough signal to replace an

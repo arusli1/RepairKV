@@ -35,6 +35,7 @@ PHASE11_DIR = REPO_DIR / "phases" / "phase11_main_robustness" / "results"
 PHASE12_DIR = REPO_DIR / "phases" / "phase12_policy_breadth" / "results"
 PHASE13_DIR = REPO_DIR / "phases" / "phase13_iteration_framework" / "results"
 PHASE14_DIR = REPO_DIR / "phases" / "phase14_critical_flaw_closure" / "results"
+PHASE15_DIR = REPO_DIR / "phases" / "phase15_real_repo_relevance_shift" / "results" / "swebench_dev"
 PHASE4_RUNTIME_DIR = REPO_DIR / "phases" / "phase4_eviction_buffer" / "results" / "runtime_capacity"
 PHASE8_STREAMING_DIR = (
     REPO_DIR / "phases" / "phase8_streaming_strict_cap" / "results" / "two_tier_snapkv"
@@ -2550,6 +2551,207 @@ def render_policy_breadth_delta() -> bool:
     return True
 
 
+def render_real_repo_repair_diagnostic() -> bool:
+    """Render the Phase 15 real-repository diagnostic as appendix evidence."""
+
+    summary_path = FIGURE_DIR / "real_repo_repair_diagnostic_summary.csv"
+    audit_path = PHASE15_DIR / "phase15_repair_v13_whole_k96_192_anchor_audit.json"
+    if not summary_path.exists() and not audit_path.exists():
+        for ext in ("pdf", "png"):
+            (FIGURE_DIR / f"real_repo_repair_diagnostic.{ext}").unlink(missing_ok=True)
+        return False
+
+    if summary_path.exists():
+        summary = load_numeric_csv(summary_path)
+        whole_values = {
+            (str(row.label), int(row.k)): float(row.score)
+            for row in summary[summary["panel"].astype(str) == "whole"].itertuples(index=False)
+        }
+        sensitivity_rows = []
+        for row in summary[summary["panel"].astype(str) == "sensitivity"].itertuples(index=False):
+            sensitivity_rows.append(
+                (
+                    str(row.label),
+                    {
+                        "mean_idlekv_minus_b_match": float(row.idlekv_lift_vs_b_match),
+                        "mean_idlekv_minus_anchor_window_k": float(row.idlekv_lift_vs_anchor_window),
+                    },
+                )
+            )
+    else:
+        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        condition_key_by_label = {
+            "Matched": "mean_b_match",
+            "Random": "mean_random_k",
+            "Oldest": "mean_oldest_k",
+            "Stale cue": "mean_stale_q_k",
+            "Wrong event": "mean_wrong_q_k",
+            "ToolFile": "mean_tool_file_k",
+            "IdleKV": "mean_idlekv",
+            "AnchorWindow*": "mean_anchor_window_k",
+        }
+        whole_values = {
+            (label, k): float(audit["k_results"][f"k{k}"][key])
+            for label, key in condition_key_by_label.items()
+            for k in (96, 192)
+        }
+        sensitivity_rows = [
+            ("All rows", audit["k_results"]["k192"]),
+            ("No cue hit", audit["sensitivity"]["exclude_cue_only_hits"]["k_results"]["k192"]),
+            ("No answer retained", audit["sensitivity"]["exclude_answer_retention"]["k_results"]["k192"]),
+            ("Strict eligible", audit["sensitivity"]["strict_repair_eligible"]["k_results"]["k192"]),
+        ]
+    condition_rows = [
+        ("Matched", PALETTE["matched"]),
+        ("Random", PALETTE["random"]),
+        ("Oldest", PALETTE["oldest"]),
+        ("Stale cue", PALETTE["stale"]),
+        ("Wrong event", PALETTE["wrong"]),
+        ("ToolFile", PALETTE["refresh"]),
+        ("IdleKV", PALETTE["idlekv"]),
+        ("AnchorWindow*", PALETTE["gold"]),
+    ]
+
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(5.15, 2.25),
+        gridspec_kw={"width_ratios": [1.35, 1.0]},
+        constrained_layout=False,
+    )
+    fig.subplots_adjust(left=0.16, right=0.985, top=0.86, bottom=0.20, wspace=0.33)
+    ax = axes[0]
+    y_positions = np.arange(len(condition_rows))[::-1]
+    for y, (label, color) in zip(y_positions, condition_rows, strict=True):
+        v96 = float(whole_values[(label, 96)])
+        v192 = float(whole_values[(label, 192)])
+        ax.hlines(y, v96, v192, color=color, linewidth=1.1, alpha=0.50, zorder=1)
+        ax.scatter(
+            [v96],
+            [y],
+            s=22,
+            marker="o",
+            facecolor="white",
+            edgecolor=color,
+            linewidth=0.85,
+            zorder=3,
+        )
+        ax.scatter(
+            [v192],
+            [y],
+            s=24,
+            marker="o",
+            facecolor=color,
+            edgecolor="white",
+            linewidth=0.35,
+            zorder=4,
+        )
+        if label in {"IdleKV", "AnchorWindow*"}:
+            ax.text(
+                v192 + 0.025,
+                y,
+                f"{v192:.2f}",
+                ha="left",
+                va="center",
+                fontsize=5.8,
+                color=color,
+                fontweight="bold",
+            )
+
+    ax.set_yticks(y_positions, [label for label, _color in condition_rows])
+    ax.set_xlim(-0.02, 1.02)
+    ax.set_xticks([0.0, 0.5, 1.0])
+    ax.set_ylim(-0.55, len(condition_rows) - 0.45)
+    ax.tick_params(axis="y", length=0, pad=1.5, labelsize=6.2)
+    _format_axes(ax, x_label="exact identifier accuracy", y_label=None)
+    ax.grid(axis="x", color=PALETTE["grid"], linewidth=0.42, alpha=0.8)
+    ax.grid(axis="y", visible=False)
+    ax.text(
+        0.0,
+        1.04,
+        "(a) whole manifest",
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=6.4,
+        fontweight="bold",
+    )
+
+    ax2 = axes[1]
+    sens_y = np.arange(len(sensitivity_rows))[::-1]
+    for y, (label, row) in zip(sens_y, sensitivity_rows, strict=True):
+        lift = float(row["mean_idlekv_minus_b_match"])
+        anchor_lift = float(row.get("mean_idlekv_minus_anchor_window_k", 0.0))
+        ax2.hlines(y, 0.0, lift, color=PALETTE["idlekv"], linewidth=4.0, alpha=0.30, zorder=1)
+        ax2.scatter(
+            [lift],
+            [y],
+            s=24,
+            marker="o",
+            color=PALETTE["idlekv"],
+            edgecolor="white",
+            linewidth=0.35,
+            zorder=3,
+        )
+        ax2.scatter(
+            [anchor_lift],
+            [y],
+            s=22,
+            marker="x",
+            color=PALETTE["gold"],
+            linewidth=0.90,
+            zorder=4,
+        )
+        ax2.text(
+            lift + 0.025,
+            y,
+            f"+{lift:.2f}",
+            ha="left",
+            va="center",
+            fontsize=5.7,
+            color=PALETTE["idlekv"],
+            fontweight="bold" if label == "All rows" else "normal",
+        )
+    ax2.axvline(0.0, color=PALETTE["matched"], linewidth=0.75, linestyle=(0, (1.0, 1.3)))
+    ax2.set_yticks(sens_y, [label for label, _row in sensitivity_rows])
+    ax2.tick_params(axis="y", length=0, pad=1.5, labelsize=6.2)
+    ax2.set_xlim(-0.35, 0.88)
+    ax2.set_xticks([-0.25, 0.0, 0.5])
+    ax2.set_ylim(-0.55, len(sensitivity_rows) - 0.45)
+    _format_axes(ax2, x_label="K=192 score gain", y_label=None)
+    ax2.grid(axis="x", color=PALETTE["grid"], linewidth=0.42, alpha=0.8)
+    ax2.grid(axis="y", visible=False)
+    ax2.text(
+        0.0,
+        1.04,
+        "(b) contamination checks",
+        transform=ax2.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=6.4,
+        fontweight="bold",
+    )
+    handles = [
+        Line2D([0], [0], marker="o", linestyle="None", markerfacecolor="white", markeredgecolor=PALETTE["matched"], label="$K=96$", markersize=4.2),
+        Line2D([0], [0], marker="o", linestyle="None", color=PALETTE["matched"], label="$K=192$", markersize=4.2),
+        Line2D([0], [0], marker="x", linestyle="None", color=PALETTE["gold"], label="vs AnchorWindow*", markersize=4.2),
+    ]
+    fig.legend(
+        handles=handles,
+        loc="upper center",
+        bbox_to_anchor=(0.52, 0.995),
+        ncol=3,
+        frameon=False,
+        handlelength=0.75,
+        handletextpad=0.30,
+        columnspacing=0.70,
+        borderaxespad=0.0,
+        fontsize=5.75,
+    )
+    save_figure(fig, "real_repo_repair_diagnostic")
+    return True
+
+
 def generated_assets() -> Iterable[Path]:
     for stem in [
         "operating_regime_heatmap",
@@ -2567,6 +2769,7 @@ def generated_assets() -> Iterable[Path]:
         "h2o_compressor_breadth",
         "model_transfer_breadth",
         "policy_breadth_delta",
+        "real_repo_repair_diagnostic",
     ]:
         yield FIGURE_DIR / f"{stem}.pdf"
         yield FIGURE_DIR / f"{stem}.png"
@@ -2589,6 +2792,7 @@ def main() -> None:
     render_h2o_compressor_breadth()
     render_model_transfer_breadth()
     render_policy_breadth_delta()
+    render_real_repo_repair_diagnostic()
 
 
 if __name__ == "__main__":

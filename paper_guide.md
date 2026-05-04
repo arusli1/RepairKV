@@ -242,6 +242,27 @@ Use paper-facing terminology, not internal repo terminology.
   prose, and do not imply it is an upper bound over all possible K-token
   repairs. It is exact only over the annotated span-group candidate family used
   by the benchmark and may use fewer than K rows.
+- "controlled real-repository relevance-shift diagnostic": preferred phrase
+  for the Phase 15 RepoDelta-Edge branch if it appears in the paper. Say
+  "repositories drawn from the SWE-bench repository pool at pinned commits,"
+  not "SWE-bench result" or "SWE-bench performance." Do not call it a coding
+  benchmark, real-world validation, or coding-agent evaluation.
+- "ToolFile-K": a simple file-pointer repair control for Phase 15. It is
+  deployable in settings where the event cue names a file, but the audit must
+  show it actually selected rows from the target file and matched the K budget.
+- "AnchorWindow-K": a label-assisted locality reference for Phase 15 that
+  restores evicted rows nearest the annotated source/event span. It is not a
+  deployable runtime baseline. Use it to diagnose whether a result is explained
+  by source-local restoration. Losing to it does not erase a
+  deployable-control win, but it normally makes the diagnostic appendix-only;
+  frame the remaining gap as headroom relative to a label-assisted locality
+  reference. If shown, visually separate it from deployable controls and label
+  it "label-assisted" in the caption or table note.
+- Current Phase 15 placement: appendix-only. The v13 whole-manifest run is
+  positive against matched no-repair, content-agnostic restores, stale/wrong
+  event cues, and ToolFile-K, and it survives cue/answer-retention sensitivity
+  checks. It does not become a main-paper selection claim because
+  AnchorWindow-K remains stronger.
 - "H2O-inspired accumulated-attention retention": use this wording for the
   current accumulated-attention policy branch unless the implementation exactly
   reproduces canonical H2O accumulated decode attention. Do not write
@@ -324,6 +345,8 @@ Prior-algorithm fidelity checklist:
 Never include:
 
 - "phase 7", "phase 8", "phase 9" in paper-facing text.
+- "Phase 15", "v13", "RepoDelta", or manifest/run nicknames in paper-facing
+  prose. Use the paper-facing diagnostic name above if the result is promoted.
 - "bridge", "extension", "clean suite", "full suite", or run nicknames.
 - "perfect data", "best data", or hype language.
 

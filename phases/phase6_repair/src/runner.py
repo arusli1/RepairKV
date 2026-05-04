@@ -67,6 +67,8 @@ ALLOWED_CONDITIONS = (
     "Refresh-K",
     "Random-K",
     "Oldest-K",
+    "ToolFile-K",
+    "AnchorWindow-K",
     "Oracle-K",
 )
 ALLOWED_QUERY_SCORING_MODES = ("proxy", "exact_q")
@@ -275,6 +277,60 @@ def _jaccard_fraction(left_positions: Iterable[int], right_positions: Iterable[i
     if not union:
         return 1.0
     return float(len(left & right) / len(union))
+
+
+def _select_segment_positions(
+    *,
+    evicted_positions: Iterable[int],
+    segment_token_ranges: Iterable[tuple[str, int, int]],
+    segment_name: str,
+    k: int,
+) -> list[int]:
+    """Select file-local rows first, then oldest rows to preserve the K footprint."""
+    ranges = [(int(start), int(end)) for name, start, end in segment_token_ranges if str(name) == segment_name]
+    available = sorted(int(value) for value in evicted_positions)
+    selected: list[int] = []
+    if not ranges:
+        return available[: int(k)]
+    for position in available:
+        if any(start <= position < end for start, end in ranges):
+            selected.append(position)
+            if len(selected) >= int(k):
+                return selected
+    selected_set = set(selected)
+    for position in available:
+        if position in selected_set:
+            continue
+        selected.append(position)
+        if len(selected) >= int(k):
+            return selected
+    return selected
+
+
+def _select_anchor_window_positions(
+    *,
+    evicted_positions: Iterable[int],
+    anchor_positions: Iterable[int],
+    k: int,
+) -> list[int]:
+    """Select evicted rows nearest to annotated relevant spans, then oldest rows.
+
+    This is a label-assisted reference for real-content diagnostics. It does
+    not score keys by the next-turn cue; it restores rows nearest to the
+    benchmark-annotated relevant positions.
+    """
+    available = sorted(dict.fromkeys(int(position) for position in evicted_positions))
+    target_k = min(max(int(k), 0), len(available))
+    if target_k == 0:
+        return []
+    anchors = sorted(dict.fromkeys(int(position) for position in anchor_positions))
+    if not anchors:
+        return available[:target_k]
+
+    def _distance_to_anchor(position: int) -> int:
+        return min(abs(int(position) - anchor) for anchor in anchors)
+
+    return sorted(available, key=lambda position: (_distance_to_anchor(position), position))[:target_k]
 
 
 def _sync_if_cuda(device: torch.device) -> None:
@@ -553,6 +609,7 @@ def _run_one_split(
     wrong_q2_question_ids: torch.Tensor | None = None,
     repair_question_ids: torch.Tensor | None = None,
     stale_question_ids: torch.Tensor | None = None,
+    tool_file_q2_path: str | None = None,
 ) -> list[dict[str, Any]]:
     example_start = time.perf_counter()
     q1_context_ids = split.q1_prepared.context_ids
@@ -1229,6 +1286,122 @@ def _run_one_split(
                 }
             )
 
+        if "ToolFile-K" in config.conditions:
+            if not tool_file_q2_path:
+                raise ValueError("ToolFile-K requires tool_file_q2_path.")
+            select_start = time.perf_counter()
+            tool_file_positions = _select_segment_positions(
+                evicted_positions=evicted_positions,
+                segment_token_ranges=split.q2_prepared.segment_token_ranges,
+                segment_name=f"file:{tool_file_q2_path}",
+                k=k_int,
+            )
+            select_s = time.perf_counter() - select_start
+            repaired_cache, restore_timing = _restore_positions(
+                active_cache=base_partition.compressed,
+                evicted_cache=base_partition.evicted,
+                selected_positions=tool_file_positions,
+            )
+            tool_file_output, tool_file_score, tool_file_generation_s = _run_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                cache=repaired_cache,
+            )
+            target_segment_name = f"file:{tool_file_q2_path}"
+            file_ranges = [
+                (int(start), int(end))
+                for name, start, end in split.q2_prepared.segment_token_ranges
+                if str(name) == target_segment_name
+            ]
+            selected_from_file_count = sum(
+                1
+                for position in tool_file_positions
+                if any(start <= int(position) < end for start, end in file_ranges)
+            )
+            row.update(
+                {
+                    "tool_file_k_score": round(tool_file_score, 6),
+                    "tool_file_k_output": tool_file_output,
+                    "tool_file_k_generation_s": round(tool_file_generation_s, 6),
+                    "tool_file_k_selection_s": round(select_s, 6),
+                    "tool_file_k_transfer_ms": round(restore_timing["transfer_ms"], 6),
+                    "tool_file_k_inject_ms": round(restore_timing["inject_ms"], 6),
+                    "tool_file_k_restored_count": int(restore_timing["restored_count"]),
+                    "tool_file_k_selected_positions": tool_file_positions,
+                    "tool_file_k_q2_path": str(tool_file_q2_path),
+                    "tool_file_k_selected_from_file_count": int(selected_from_file_count),
+                    "tool_file_k_selected_from_file_fraction": round(
+                        selected_from_file_count / max(1, len(tool_file_positions)),
+                        6,
+                    ),
+                    "tool_file_k_budget_matched": len(tool_file_positions) == min(k_int, len(evicted_positions)),
+                    "tool_file_k_overlap_fraction": round(
+                        _overlap_fraction(tool_file_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "tool_file_k_selected_overlap_fraction": round(
+                        _overlap_fraction(tool_file_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "tool_file_k_active_overlap_fraction": round(
+                        _overlap_fraction(
+                            tuple(sorted(set(base_partition.kept_context_positions) | set(tool_file_positions))),
+                            q2_relevant_positions,
+                        ),
+                        6,
+                    ),
+                }
+            )
+
+        if "AnchorWindow-K" in config.conditions:
+            select_start = time.perf_counter()
+            anchor_window_positions = _select_anchor_window_positions(
+                evicted_positions=evicted_positions,
+                anchor_positions=q2_relevant_positions,
+                k=k_int,
+            )
+            select_s = time.perf_counter() - select_start
+            repaired_cache, restore_timing = _restore_positions(
+                active_cache=base_partition.compressed,
+                evicted_cache=base_partition.evicted,
+                selected_positions=anchor_window_positions,
+            )
+            anchor_window_output, anchor_window_score, anchor_window_generation_s = _run_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                cache=repaired_cache,
+            )
+            row.update(
+                {
+                    "anchor_window_k_score": round(anchor_window_score, 6),
+                    "anchor_window_k_output": anchor_window_output,
+                    "anchor_window_k_generation_s": round(anchor_window_generation_s, 6),
+                    "anchor_window_k_selection_s": round(select_s, 6),
+                    "anchor_window_k_transfer_ms": round(restore_timing["transfer_ms"], 6),
+                    "anchor_window_k_inject_ms": round(restore_timing["inject_ms"], 6),
+                    "anchor_window_k_restored_count": int(restore_timing["restored_count"]),
+                    "anchor_window_k_selected_positions": anchor_window_positions,
+                    "anchor_window_k_budget_matched": len(anchor_window_positions) == min(k_int, len(evicted_positions)),
+                    "anchor_window_k_overlap_fraction": round(
+                        _overlap_fraction(anchor_window_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "anchor_window_k_selected_overlap_fraction": round(
+                        _overlap_fraction(anchor_window_positions, q2_relevant_positions),
+                        6,
+                    ),
+                    "anchor_window_k_active_overlap_fraction": round(
+                        _overlap_fraction(
+                            tuple(sorted(set(base_partition.kept_context_positions) | set(anchor_window_positions))),
+                            q2_relevant_positions,
+                        ),
+                        6,
+                    ),
+                }
+            )
+
         if "Oracle-K" in config.conditions:
             if config.oracle_mode == "gold_spans":
                 assert gold_span_oracle_candidates is not None
@@ -1461,6 +1634,26 @@ def _summarize_rows_by_k(rows: list[dict[str, Any]]) -> dict[str, Any]:
             payload["mean_random_k"] = round(_mean(row["random_k_score"] for row in group), 6)
         if "oldest_k_score" in group[0]:
             payload["mean_oldest_k"] = round(_mean(row["oldest_k_score"] for row in group), 6)
+        if "tool_file_k_score" in group[0]:
+            payload.update(
+                {
+                    "mean_tool_file_k": round(_mean(row["tool_file_k_score"] for row in group), 6),
+                    "mean_tool_file_lift": round(
+                        _mean(float(row["tool_file_k_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                }
+            )
+        if "anchor_window_k_score" in group[0]:
+            payload.update(
+                {
+                    "mean_anchor_window_k": round(_mean(row["anchor_window_k_score"] for row in group), 6),
+                    "mean_anchor_window_lift": round(
+                        _mean(float(row["anchor_window_k_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                }
+            )
         summary_by_k[f"k{k}"] = payload
     return summary_by_k
 

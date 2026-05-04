@@ -18,8 +18,8 @@ class Phase15Protocol:
     context_tokens: int = 32768
     base_context_budget: int = 16384
     recency_window: int = 1024
-    k_grid: tuple[int, ...] = (32, 48, 64, 96, 128)
-    primary_k: int = 96
+    k_grid: tuple[int, ...] = (96, 192)
+    primary_k: int = 192
     bootstrap_seed: int = 20260504
     conditions: tuple[str, ...] = (
         "A",
@@ -31,6 +31,7 @@ class Phase15Protocol:
         "StaleCue-K",
         "WrongEvent-K",
         "ToolFile-K",
+        "AnchorWindow-K",
     )
     scoring_rule: str = "strict_identifier_first_line"
     source_task: str = "repodelta_edge"
@@ -73,4 +74,3 @@ def read_protocol(path: Path | str) -> Phase15Protocol:
 
 def write_protocol(path: Path | str, protocol: Phase15Protocol) -> None:
     Path(path).write_text(json.dumps(protocol.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-

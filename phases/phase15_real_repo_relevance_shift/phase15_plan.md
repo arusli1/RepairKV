@@ -1,6 +1,6 @@
 # Phase 15 Real-Repository Relevance Shift
 
-Last updated: 2026-05-04 19:05 UTC.
+Last updated: 2026-05-04 20:26 UTC.
 
 ## Goal
 
@@ -22,25 +22,27 @@ active KV cache once the next-turn cue is known?
 Primary paper candidate: **RepoDelta-Edge**.
 
 RepoDelta-Edge uses public, pinned Python repositories and constructs examples
-from a simple static edge, such as caller/callsite to callee or tool-event stack
-frame to implicated implementation region. The answer is a short identifier
-that appears in the already-seen repository context, not in the tool event and
-not in the Q2 wording. Q1 asks about an unrelated file, biasing the compressed
-post-Q1 cache away from Q2. A tool-event-like cue then names the new file/region
-or anchor. IdleKV may use that cue to score evicted rows and restore K rows
-before Q2 decoding.
+from a simple static edge, such as caller/callsite to callee or a raised
+exception identifier. The answer is a short identifier that appears in the
+already-seen repository context, not in the tool event and not in the Q2 wording.
+Q1 asks about an unrelated file, biasing the compressed post-Q1 cache away from
+Q2. A tool-event-like cue then names the new file/region or anchor and includes
+an answer-redacted source statement. IdleKV may use that cue to score evicted
+rows and restore K rows before Q2 decoding.
 
 Primary implementation target:
 
 - Python-only.
 - One-hop structural relation only: `anchor function + callsite -> leaf callee
-  identifier`, with `exception class` or `uppercase config constant` as reserve
-  answer types if callsite yield is too low.
+  identifier`, with `exception identifier` as a reserve answer type if callsite
+  yield is too low. Class-base edges are allowed for smoke only unless they
+  produce a matched-cache gap; early results show they are often too easy.
 - Exact identifier output only.
 - 32K rendered context of line-numbered file cards from a single pinned repo
   snapshot.
-- Q2 does not restate path or line. It asks about the reported failure/callsite
-  location or implicated helper.
+- Q2 does not restate line number or the answer. The event cue may name a file
+  and anchor, but the source statement must replace the gold identifier with
+  `<identifier>` so the cue is useful without leaking the answer.
 
 Fallback/smoke candidate: **RepoDelta-EventLoc**.
 
@@ -64,7 +66,16 @@ Secondary lanes:
 - DocDelta-Anchor, especially a version-pinned `KubeDelta-Flag` style task over
   technical reference docs, is the best non-repo fallback if code ability or
   Edge yield fails. It is easier to audit but weaker because reviewers may read
-  it as document lookup.
+  it as document lookup. If used, it should keep the same mechanism: prefill a
+  32K pinned documentation context, ask an unrelated redacted Q1, compress to
+  `B_base`, observe an answer-redacted pre-turn-2 event cue, repair using only
+  that cue, then decode the same final event+Q2 prompt. Static gates must
+  reject answers that appear in the cue, Q2, page slug/title, heading, anchor
+  text, or cheap lexical decomposition of the cue. Required controls would add
+  `Section-K` and `LexicalAnchor-K` to the normal matched, random, oldest,
+  stale, and wrong-event suite. Appendix is the default outcome; main-paper
+  promotion is exceptional and requires beating those cheap heuristics under a
+  page-family bootstrap.
 - RealRepo MultiTurn Revisit changes too many axes at once and has no explicit
   tool-event cue; keep it as separate multi-turn evidence/future work.
 - BuildManifest Delta is a viable emergency fallback if code ability fails, but
@@ -168,15 +179,16 @@ Current state after audit:
 - File cards are line-numbered.
 - Q2 no longer restates the exact path and line after the tool event.
 - The Edge manifest/scoring/audit package now exists and is CPU-tested.
-- Phase 6 cannot run RepoDelta through its normal synthetic-task registry.
 - Phase 6 now has a non-invasive optional hook for separate repair question IDs,
-  but Phase 15 still needs a dedicated manifest-consuming GPU wrapper before any
-  main-claim run.
+  and Phase 15 now has a dedicated manifest-consuming wrapper for RepoDelta-Edge
+  GPU smokes.
+- The current dev manifest uses 12 repositories drawn from the SWE-bench
+  Verified repository pool. We should describe this precisely as "repositories
+  drawn from the SWE-bench repository pool," not as running SWE-bench.
 
 ## Required Implementation Before GPU
 
-No GPU run, including ability smoke, should start until these exist and pass CPU
-tests:
+No paper-facing GPU run should start until these exist and pass CPU tests:
 
 1. `phase15_protocol.json` with model revision, tokenizer revision,
    chat-template hash, repo registry hash, `B_base`, `R_ctx`, `K_grid`, primary
@@ -191,8 +203,8 @@ tests:
    stable example ID.
 4. Tokenizer-aware CPU audits: rendered length within 32K, nonempty Q2 token
    span, gold answer token sequence appears exactly once at the annotated span,
-   Q2 span outside the last `R_ctx + K_max` tokens, Q2 not already preserved by
-   the matched base keep plan, and no answer token occurrence in the tool cue.
+   Q2 span outside the last `R_ctx + K_max` tokens, and no answer token
+   occurrence in the tool cue.
 5. Strict identifier scorer: first decoded line after whitespace/backtick trim
    must match the gold answer byte-for-byte. No substring, case-folding, fuzzy
    matching, or judge model.
@@ -203,6 +215,16 @@ tests:
 8. Unit tests for manifest determinism, AST edge extraction, leakage rejection,
    token-span mapping, strict scoring, stale/wrong cue construction, metadata
    persistence, and runner dry-run plumbing.
+
+Current gate status: the redacted-unique v11 manifest improved the recoverable
+gap, and selected-row diagnostics showed an IdleKV signal at higher K, but v11
+and v12 did not satisfy the paper-facing gate. The fresh v12 pilot over 36 rows
+created headroom (`A-B_match=0.528`) but failed full-cache ability
+(`A=0.722`), had three cue-only hits, and had answer-token retention in some
+matched-cache rows. Any v11/v12 selected repair result is therefore diagnostic
+only. The final bounded RepoDelta-Edge attempt is v13: callsite-only rows with
+answer-redacted Q1 and answer-redacted event cues. If v13 fails the ability and
+eligibility gates, stop Edge and do not promote Phase 15 to the main paper.
 
 ## Conditions
 
@@ -221,6 +243,16 @@ Strongly recommended if runtime permits:
 
 - `ToolFile-K`: restore rows only from file(s) named in the tool cue. This tests
   whether IdleKV is better than a simple file-pointer heuristic.
+- `AnchorWindow-K`: restore evicted rows nearest to the annotated source/event
+  line, then backfill to the same K. This is a label-assisted locality
+  reference, not a deployable runtime baseline. It is mandatory for diagnosing
+  whether the result is explained by source-local neighborhood restoration.
+  Losing to it does not erase a deployable-control win, but it normally makes
+  the diagnostic appendix-only; the paper must then frame the remaining gap as
+  headroom relative to a label-assisted locality reference.
+- `LexicalAnchor-K`: optional before-main control that restores rows near
+  literal non-answer identifiers from the anchor/redacted statement. This tests
+  whether a cheap lexical/anchor heuristic explains exact identifier recovery.
 - `Event+Q2-K`: boundary ablation; not the main tool-event claim.
 - `Refresh-buffered`: method-boundary comparator, not a matched baseline.
 
@@ -228,8 +260,9 @@ Strongly recommended if runtime permits:
 
 1. Build CPU manifests for RepoDelta-EventLoc and RepoDelta-Edge over 10-15
    public pinned Python repos.
-2. Inspect yield. Preferred threshold for Edge: at least 150 clean candidate
-   examples total and at least 8 repos contributing candidates.
+2. Inspect yield. Preferred threshold for Edge before a locked run: at least
+   150 clean candidate examples total and at least 8 repos contributing
+   candidates. A smaller 24-row dev manifest is acceptable for smoke testing.
 3. Run full-context ability smoke on the dev split only: `n=5` for Edge and
    EventLoc, no repair claim.
 4. If Edge has `A >= 0.80` and the manifest yield is healthy, make Edge the
@@ -245,18 +278,78 @@ Strongly recommended if runtime permits:
 
 All GPU runs must be in tmux with timestamped logs.
 
+Outcome-selected manifests are discovery tools only. They can be used to test
+whether a candidate family is worth pursuing, but final main-paper evidence
+must come from a fresh frozen manifest whose eligibility rules are pre-outcome:
+repo split, generator parameters, static audit gates, token-depth gates,
+answer uniqueness, cue redaction, and deterministic cache-retention audits.
+Rows must not be added or removed after observing locked model outputs.
+
+## Confirmatory Phase 15 Design
+
+If discovery repair remains positive, the next paper-facing attempt should be a
+fresh frozen manifest, not the selected discovery examples. Use the discovery
+work only to freeze generator rules:
+
+- Repositories: pinned public Python repositories drawn from the SWE-bench
+  Verified repository pool, with a predeclared per-repo cap and source hashes.
+- Candidate types: primary `callsite_leaf_callee`. Use
+  `exception_identifier` only as reserve/future evidence because v12 showed
+  exception rows were lower ability and more often cue-solvable. Exclude
+  class-base rows unless a separate ability smoke shows they create a
+  matched-cache gap.
+- Static gates: unique answer occurrence, answer-redacted event cue, no answer
+  in event/Q2/path/anchor, Q2 outside the tail reserve, rendered context above
+  the active-cache budget, non-test source path, and deterministic seed.
+- Balance: target at least 8 contributing repos for a pilot and 12-16 repos for
+  a locked run, with no single repo contributing more than four locked rows.
+- Near-deadline pilot: with the current 12-repo verified pool, target 3 fresh
+  examples per repo (`n=30-36`) using a new fixed seed. If the ability gate
+  yields 8-12 repair-eligible rows from at least 8 repos, use all eligible rows
+  for a repair pilot; if more than 12 qualify, truncate deterministically by
+  manifest order with at most two rows per repo. If fewer than 8 rows or fewer
+  than 8 repos qualify, stop Edge rather than hand-picking rows.
+- Ability gate: run `A/B/B_match` plus CueOnly first at `K*=192` for this
+  near-deadline real-repo diagnostic; discovery showed the Edge signal is
+  budget-limited, so `K=96` is an adjacent compression sanity check rather than
+  the primary real-repo budget. If `A < 0.80`, `A-B_match < 0.15`, cue-only is
+  non-clean, or answer-token-retention audits indicate the task is not actually
+  compressed, omit Phase 15 from the main paper or redesign before any repair
+  claim.
+- Repair gate: only after the ability gate passes, run the fixed repair suite
+  on the whole fresh manifest at `K={96,192}` with all controls for this
+  real-repo pilot. The higher K is justified by discovery diagnostics showing
+  the Edge signal is budget-limited; it should be reported as a separate
+  real-repo diagnostic budget, not silently merged with the MQ-NIAH main
+  frontier. Strict-eligible rows can be reported only as a secondary
+  mechanistic slice, not the primary analysis. Any main result must include
+  `ToolFile-K` and `AnchorWindow-K`.
+
 ## Promotion Gate
 
 Main-paper promotion requires a locked run satisfying all of:
 
-- Full-cache score `A >= 0.80`.
-- Matched no-repair has a real gap: `A - B_match >= 0.15` at `K*=96`.
-- Mean `IdleKV-EventOnly - B_match >= 0.10` at `K*=96` and nonnegative at an
-  adjacent K.
+- Full-cache score `A >= 0.80` on the fresh predeclared manifest.
+- Matched no-repair has a real gap: `A - B_match >= 0.15` at the primary
+  real-repo diagnostic budget (`K*=192` for v13).
+- Discovery rows used for repair-smoke selection must satisfy the
+  per-row gate `A=1`, `B_match=0`, `CueOnly=0`, `Q1=1`, real eviction, and zero
+  B/B_match answer-token retention. The selector must write all rejection
+  reasons, and the resulting manifest is not confirmatory evidence.
+- Mean `IdleKV-EventOnly - B_match >= 0.10` at `K*=192` and nonnegative at
+  adjacent `K=96`.
 - Bootstrap 95% CI lower bound is positive for `IdleKV-EventOnly - B_match`,
-  `IdleKV-EventOnly - Random-K`, and `IdleKV-EventOnly - Oldest-K` at `K*=96`.
+  `IdleKV-EventOnly - Random-K`, and `IdleKV-EventOnly - Oldest-K` at
+  `K*=192`.
 - `IdleKV-EventOnly` beats `StaleCue-K` and `WrongEvent-K` by a positive paired
   CI or at least a predeclared practical margin.
+- `IdleKV-EventOnly` beats `ToolFile-K` by a predeclared practical margin.
+  `AnchorWindow-K` is reported separately as a label-assisted locality
+  reference, not as a deployable baseline. If IdleKV matches or beats it,
+  the result supports a stronger main-paper selection claim; if IdleKV beats
+  deployable controls but loses to AnchorWindow, keep the result appendix-only
+  and frame the remaining gap as headroom relative to a label-assisted locality
+  reference.
 - Repo-level median lift is positive; no single repo dominates the result.
 - Zero locked-manifest leakage/audit failures.
 - Full-cache misses are not dominated by formatting/truncation.
@@ -272,7 +365,12 @@ repair and do not claim idle tool-event repair.
 Preferred integration:
 
 - Add one concise result paragraph.
-- Add one one-column main figure only if the result is clean and visually strong.
+- Add one one-column main figure or compact table only if the result is clean
+  and visually strong. Preferred table columns: condition, score at `K*=192`,
+  gain over matched no-repair, paired repo-clustered interval, and positive-repo
+  count. Group `A/B/B_match`, deployable controls, `IdleKV-EventOnly`, and the
+  label-assisted `AnchorWindow-K` reference separately rather than mixing all
+  rows as equivalent baselines.
 - Replace the lower-priority retention-rule sensitivity figure if necessary.
 - Keep frontier, specificity, synthetic multi-turn, and runtime-capacity figures
   in main.

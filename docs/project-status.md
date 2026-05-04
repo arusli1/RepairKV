@@ -22,7 +22,8 @@ dynamic between-turn cache repair.
 | P11 | Done | Accumulated-attention retention inspired by H2O on the 4Q full K-grid `n=24` and Llama-3.1-8B 4Q full K-grid `n=24` both passed the main-candidate gate. |
 | P12 | Done | Sink-plus-recent policy-breadth `n=24` follow-up passed the gate and is integrated as a main figure with SnapKV and accumulated-attention rows. |
 | P13 | Done for current paper | Iterative gates, live-branch audit script, and paired uncertainty checks are implemented. The locked `n=24`, `K=80` five-turn run passed the main gate and is integrated as a main diagnostic with stale-query caveats. |
-| P14 | Active closure | AdaptFM/test-time-adaptation framing, controlled proxy-scorer validation, Llama portability cleanup, and real-agentic diagnostic planning are underway. |
+| P14 | Done for current paper | AdaptFM/test-time-adaptation framing, controlled proxy-scorer validation, Llama portability cleanup, and critical-flaw closure are integrated or promotion-gated. |
+| P15 | Appendix diagnostic | The controlled real-repository relevance-shift diagnostic over pinned SWE-bench-pool repositories is complete for this pass: strong against deployable/content-agnostic controls, but appendix-only because the label-assisted AnchorWindow reference remains stronger. |
 
 ## Paper State
 
@@ -39,6 +40,8 @@ dynamic between-turn cache repair.
 - Iterative closure framework: `phases/phase13_iteration_framework/phase13_plan.md`.
 - Critical-flaw closure plan:
   `phases/phase14_critical_flaw_closure/phase14_plan.md`.
+- Real-repository relevance-shift diagnostic:
+  `phases/phase15_real_repo_relevance_shift/phase15_status.md`.
 - Exact prior-policy audit:
   `phases/phase13_iteration_framework/exact_policy_audit.md`.
 
@@ -47,10 +50,10 @@ frontier for 2Q/4Q/6Q/8Q, a specificity-control figure, a locked five-turn
 relevance-shift figure, and a first-stage policy-breadth figure covering
 SnapKV, accumulated-attention, and sink-plus-recent rows. The 2Q and 8Q curves
 both come from full K-grid runs, not endpoint-only breadth evidence. The
-appendix contains graph-first robustness views for query-count breadth, the
-operating-regime heatmap, selection diagnostics, partition endpoints, scorer
-latency, and the plotted Llama portability check that is summarized in main
-prose. The Qwen2.5-3B
+appendix contains graph-first robustness views for the real-repository
+diagnostic, query-count breadth, the operating-regime heatmap, selection
+diagnostics, partition endpoints, scorer latency, and the plotted Llama
+portability check that is summarized in main prose. The Qwen2.5-3B
 same-family transfer result remains fallback appendix evidence rather than
 the preferred paper-facing transfer check.
 
@@ -64,7 +67,7 @@ generalization.
 Phase 12 tested a second non-SnapKV policy because it earned the space. The
 sink-plus-recent `n=24` K-grid at `B_base=16384` passed the policy-curve gate:
 best gain `0.431` at `K=128`, three eligible adjacent positive points,
-controls near matched no-repair, and the Gold-K reference covering IdleKV.
+controls near matched no-repair, and the SpanRef-K diagnostic covering IdleKV.
 The main figure now shows SnapKV, accumulated-attention, and sink-plus-recent
 policy rows as a robustness check rather than a broad canonical reproduction
 claim.
@@ -76,11 +79,13 @@ main paper. The locked multi-turn run passed: non-initial IdleKV gain is
 `0.542` with paired interval `[0.458,0.620]`, and current-query-only repair
 beats stale-query-only repair by `0.307` with paired interval `[0.240,0.370]`.
 
-Phase 14 reframes the paper as test-time adaptation of active KV state and
-keeps the remaining closure work promotion-gated. The canonical live-status
-file is `phases/phase14_critical_flaw_closure/phase14_status.md`. The active
-GPU run is the controlled proxy-scorer frontier; the real-agentic diagnostic is
-currently a design artifact, not a completed experiment.
+Phase 14 reframed the paper as test-time adaptation of active KV state and
+kept closure work promotion-gated. Phase 15 completed the bounded
+real-repository diagnostic: at `K=192`, event-only IdleKV improved exact
+identifier accuracy from `0.188` for matched no-repair to `0.729` and beat
+random, oldest, stale-cue, wrong-event, and ToolFile controls with positive
+paired intervals. The label-assisted AnchorWindow reference reached `0.896`,
+so the result is appendix evidence rather than a main selection claim.
 
 ## Validation
 
@@ -90,9 +95,17 @@ From the repo root:
 .venv/bin/python -m pytest -q
 ```
 
-Most recent recorded repo-wide CPU result:
-`241 passed, 16 warnings, 304 subtests passed` on 2026-05-03. Re-run before a
-release snapshot because active Phase 14 edits may change tests.
+Most recent focused Phase 15/Phase 6 result:
+`69 passed, 16 warnings` on 2026-05-04 after the event-only real-repository
+runner, ToolFile/AnchorWindow controls, stricter repair-artifact audit,
+repo-level lift summaries, manifest-audit gates, and appendix figure generation
+were added. Re-run the full repo-wide suite before a release snapshot.
+
+Most recent paper rebuild:
+`paper/scripts/render_paper_figures.py` and
+`latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex` both passed on
+2026-05-04; the log has no undefined references, undefined citations, or
+overfull boxes.
 
 After any paper or figure edit:
 

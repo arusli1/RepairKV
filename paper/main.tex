@@ -643,6 +643,15 @@ long enough to cover repair overhead.
 The present evidence is controlled: the main quality figures use one
 primary model, one primary first-stage retention rule, one synthetic
 split-query family, and fixed full-cache-generated turn-$N$ transcripts.
+We also built a stricter controlled real-repository relevance-shift
+diagnostic over pinned repositories drawn from the SWE-bench repository
+pool; it is not a SWE-bench issue-resolution benchmark. At $K=192$,
+event-only \idlekv{} improved exact identifier accuracy from $0.188$ for
+matched no-repair to $0.729$ and beat random, oldest, stale-cue,
+wrong-event, and file-name-assisted controls, but a label-assisted
+locality reference reached $0.896$, so Appendix
+Figure~\ref{fig:app-real-repo-diagnostic} treats the result as
+supporting diagnostic evidence rather than a main selection claim.
 The next systems experiment is trace-scheduled repair against real
 tool/environment wait distributions, queue state, and overlap.
 The main algorithmic gaps are also clear: a learned or page-level
@@ -953,6 +962,23 @@ main claims without replacing the primary matched-budget frontier. Exact
 audit values are kept in the released result artifacts rather than
 duplicated as wide tables.
 \FloatBarrier
+
+\IfFileExists{figures/real_repo_repair_diagnostic.pdf}{%
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.94\textwidth]{figures/real_repo_repair_diagnostic.pdf}
+  \caption{Controlled real-repository relevance-shift diagnostic over
+  $48$ callsite examples from $12$ repositories drawn from the SWE-bench
+  repository pool at pinned commits. Repair sees only the event cue; all
+  conditions decode the same event-plus-question prompt. Left: exact
+  identifier accuracy at $K=96$ and $K=192$. Right: $K=192$ \idlekv{}
+  gain over matched no-repair after removing cue-only or answer-retention
+  rows. ToolFile-$K$ is file-name-assisted with oldest-row backfill.
+  AnchorWindow-$K$ is a label-assisted locality reference, not a
+  deployable baseline or end-to-end issue-resolution result.}
+  \label{fig:app-real-repo-diagnostic}
+\end{figure}
+}{}
 
 \IfFileExists{figures/query_count_breadth.pdf}{%
 \begin{figure}[H]

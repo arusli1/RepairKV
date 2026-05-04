@@ -42,16 +42,22 @@ def paired_cluster_bootstrap(
     seed: int = 0,
 ) -> BootstrapCI:
     """Bootstrap paired treatment-baseline lift by repo then example."""
-    grouped: dict[str, list[tuple[str, float]]] = defaultdict(list)
-    lifts: list[float] = []
+    example_lifts: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
         treatment = float(row[treatment_field])
         baseline = float(row[baseline_field])
         lift = treatment - baseline
         repo = str(row[repo_field])
         example = str(row[example_field])
-        grouped[repo].append((example, lift))
-        lifts.append(lift)
+        example_lifts[repo][example].append(lift)
+    grouped: dict[str, list[tuple[str, float]]] = {}
+    lifts: list[float] = []
+    for repo, examples in example_lifts.items():
+        grouped[repo] = []
+        for example, values in examples.items():
+            example_lift = sum(values) / len(values)
+            grouped[repo].append((example, example_lift))
+            lifts.append(example_lift)
     if not grouped or not lifts:
         raise ValueError("Bootstrap requires at least one row.")
     repos = sorted(grouped)
@@ -72,4 +78,3 @@ def paired_cluster_bootstrap(
         high=_percentile(boot_means, 0.975),
         draws=int(draws),
     )
-
