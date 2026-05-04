@@ -98,12 +98,15 @@ From the repo root:
 .venv/bin/python -m pytest -q
 ```
 
+Most recent full test result:
+`295 passed, 16 warnings, 304 subtests passed` on 2026-05-04 after the Phase
+15 main-text cleanup and donor-complete figure-render fallback.
+
 Most recent focused Phase 15/Phase 6 result:
 `110 passed, 16 warnings` on 2026-05-04 after the event-only real-repository
 runner, ToolFile/AnchorWindow controls, stricter repair-artifact audit,
 repo-level lift summaries, manifest-audit gates, wrong-event donor provenance,
-and appendix figure generation were added. Re-run the full repo-wide suite
-before a release snapshot.
+and appendix figure generation were added.
 
 Most recent paper rebuild:
 `paper/scripts/render_paper_figures.py` and

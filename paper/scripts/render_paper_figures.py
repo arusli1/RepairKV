@@ -2555,7 +2555,7 @@ def render_real_repo_repair_diagnostic() -> bool:
     """Render the Phase 15 real-repository diagnostic as appendix evidence."""
 
     summary_path = FIGURE_DIR / "real_repo_repair_diagnostic_summary.csv"
-    audit_path = PHASE15_DIR / "phase15_repair_v13_whole_k96_192_anchor_audit.json"
+    audit_path = PHASE15_DIR / "phase15_repair_v13_whole_k96_192_anchor_with_donors_audit.json"
     if not summary_path.exists() and not audit_path.exists():
         for ext in ("pdf", "png"):
             (FIGURE_DIR / f"real_repo_repair_diagnostic.{ext}").unlink(missing_ok=True)

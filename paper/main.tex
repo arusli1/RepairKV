@@ -558,10 +558,13 @@ $0.188$ for matched no-repair to $0.729$, while random, oldest,
 stale-cue, wrong-event, and file-name-assisted controls remain between
 $0.167$ and $0.188$.
 A label-assisted locality reference reaches $0.896$, so we treat this as
-preliminary evidence that real repository cues create repairable KV-state
-failures, not as a solved real-code benchmark.
-Appendix Figure~\ref{fig:app-real-repo-diagnostic} gives the full
-diagnostic and sensitivity checks.
+preliminary evidence that this controlled real-repository setting
+instantiates repairable KV-state failures, not as a solved real-code
+benchmark.
+The gain remains positive after excluding the cue-only hit or rows with
+answer-token retention; Appendix
+Figure~\ref{fig:app-real-repo-diagnostic} gives the full diagnostic and
+sensitivity checks.
 
 \paragraph{Latency accounting.}
 We separate quality-linked scorer diagnostics from systems-capacity
