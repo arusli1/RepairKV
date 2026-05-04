@@ -41,6 +41,7 @@ PHASE8_STREAMING_DIR = (
 )
 
 COLUMN_WIDTH_IN = 3.35
+SPAN_REF_LABEL = "SpanRef-K"
 PALETTE = {
     "idlekv": "#0072B2",  # Okabe-Ito blue
     "gold": "#E69F00",  # Okabe-Ito orange
@@ -123,7 +124,7 @@ def load_numeric_csv(path: Path) -> pd.DataFrame:
 def _line_style(name: str) -> dict[str, object]:
     styles: dict[str, dict[str, object]] = {
         "IdleKV": {"color": PALETTE["idlekv"], "marker": "o", "linestyle": "-", "linewidth": 1.45},
-        "Gold-K": {"color": PALETTE["gold"], "marker": "s", "linestyle": "--", "linewidth": 1.2},
+        SPAN_REF_LABEL: {"color": PALETTE["gold"], "marker": "s", "linestyle": "--", "linewidth": 1.2},
         "Matched": {"color": PALETTE["matched"], "marker": "D", "linestyle": ":", "linewidth": 1.05},
         "Random-K": {"color": PALETTE["random"], "marker": "^", "linestyle": "-.", "linewidth": 1.0},
         "Oldest-K": {"color": PALETTE["oldest"], "marker": "x", "linestyle": (0, (3, 1.2)), "linewidth": 1.0},
@@ -157,7 +158,7 @@ def _plot_score_or_overlap(
             "Matched": "b_match",
             "Random-K": "random_k",
             "Oldest-K": "oldest_k",
-            "Gold-K": "oracle_k",
+            SPAN_REF_LABEL: "oracle_k",
         }
     elif mode == "overlap":
         series = {
@@ -165,7 +166,7 @@ def _plot_score_or_overlap(
             "Matched": "b_match_overlap",
             "Random-K": "random_k_overlap",
             "Oldest-K": "oldest_k_overlap",
-            "Gold-K": "oracle_k_overlap",
+            SPAN_REF_LABEL: "oracle_k_overlap",
         }
     else:
         raise ValueError(f"Unknown panel mode: {mode}")
@@ -236,8 +237,8 @@ def render_selection_diagnostic() -> None:
     for ax in axes[:, 1]:
         ax.tick_params(labelleft=True)
 
-    handles = [Line2D([0], [0], **_line_style(label)) for label in ["IdleKV", "Gold-K", "Matched", "Random-K", "Oldest-K"]]
-    labels = ["IdleKV", "Gold-K", "Matched", "Random-K", "Oldest-K"]
+    handles = [Line2D([0], [0], **_line_style(label)) for label in ["IdleKV", SPAN_REF_LABEL, "Matched", "Random-K", "Oldest-K"]]
+    labels = ["IdleKV", SPAN_REF_LABEL, "Matched", "Random-K", "Oldest-K"]
     fig.legend(
         handles,
         labels,
@@ -395,7 +396,7 @@ def render_operating_regime_heatmap() -> bool:
     axes[0].tick_params(labelbottom=False)
 
     cbar = fig.colorbar(im, ax=axes, fraction=0.05, pad=0.035)
-    cbar.set_label("Gold-K ref. gap closed", labelpad=2.0)
+    cbar.set_label("SpanRef diagnostic gap closed", labelpad=2.0)
     cbar.outline.set_linewidth(0.45)
     cbar.ax.tick_params(width=0.45, length=2.0, pad=1.2)
     save_figure(fig, "operating_regime_heatmap")
@@ -591,14 +592,13 @@ def render_specificity_panel() -> bool:
     if df.empty:
         return False
 
-    condition_order = ["StaleQ-K", "WrongQ-K", "IdleKV", "Refresh-K", "Gold-K"]
+    condition_order = ["StaleQ-K", "WrongQ-K", "IdleKV", "Refresh-K"]
     labels = {
         "Matched": "Matched",
         "StaleQ-K": "Stale query",
         "WrongQ-K": "Donor query",
         "Refresh-K": "Refresh-buffered",
         "IdleKV": "IdleKV",
-        "Gold-K": "Gold-K",
     }
     colors = {
         "Matched": PALETTE["matched"],
@@ -606,7 +606,6 @@ def render_specificity_panel() -> bool:
         "WrongQ-K": PALETTE["wrong"],
         "Refresh-K": PALETTE["refresh"],
         "IdleKV": PALETTE["idlekv"],
-        "Gold-K": PALETTE["gold"],
     }
     markers = {
         "Matched": "D",
@@ -614,7 +613,6 @@ def render_specificity_panel() -> bool:
         "WrongQ-K": "^",
         "Refresh-K": "P",
         "IdleKV": "o",
-        "Gold-K": "s",
     }
     ks = sorted(int(value) for value in df["k"].dropna().unique())
     k = ks[0]
@@ -631,8 +629,7 @@ def render_specificity_panel() -> bool:
     fig.subplots_adjust(left=0.30, right=0.985, top=0.93, bottom=0.27)
 
     ax.axvspan(-0.025, 0.025, color="#EFEFEF", alpha=0.82, zorder=0)
-    ax.axhline(2.5, color=PALETTE["grid"], linewidth=0.35, alpha=0.7, zorder=1)
-    ax.axhline(0.5, color=PALETTE["grid"], linewidth=0.35, alpha=0.7, zorder=1)
+    ax.axhline(1.5, color=PALETTE["grid"], linewidth=0.35, alpha=0.7, zorder=1)
     ax.axvline(0.0, color=PALETTE["matched"], linewidth=0.95, linestyle=(0, (1.0, 1.3)), zorder=2)
 
     for y, condition in zip(y_positions, condition_order, strict=True):
@@ -667,7 +664,7 @@ def render_specificity_panel() -> bool:
                 alpha=0.80,
                 zorder=3,
             )
-        facecolor = "white" if condition in {"Refresh-K", "Gold-K"} else colors[condition]
+        facecolor = "white" if condition == "Refresh-K" else colors[condition]
         ax.scatter(
             gain,
             y,
@@ -675,7 +672,7 @@ def render_specificity_panel() -> bool:
             marker=markers[condition],
             facecolor=facecolor,
             edgecolor=colors[condition],
-            linewidth=0.82 if condition in {"Refresh-K", "Gold-K"} else 0.32,
+            linewidth=0.82 if condition == "Refresh-K" else 0.32,
             zorder=4,
         )
         if condition not in {"StaleQ-K", "WrongQ-K"}:
@@ -1123,7 +1120,7 @@ def render_proxy_controlled_frontier() -> bool:
         ("random_k", "Random-K", _line_style("Random-K")),
         ("oldest_k", "Oldest-K", _line_style("Oldest-K")),
         ("idlekv", "IdleKV", _line_style("IdleKV")),
-        ("gold_k", "Gold-K", _line_style("Gold-K")),
+        ("gold_k", SPAN_REF_LABEL, _line_style(SPAN_REF_LABEL)),
     ]
     handles: list[Line2D] = []
     for ax, (label, panel) in zip(axes, panels, strict=True):
@@ -1796,7 +1793,7 @@ def render_partition_endpoint_dotplot() -> bool:
     series = [
         ("Matched", "matched", PALETTE["matched"], "D", 13),
         ("IdleKV", "idlekv", PALETTE["idlekv"], "o", 18),
-        ("Gold-K", "gold", PALETTE["gold"], "s", 15),
+        (SPAN_REF_LABEL, "gold", PALETTE["gold"], "s", 15),
     ]
     for label, key, color, marker, size in series:
         ax.scatter(
@@ -1960,15 +1957,12 @@ def render_multiturn_hard_trajectory() -> bool:
     fig.subplots_adjust(left=0.18, right=0.985, top=0.82, bottom=0.24, hspace=0.20)
 
     matched_fill = "#D7DCE2"
-    gold_fill = "#F0D28D"
-    control_color = "#8A8A8A"
-    observed_conditions = {str(condition) for condition in mean_gain["condition"].dropna().unique()}
     for ax, k in zip(axes, ks, strict=True):
         subset = mean_gain[mean_gain["k"] == k]
         x_positions = np.arange(len(display_turns), dtype=float)
         tick_labels = []
-        bar_width = 0.13
-        offsets = {"Rand/old": -0.34, "Matched": -0.17, "Stale-Q": 0.0, "IdleKV": 0.17, "Gold-K": 0.34}
+        bar_width = 0.15
+        offsets = {"Rand/old": -0.27, "Matched": -0.09, "Stale-Q": 0.09, "IdleKV": 0.27}
         for x, turn in zip(x_positions, display_turns, strict=True):
             matched_series = subset[
                 (subset["turn"] == turn)
@@ -1978,10 +1972,6 @@ def render_multiturn_hard_trajectory() -> bool:
                 (subset["turn"] == turn)
                 & (subset["condition"].astype(str) == "IdleKV")
             ]
-            gold_series = subset[
-                (subset["turn"] == turn)
-                & (subset["condition"].astype(str) == "Gold-K")
-            ]
             if matched_series.empty or idle_series.empty:
                 continue
 
@@ -1990,12 +1980,6 @@ def render_multiturn_hard_trajectory() -> bool:
             idle_score = float(idle["score"])
             idle_lo = float(idle["score_lo"])
             idle_hi = float(idle["score_hi"])
-            gold_score = (
-                float(gold_series.iloc[0]["score"])
-                if not gold_series.empty
-                else max(matched_score, idle_score)
-            )
-
             control_values = subset[
                 (subset["turn"] == turn)
                 & (subset["condition"].astype(str).isin(["Random-K", "Oldest-K"]))
@@ -2050,16 +2034,6 @@ def render_multiturn_hard_trajectory() -> bool:
                 edgecolor="none",
                 zorder=3,
             )
-            ax.bar(
-                x + offsets["Gold-K"],
-                gold_score,
-                width=bar_width,
-                color=gold_fill,
-                edgecolor=PALETTE["gold"],
-                linewidth=0.45,
-                alpha=0.78,
-                zorder=2,
-            )
             ax.errorbar(
                 [x + offsets["IdleKV"]],
                 [idle_score],
@@ -2075,8 +2049,8 @@ def render_multiturn_hard_trajectory() -> bool:
             displayed = int(turn) + 1
             if displayed in revisit_turns:
                 label = f"T{displayed}\nrevisit"
-            elif gold_score - matched_score < 0.03:
-                label = f"T{displayed}\nno gap"
+            elif matched_score >= 0.95:
+                label = f"T{displayed}\nhigh"
             else:
                 label = f"T{displayed}\nshift"
             tick_labels.append(label)
@@ -2107,13 +2081,12 @@ def render_multiturn_hard_trajectory() -> bool:
         Patch(facecolor=matched_fill, edgecolor="none", label="matched"),
         Patch(facecolor=PALETTE["refresh"], alpha=0.82, edgecolor="none", label="Stale-Q"),
         Patch(facecolor=PALETTE["idlekv"], alpha=0.90, edgecolor="none", label="IdleKV"),
-        Patch(facecolor=gold_fill, alpha=0.78, edgecolor=PALETTE["gold"], label="Gold-K"),
     ]
     fig.legend(
         handles=handles,
         loc="upper center",
         bbox_to_anchor=(0.53, 0.985),
-        ncol=5,
+        ncol=4,
         frameon=False,
         columnspacing=0.34,
         handlelength=0.54,
@@ -2277,7 +2250,7 @@ def _render_sparse_robustness_rows(
             markerfacecolor="none",
             markeredgecolor=PALETTE["gold"],
             color=PALETTE["gold"],
-            label="Gold-K",
+            label=SPAN_REF_LABEL,
             markersize=3.8,
         ),
     ]
@@ -2318,7 +2291,7 @@ def _format_frontier_xaxis(ax: plt.Axes, rows: pd.DataFrame) -> None:
 def _robustness_handles() -> list[object]:
     return [
         Line2D([0], [0], color=PALETTE["idlekv"], marker="o", linewidth=1.45, markersize=3.0, label="IdleKV"),
-        Line2D([0], [0], color=PALETTE["gold"], marker="s", linestyle="--", linewidth=1.10, markersize=2.8, label="Gold-K"),
+        Line2D([0], [0], color=PALETTE["gold"], marker="s", linestyle="--", linewidth=1.10, markersize=2.8, label=SPAN_REF_LABEL),
         Line2D([0], [0], color=PALETTE["matched"], linestyle=(0, (1.0, 1.3)), linewidth=0.95, label="Matched"),
         Patch(facecolor="#C9C9C9", alpha=0.32, edgecolor="none", label="control band"),
     ]
@@ -2505,20 +2478,6 @@ def render_policy_breadth_delta() -> bool:
     k_values = np.asarray(sorted(rows["k"].unique()), dtype=float)
     control_lo = grouped[["random_gain", "oldest_gain"]].min().min(axis=1).reindex(k_values).to_numpy(dtype=float)
     control_hi = grouped[["random_gain", "oldest_gain"]].max().max(axis=1).reindex(k_values).to_numpy(dtype=float)
-    gold_lo = grouped["gold_gain"].min().reindex(k_values).to_numpy(dtype=float)
-    gold_hi = grouped["gold_gain"].max().reindex(k_values).to_numpy(dtype=float)
-
-    ax.fill_between(
-        k_values,
-        gold_lo,
-        gold_hi,
-        color=PALETTE["gold"],
-        alpha=0.14,
-        linewidth=0.0,
-        zorder=1,
-    )
-    ax.plot(k_values, gold_lo, color=PALETTE["gold"], linewidth=0.38, alpha=0.35, zorder=1)
-    ax.plot(k_values, gold_hi, color=PALETTE["gold"], linewidth=0.38, alpha=0.35, zorder=1)
     ax.fill_between(
         k_values,
         control_lo,
@@ -2573,14 +2532,13 @@ def render_policy_breadth_delta() -> bool:
     ax.set_yticks([0.0, 0.4, 0.8])
     ax.grid(axis="x", visible=False)
     band_handles = [
-        Patch(facecolor=PALETTE["gold"], alpha=0.18, edgecolor=PALETTE["gold"], linewidth=0.35, label="Gold-K ref. range"),
         Patch(facecolor="#A9A9A9", alpha=0.28, edgecolor="#7D7D7D", linewidth=0.35, label="Rand/old range"),
     ]
     ax.legend(
         handles=band_handles,
         loc="upper left",
         bbox_to_anchor=(0.01, 0.995),
-        ncol=2,
+        ncol=1,
         frameon=False,
         borderaxespad=0.0,
         handlelength=0.9,

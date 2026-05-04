@@ -48,7 +48,7 @@ def evaluate_refresh_rows(
 
     A Refresh-K win is not a failed run. It means the paper should call IdleKV
     an incremental repair operator and describe Refresh-K as full-budget
-    reselection headroom.
+    reselection diagnostic.
     """
     decisions: list[dict[str, object]] = []
     for k, by_condition in sorted(_by_k_condition(rows).items()):
@@ -72,7 +72,7 @@ def evaluate_refresh_rows(
         if idle_vs_wrong < min_wrong_gap:
             failures.append("weak_donor_query_separation")
         if gold + 1e-9 < idle:
-            warnings.append("gold_span_reference_below_idlekv")
+            warnings.append("span_ref_diagnostic_below_idlekv")
         if refresh_vs_idle > refresh_boundary_gap:
             failures.append("refresh_k_is_stronger")
 
@@ -157,7 +157,7 @@ def evaluate_llama_rows(
         if idle - best_control < min_control_gap:
             failures.append("content_agnostic_controls_too_close")
         if gold + 1e-9 < idle:
-            warnings.append("gold_span_reference_below_idlekv")
+            warnings.append("span_ref_diagnostic_below_idlekv")
         decisions.append(
             {
                 "k": _int(row, "k", -1),

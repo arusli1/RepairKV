@@ -490,7 +490,7 @@ def test_llama_evaluator_promotes_non_saturated_useful_grid() -> None:
     assert result["useful_k"] == 4
 
 
-def test_llama_evaluator_treats_gold_span_shortfall_as_warning() -> None:
+def test_llama_evaluator_treats_span_ref_shortfall_as_warning() -> None:
     rows = [
         {
             "k": k,
@@ -509,7 +509,7 @@ def test_llama_evaluator_treats_gold_span_shortfall_as_warning() -> None:
 
     assert result["status"] == "llama_smoke_pass_run_locked"
     assert result["useful_k"] == 4
-    assert result["decisions"][0]["warnings"] == ["gold_span_reference_below_idlekv"]
+    assert result["decisions"][0]["warnings"] == ["span_ref_diagnostic_below_idlekv"]
     assert result["decisions"][0]["failures"] == []
 
 

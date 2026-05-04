@@ -120,9 +120,10 @@ design, then move to a locked run only after the smoke passes a written gate.
   `IdleKV` but greedily favors non-overlapping high-value neighborhoods, so it
   can cover multiple future-relevant spans instead of over-spending the restore
   budget near one span.
-- `Gold-K`: benchmark-metadata hindsight reference over annotated future-span
-  groups. It is not an implementable algorithm and is not a universal upper
-  bound over all possible K-token repairs.
+- `SpanRef-K`: benchmark-metadata diagnostic over annotated future answer-span
+  groups. It enumerates feasible annotated span-group subsets with cost at most
+  `K`; it is not an implementable algorithm and is not a universal upper bound
+  over all possible K-token repairs.
 - `Random-K` and `Oldest-K`: content-agnostic restore controls.
 - `Refresh-buffered`: reselects the full resumed active budget from active plus
   offloaded rows using the next-turn signal. It is a method-boundary reference,
@@ -134,8 +135,8 @@ design, then move to a locked run only after the smoke passes a written gate.
 
 ## Active Questions
 
-- Does the Coverage selector generalize beyond the strong 4Q locked result, or
-  should it remain an algorithmic-headroom appendix result?
+- Does the Coverage selector generalize beyond the strong 4Q/6Q locked checks,
+  or should it remain an algorithmic-selection-gap appendix result?
 - Can the RepoDelta real-repository diagnostic become a credible non-synthetic
   relevance-shift result after full-context GPU smokes?
 - Which selector or retention-policy variants add enough signal to replace an

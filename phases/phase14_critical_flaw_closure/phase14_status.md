@@ -1,6 +1,6 @@
 # Phase 14 Status
 
-Last updated: 2026-05-04 03:06 UTC.
+Last updated: 2026-05-04 03:22 UTC.
 
 ## Implemented
 
@@ -18,8 +18,9 @@ Last updated: 2026-05-04 03:06 UTC.
 - Added automated Phase 14 smoke evaluators for Refresh-K frontiers, calibrated
   Llama smokes, and selector variants.
 - Updated the readiness audit so that, once the locked controlled-proxy CSV
-  exists, P0 uses that CSV for controlled quality and Random/Oldest/Gold checks
-  while still using the existing fixed-K proxy reference for latency speedup.
+  exists, P0 uses that CSV for controlled quality and Random/Oldest/SpanRef
+  checks while still using the existing fixed-K proxy reference for latency
+  speedup.
 - Tightened the P0 status logic so a completed controlled proxy artifact that
   fails retained-gain/quality/speed gates is reported as `needs_proxy_redesign`,
   not as another request for a controlled run.
@@ -136,18 +137,18 @@ Last updated: 2026-05-04 03:06 UTC.
 - Completed the gated calibrated Llama branch at `n=24`, `B=16384`,
   `K={24,32,48,64}` on MQ-NIAH-6Q. The evaluator marked it as pass/run-locked;
   all four K points are useful for the Llama portability check, while `K=24/32`
-  exceed the span-group \goldk{} reference and therefore need the explicit
-  "Gold-K is not an upper bound" explanation.
+  exceed the SpanRef-K diagnostic and therefore need the explicit "SpanRef-K is
+  not an upper bound" explanation.
 - Completed the selector-variant branch at `n=24`, `K={24,48,96}` on MQ-NIAH-4Q.
   Coverage passed the selector gate (`+0.431` over current \idlekv{} at
   `K=48`, no high-K loss); MMR was rejected. This is promising algorithmic
   evidence, but it has not yet been promoted into the paper.
-- Audited the low-K Llama case where \idlekv{} exceeds \goldk{}. The raw rows
+- Audited the low-K Llama case where \idlekv{} exceeds SpanRef-K. The raw rows
   have no budget violations and the span-group reference is monotone in `K`.
-  The issue is semantic rather than corruption: in `gold_spans` mode \goldk{}
+  The issue is semantic rather than corruption: in `gold_spans` mode SpanRef-K
   enumerates annotated Q2 span-group subsets and may restore fewer than `K`
   tokens, while \idlekv{} can spend the full budget on useful local
-  neighborhoods. Therefore \goldk{} must remain a benchmark-metadata reference,
+  neighborhoods. Therefore SpanRef-K must remain a benchmark-metadata diagnostic,
   not an upper bound or a required ceiling.
 - Added `run_selector_variant_6q_locked.sh` and completed the locked 6Q Coverage
   check in tmux after a positive-but-mixed 6Q smoke. The locked run passed the
@@ -155,12 +156,16 @@ Last updated: 2026-05-04 03:06 UTC.
   `0.667` and matched no-repair `0.434`; at `K=96`, Coverage tied \idlekv{}
   at `0.986`. Raw artifact audit found no restore-count, selected-position, or
   duplicate-position violations. This makes Coverage important algorithmic
-  headroom, but it still needs a dedicated 4Q/6Q K-grid before promotion as a
+  selection-gap evidence, but it still needs a dedicated 4Q/6Q K-grid before promotion as a
   main-paper selector figure.
-- Updated the Phase 14 smoke evaluator so a Gold-span reference below \idlekv{}
+- Updated the Phase 14 smoke evaluator so a SpanRef-K diagnostic below \idlekv{}
   is emitted as a warning rather than a run failure. This preserves the audit
   signal without conflating a constrained reference-family shortfall with a
   corrupt run.
+- Completed the span-reference terminology review with expert-agent consensus:
+  keep the existing span-group diagnostic, rename it to SpanRef-K in all
+  paper-facing text, do not treat it as an upper bound, and do not rerun
+  existing experiments because the data and selector audits are valid.
 - Copied compact locked summaries for the Llama 6Q check and Coverage selector
   checks into `paper/figures/` so paper-facing evidence does not depend only on
   ignored local phase-result directories.
@@ -251,7 +256,7 @@ Last updated: 2026-05-04 03:06 UTC.
 - `.venv/bin/python -m pytest phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py phases/phase13_iteration_framework/tests/test_paper_language.py phases/phase9_experiment_deepening/tests/test_paper_figure_renderer.py -q`
   - `27 passed` at the end of the queued closure.
 - `.venv/bin/python -m pytest phases/phase6_repair/tests/test_selectors.py phases/phase6_repair/tests/test_runner.py phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py`
-  - `46 passed` after the Gold-K/Coverage audit.
+  - `46 passed` after the SpanRef-K/Coverage audit.
 - `bash -n phases/phase14_critical_flaw_closure/scripts/run_selector_variant_6q_locked.sh`
 - `.venv/bin/python -m pytest phases/phase6_repair/tests/test_selectors.py phases/phase6_repair/tests/test_runner.py`
   - `31 passed` before launching the 6Q Coverage locked run.
@@ -293,7 +298,7 @@ The remaining over-detail risks are:
 The reviewer holes that remain material are:
 
 - Controlled proxy scoring: closed for the current benchmark. The locked proxy
-  frontier preserves the repair effect under Random-K/Oldest-K/Gold-K controls,
+  frontier preserves the repair effect under Random-K/Oldest-K/SpanRef-K controls,
   but it remains benchmark evidence for a cheaper scoring path rather than a
   production selector.
 - Trace-scheduled evaluation: the paper cites web/coding-agent wait evidence,
@@ -304,8 +309,8 @@ The reviewer holes that remain material are:
 - Broader generality: current Llama and retention-rule evidence are targeted
   breadth checks, not enough for a broad model-family or named-policy claim.
 - Algorithmic selection gap: Refresh-buffered and the Coverage selector show that
-  IdleKV is a useful promotion primitive, not the final selector. Gold-K is a
-  benchmark-metadata span-group reference, so it should support interpretation
+  IdleKV is a useful promotion primitive, not the final selector. SpanRef-K is a
+  benchmark-metadata span-group diagnostic, so it should support interpretation
   but not be described as a universal upper bound.
 - Off-device retention policy: the paper now states the two-level retention
   problem explicitly, but it does not solve how a long-running agent should
@@ -336,14 +341,14 @@ Command:
 Result:
 
 - `4q_proxy`: needs controlled proxy smoke or locked run. Existing n=100 proxy
-  has strong retained gain and speedup, but lacks Random-K, Oldest-K, and Gold-K
+  has strong retained gain and speedup, but lacks Random-K, Oldest-K, and SpanRef-K
   controls and only has two K points.
 - `6q_proxy`: needs controlled proxy smoke or locked run. Existing n=100 proxy
   has large speedup but narrowly misses the strict retained-gain gate and also
   lacks controls.
 - `specificity`: boundary result. IdleKV beats stale/donor controls, but
   Refresh-K exceeds IdleKV by `+0.458`, so the paper must frame Refresh-K
-  explicitly as full-budget reselection/headroom.
+  explicitly as full-budget reselection diagnostic evidence.
 - `llama`: current readiness now prefers the Phase 11 Llama-3.1-8B 4Q
   full-grid artifact (`n=24`, nine K values), which passes the
   non-saturation/main-candidate audit for a cautious portability statement.
@@ -437,4 +442,4 @@ Result:
 - At high K, stale/donor controls get close or equal to IdleKV, so this smoke
   should not become a new main figure. It supports text framing: IdleKV is an
   incremental pre-resume promotion primitive, while Refresh-K is full-budget
-  Q2-time reselection headroom.
+  Q2-time reselection diagnostic evidence.

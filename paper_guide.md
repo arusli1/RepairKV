@@ -237,10 +237,11 @@ Use paper-facing terminology, not internal repo terminology.
 - `Delta_repair`: compact metric symbol for score gain over matched no-repair.
 - "proxy/exact gain ratio": preferred term for fixed-K proxy/exact comparisons.
   Define it as `(Proxy - matched no-repair)/(Exact - matched no-repair)`.
-- "`Gold-K` benchmark-metadata hindsight reference": acceptable if defined.
-  Do not call it "oracle" in prose, and do not imply it is an upper bound over
-  all possible K-token repairs. It is exact only over the annotated span-group
-  candidate family used by the benchmark.
+- "`SpanRef-K` benchmark-metadata diagnostic": preferred paper-facing name for
+  the current annotated-span reference. Do not call it Gold-K or oracle in
+  prose, and do not imply it is an upper bound over all possible K-token
+  repairs. It is exact only over the annotated span-group candidate family used
+  by the benchmark and may use fewer than K rows.
 - "H2O-inspired accumulated-attention retention": use this wording for the
   current accumulated-attention policy branch unless the implementation exactly
   reproduces canonical H2O accumulated decode attention. Do not write
@@ -390,9 +391,9 @@ Target main visual package:
 2. Main matched-budget frontier. Use a one-column raw-score overlay over
    restore budget when the visual remains readable: IdleKV curves for
    2Q/4Q/6Q/8Q, faint matched no-repair traces, neutral query-count labels,
-   and right-side endpoint or K=96 difference labels. Do not include Gold-K in
-   this main figure unless it answers a new question; it usually makes the
-   frontier too busy.
+   and right-side endpoint or K=96 difference labels. Do not include SpanRef-K
+   in this main figure unless it answers a new question; it usually makes the
+   frontier too busy and can be misread as an upper bound.
 3. Specificity contrast if the locked Phase 10 run passes: use score gain
    over matched no-repair with uncertainty plus paired win/tie/loss rates.
    Label the bounded comparator as Refresh-buffered in caption/prose; a
@@ -400,15 +401,16 @@ Target main visual package:
    defines it.
 4. Operating-regime heatmap in the main text only while it replaces weaker
    prose and answers "where does repair help?" Use normalized recovery against
-   the Gold-K span-group reference only when the denominator is positive and
-   the caption states that Gold-K is not a universal upper bound. Demote it to
+   the SpanRef-K diagnostic only when the denominator is positive and the
+   caption states that SpanRef-K is not a universal upper bound. Demote it to
    appendix if a stronger specificity or multi-turn figure needs the main-text
    slot.
 5. Multi-turn relevance-shift trajectory if the locked run passes the
    numerical gate and paired uncertainty is available. The main plot should
-   show IdleKV, StaleQ-K, Gold-K, and a Random-K/Oldest-K band, with revisit
-   turns marked. Keep CurrentQOnly-K/StaleQOnly-K as audit or caption/prose
-   evidence unless adding them remains clearly readable.
+   show IdleKV, StaleQ-K, matched no-repair, and a Random-K/Oldest-K band, with
+   revisit turns marked. Keep SpanRef-K, CurrentQOnly-K, and StaleQOnly-K as
+   appendix audit or caption/prose evidence unless adding them remains clearly
+   readable.
 6. Compact algorithm box or pseudocode only if it can replace prose and add
    reproducible detail beyond the method schematic.
 7. Optional mechanism or latency plot only if it replaces text/table space and
@@ -466,7 +468,7 @@ ICML figure rules to preserve:
 - Legends must not cover data; prefer below or outside the plot.
 - Prefer vector formats for plots.
 - Keep color semantics stable across the paper. Current convention: IdleKV is
-  Okabe-Ito blue; Gold-K/reference headroom is orange/gold; matched and
+  Okabe-Ito blue; SpanRef-K diagnostics are orange/gold; matched and
   content-agnostic controls are black/gray; stale/refresh/query-control
   diagnostics are purple; accumulated-attention policy variants are green; and
   sink-plus-recent/policy variants that need a third policy color use
@@ -500,21 +502,20 @@ IdleKV-specific figure rules:
   the main plot if the legend becomes the visual center.
 - A single raw-score overlay is acceptable when query-count breadth is the main
   story: use solid IdleKV curves, faint matched no-repair traces, direct
-  query-count labels, and move Gold-K plus Random/Oldest details to prose or
+  query-count labels, and move SpanRef-K plus Random/Oldest details to prose or
   appendix tables. Do not normalize the main frontier just to merge panels.
 - Include 2Q/4Q/6Q/8Q in the main frontier only from full K-grid evidence.
   It is acceptable for 2Q to saturate, but keep panel labels neutral and put
   interpretation in prose. Endpoint-only query-count evidence belongs in
   appendix breadth.
-- For multi-turn diagnostics: promote only locked runs, not smokes. Prefer raw
-  exact score when a Gold-K/reference marker is shown, so the reference remains
-  visually interpretable as a benchmark-metadata span-group score rather than a
-  universal upper bound. If using gain over matched no-repair, omit or clearly
-  remap references. The main diagnostic must include StaleQ-K if the claim is
-  dynamic next-turn adaptation; otherwise reviewers can attribute the effect to
-  stale query reuse. If CurrentQOnly-K and StaleQOnly-K diagnostics are present,
-  require current-query-only repair to separate from stale-query-only repair
-  before promoting the result.
+- For multi-turn diagnostics: promote only locked runs, not smokes. Keep
+  SpanRef-K out of the main multi-turn plot unless it is visually secondary and
+  clearly described as a benchmark-metadata span-group diagnostic, not a
+  universal upper bound. The main diagnostic must include StaleQ-K if the claim
+  is dynamic next-turn adaptation; otherwise reviewers can attribute the effect
+  to stale query reuse. If CurrentQOnly-K and StaleQOnly-K diagnostics are
+  present, require current-query-only repair to separate from stale-query-only
+  repair before promoting the result.
 - For cross-model evidence: require a full-cache/matched ability gate and a
   cache round-trip check before any repair comparison. Failed small-model
   ability checks belong in notes, not in the main paper.
@@ -537,7 +538,7 @@ Current Phase 10 gate:
 
 - `K=48` is the locked specificity operating point because the `n=1` smoke
   separates IdleKV from stale and donor wrong-query controls while leaving
-  a visible matched-to-Gold-K reference gap.
+  a visible matched-to-SpanRef-K diagnostic gap.
 - `K=96` should not anchor next-turn specificity because the smoke showed
   stale-query catching up.
 - If the locked run keeps `IdleKV > StaleQ-K` and `IdleKV > WrongQ-K` but
@@ -787,7 +788,7 @@ Figure and diagram rules:
   square-ish cells, clear axis ticks, and no fake-data warnings inside the
   plotting area. If a panel is preliminary, say so in the caption only and do
   not use it for claims. Use stars or hatching sparingly for secondary
-  information such as remaining hindsight-reference headroom.
+  information such as remaining SpanRef-K diagnostic gap.
 - Dense experimental figures are acceptable when each panel answers a distinct
   reviewer question. If a figure only repeats a table, move it to appendix or
   drop it.
@@ -797,14 +798,14 @@ Figure and diagram rules:
   robustness question.
 - Appendix robustness plots should reuse the main frontier grammar when
   possible: restore budget on the x-axis, exact score on the y-axis, IdleKV
-  as the primary blue curve, `Gold-K` as a dashed orange reference, and
+  as the primary blue curve, `SpanRef-K` as a dashed orange diagnostic, and
   matched / Random-$K$ / Oldest-$K$ summarized as a gray control band. Avoid
   lollipop marker piles for two-point robustness checks.
 - If a robustness check has only two or three K values, do not render it as a
   fake frontier. Use a compact endpoint/interval dot plot instead: y-axis rows
   are K or budget-K settings, x-axis is exact score, gray interval is
   Random/Oldest controls, dark marker is matched no-repair, blue marker is
-  IdleKV, orange hollow marker is Gold-K, and right labels show IdleKV gain
+  IdleKV, orange hollow marker is SpanRef-K, and right labels show IdleKV gain
   over matched. Switch back to frontier grammar only after a full K-grid run.
 - Accumulated-attention retention checks should stay appendix unless the
   full-grid run passes the main-candidate gate. The caption must explicitly
@@ -815,12 +816,13 @@ Figure and diagram rules:
   the interpretation of the main frontier. Do not add a policy graph just to
   increase figure count. Use a one-column gain-over-matched plot: rows/curves
   are SnapKV, accumulated-attention retention, and sink-plus-recent retention;
-  blue is IdleKV/SnapKV, orange dashed is Gold-K gain, and a gray band is the
-  Random-K/Oldest-K control-gain range.
+  blue is IdleKV/SnapKV and a gray band is the Random-K/Oldest-K control-gain
+  range. Keep SpanRef-K in appendix diagnostics unless it is needed to answer a
+  distinct selection-gap question.
 - Do not promote a first-stage-policy figure on a single good endpoint.
   Sink-plus-recent retention needs a clean multi-point frontier with controls
-  pinned near matched no-repair and a clearly defined Gold-K span-group
-  reference. If it is only endpoint-positive or noisy, leave prior-policy
+  pinned near matched no-repair and a clearly defined SpanRef-K diagnostic if
+  that diagnostic is shown. If it is only endpoint-positive or noisy, leave prior-policy
   variants as appendix robustness and future-benchmark evidence.
 - Before any result enters the main text, run the Phase 13 result-rigor gate:
   full run rather than smoke, paired/shared examples, enough K-grid points,

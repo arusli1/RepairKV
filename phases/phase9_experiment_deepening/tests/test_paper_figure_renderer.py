@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 
 import paper.scripts.render_paper_figures as renderer
-from paper.scripts.render_paper_figures import _line_style, _pivot_heatmap
+from paper.scripts.render_paper_figures import SPAN_REF_LABEL, _line_style, _pivot_heatmap
 
 
 def test_pivot_heatmap_orders_budget_and_restore_budget() -> None:
@@ -28,9 +28,9 @@ def test_pivot_heatmap_orders_budget_and_restore_budget() -> None:
 
 
 def test_line_styles_use_distinct_marker_channels() -> None:
-    styles = {name: _line_style(name) for name in ["IdleKV", "Gold-K", "Matched", "Random-K", "Oldest-K"]}
+    styles = {name: _line_style(name) for name in ["IdleKV", SPAN_REF_LABEL, "Matched", "Random-K", "Oldest-K"]}
 
-    assert styles["IdleKV"]["marker"] != styles["Gold-K"]["marker"]
+    assert styles["IdleKV"]["marker"] != styles[SPAN_REF_LABEL]["marker"]
     assert styles["Matched"]["linestyle"] != styles["Random-K"]["linestyle"]
     assert styles["Oldest-K"]["color"] != styles["Random-K"]["color"]
 

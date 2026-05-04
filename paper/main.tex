@@ -21,7 +21,7 @@
 \newcommand{\idlekv}{\textsc{IdleKV}}
 \newcommand{\bbase}{\ensuremath{B_{\mathrm{base}}}}
 \newcommand{\bmatch}{\ensuremath{B_{\mathrm{match}}}}
-\newcommand{\goldk}{\ensuremath{\mathrm{Gold}\mbox{-}K}}
+\newcommand{\spanref}{\ensuremath{\mathrm{SpanRef}\mbox{-}K}}
 
 \usepackage{icml2026}
 
@@ -321,9 +321,11 @@ no-repair,
 where $\mathrm{Score}$ is the mean fraction of held-out $Q_2$ targets
 recovered correctly per example, averaged over the fixed evaluation set
 shared across all conditions for that setting.
-$\goldk$ is a benchmark-metadata hindsight reference over annotated
-$Q_2$ span groups; it is not a mathematical upper bound over arbitrary
-token subsets.
+For diagnostic purposes only, \spanref{} uses benchmark metadata:
+it enumerates annotated $Q_2$ answer-span groups and selects the
+highest-scoring subset whose token cost is at most $K$.
+\spanref{} is exact over this small span-group family, but it is not an
+optimum over all $K$-token cache states and is not used as an upper bound.
 Thus the protocol tests whether newly revealed turn-$(N{+}1)$
 information can improve a compressed cache relative to matched
 no-repair retention, not whether the runtime simply keeps more active
@@ -386,7 +388,7 @@ Every condition reuses the same full-cache-generated turn-$N$
 transcript when answering $Q_2$.
 We compare the full-cache reference $A$, the base compressed cache $B$,
 matched no-repair $\bmatch$, Random-$K$ and Oldest-$K$ restore
-controls, \idlekv{}, and $\goldk$.
+controls, and \idlekv{}.
 Random-$K$ and Oldest-$K$ restore from the same evicted-KV store as
 \idlekv{} without future-query scoring, so they test whether gains come
 from query-aware repair rather than from generic reinsertion.
@@ -416,9 +418,10 @@ while matched no-repair scores $0.245$, $0.422$, and $0.546$,
 respectively.
 This shows that generic reinsertion from the same offloaded evicted-KV
 store does not explain the effect.
-The $\goldk$ reference shows the remaining benchmark-metadata span gap
-at intermediate budgets, especially on MQ-NIAH-6Q at $K=48$
-($0.994$ versus $0.653$ for \idlekv{} in absolute score).
+Appendix diagnostics additionally report \spanref{}, which shows that
+benchmark-labeled answer spans remain recoverable at intermediate
+budgets; on MQ-NIAH-6Q at $K=48$, \spanref{} scores $0.994$ versus
+$0.653$ for \idlekv{}.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/frontier_raw_overlay.pdf}
@@ -426,7 +429,8 @@ at intermediate budgets, especially on MQ-NIAH-6Q at $K=48$
   Solid curves are \idlekv{}; dotted curves are matched no-repair.
   Right-side labels report query count and $\Delta_{96}$, the score
   difference at $K=96$. Endpoint content-agnostic controls and
-  $\goldk{}$ appear in Appendix Figure~\ref{fig:app-partition-endpoints}.
+  \spanref{} diagnostics appear in Appendix
+  Figure~\ref{fig:app-partition-endpoints}.
   MQ-NIAH-2Q/4Q/6Q use 100 examples; MQ-NIAH-8Q uses 24 examples per
   split over five partitions.}
   \label{fig:main-frontier}
@@ -442,8 +446,7 @@ $[-0.014,0.069]$, respectively.
 The same panel also shows the method boundary.
 Refresh-buffered, which reselects the whole resumed active budget from
 the active cache plus offloaded evicted-KV store using $Q_2$ scores,
-reaches the
-$\goldk{}$ reference at this operating point.
+reaches raw score $1.000$ at this operating point.
 Thus \idlekv{} is not the strongest possible $Q_2$-time store-backed
 selector; it is an incremental repair primitive that leaves
 room for stronger selection policies.
@@ -456,7 +459,7 @@ room for stronger selection policies.
   over matched no-repair with bootstrap $95\%$ confidence intervals;
   the matched no-repair raw score is $0.215$. Stale and donor
   controls test whether any query-like signal suffices; Refresh is a
-  full-budget reselector and \goldk{} uses benchmark metadata.}
+  full-budget reselector.}
   \label{fig:specificity-control}
 \end{figure}
 
@@ -472,8 +475,7 @@ On a fixed five-turn MQ-NIAH-8Q revisit schedule ($K=80$, $n=24$),
 paired bootstrap interval $[0.458,0.620]$; Random-$K$ and Oldest-$K$
 gain only $0.010$ and $0.021$.
 The strongest effect appears on the revisit turn; Turn 3 is retained as
-an internal saturated-reference control because matched no-repair already
-reaches the \goldk{} reference.
+an internal saturation control because matched no-repair is already high.
 A current-query-only audit matches \idlekv{}, while stale-query-only
 repair recovers part of the gap but remains clearly below current-query
 repair.
@@ -485,11 +487,10 @@ trace-based agent benchmarks.
   \includegraphics[width=\columnwidth]{figures/multiturn_hard_trajectory.pdf}
   \caption{Five-turn relevance-shift diagnostic on MQ-NIAH-8Q
   ($B{=}18{,}432$, $K{=}80$, $n{=}24$). Groups show post-priming exact
-  scores at equal active-cache budget for matched no-repair, \idlekv{},
-  and \goldk{}. Blue intervals are bootstrap $95\%$ confidence
-  intervals for \idlekv{}; Stale-Q uses the previous-turn query, and
-  Rand/old summarizes the Random-$K$ and Oldest-$K$ controls. Turn 3 has
-  no matched-to-\goldk{} reference gap.}
+  scores at equal active-cache budget for matched no-repair and
+  \idlekv{}. Blue intervals are bootstrap $95\%$ confidence intervals for
+  \idlekv{}; Stale-Q uses the previous-turn query, and Rand/old
+  summarizes the Random-$K$ and Oldest-$K$ controls.}
   \label{fig:multiturn}
 \end{figure}
 
@@ -514,8 +515,8 @@ named-algorithm performance.
   \includegraphics[width=\columnwidth]{figures/policy_breadth_delta.pdf}
   \caption{First-stage retention sensitivity on MQ-NIAH-4Q
   ($n{=}24$, $B{=}16{,}384$). Curves show exact $Q_2$ score gain over
-  each retention rule's matched no-repair baseline; gray and orange bands
-  span Random-$K$/Oldest-$K$ and \goldk{} gains across rules.
+  each retention rule's matched no-repair baseline; the gray band spans
+  Random-$K$/Oldest-$K$ gains across rules.
   Accumulated-attention and sink-plus-recent are protocol-matched
   variants inspired by H$_2$O and StreamingLLM, not full system
   reproductions.}
@@ -538,7 +539,7 @@ $0.80/0.90/0.98/1.00$ at $K=24/32/48/64$, while Random-$K$/Oldest-$K$
 remain near $\bmatch$.
 
 The restored tokens also move the final active cache toward the annotated
-$Q_2$ gold spans.
+$Q_2$ answer spans.
 Appendix Figure~\ref{fig:app-selection-diagnostic} shows that
 \idlekv{} overlap rises with $K$ while $\bmatch$ and content-agnostic
 controls stay near baseline.
@@ -674,9 +675,10 @@ how quickly eviction failures accumulate.
 The five-turn diagnostic in Figure~\ref{fig:multiturn} strengthens
 the dynamic-workflow evidence, but it remains synthetic and a stale
 previous-query scorer still closes part of the gap.
-The current selector also leaves visible gap to the $\goldk$ reference at
-moderate $K$, which motivates stronger selection rules and broader task
-families with the same matched-budget controls.
+The current selector also leaves room for stronger selection rules at
+moderate $K$, as shown by Refresh-buffered and the Coverage selector
+diagnostics, motivating broader task families with the same
+matched-budget controls.
 
 % -----------------------------------------------------------------------
 \section{Conclusion}
@@ -694,8 +696,8 @@ outperform matched no-repair retention while random and oldest-token
 restores stay near baseline, with targeted checks across first-stage
 retention rules.
 The remaining work is to broaden the evidence beyond this synthetic
-family and to close the gap between the current repair selection rule
-and the $\goldk$ reference.
+family and to develop stronger selector policies under the same
+matched-budget controls.
 More broadly, long-context agent systems may need to be judged not only
 by how efficiently they decode, but by how well they maintain KV state
 between turns.
@@ -906,19 +908,20 @@ The $Q_2$-appended-state proxy instead appends $Q_2$ to the compressed
 cache with an ordinary forward pass and reuses the appended $Q_2$ cache
 rows as scoring rows.
 
-\paragraph{Hindsight reference.}
-$\goldk$ starts from the same $B$ state and offloaded evicted-KV store
+\paragraph{Span-group diagnostic.}
+\spanref{} starts from the same $B$ state and offloaded evicted-KV store
 as \idlekv{}.
-It enumerates the small family of annotated gold $Q_2$ span-group
+It enumerates the small family of annotated $Q_2$ answer-span-group
 subsets, one key/value span group per requested needle, evaluates each
 subset once under actual $Q_2$ generation, and chooses the
 highest-scoring subset with total cost at most $K$.
 It is exact over this benchmark-specific span-group family, but not over
 all arbitrary token subsets or possible final generations.
 Because the selected span-group subset may use fewer than $K$ rows, a
-repair selector can occasionally score higher at low budgets by
-spending the full budget on useful local neighborhoods around the
-future-relevant spans.
+repair selector can occasionally score higher at low budgets by spending
+the full budget on useful local neighborhoods around future-relevant
+spans. Thus \spanref{} is a diagnostic span-group reference, not a
+ceiling.
 
 \paragraph{Partition choices.}
 For MQ-NIAH-4Q, the pooled panel uses
@@ -970,12 +973,12 @@ duplicated as wide tables.
   \includegraphics[width=\columnwidth]{figures/operating_regime_heatmap.pdf}
   \caption{Operating-regime heatmap for the final exact $Q_2$
   evaluations ($n{=}24$ per setting). Cells show the fraction of
-  available $\goldk{}$ reference gain recovered by \idlekv{}, clipped to
+  available \spanref{} diagnostic gain recovered by \idlekv{}, clipped to
   $[0,1]$: $(S_{\mathrm{IdleKV}}-S_{\bmatch})/
-  (S_{\goldk{}}-S_{\bmatch})$, averaged over pooled balanced splits for
-  MQ-NIAH-4Q and MQ-NIAH-6Q. Cells with little remaining
-  matched-to-\goldk{} reference gap should be read as saturation
-  diagnostics.}
+  (S_{\mathrm{SpanRef}}-S_{\bmatch})$, averaged over pooled balanced
+  splits for MQ-NIAH-4Q and MQ-NIAH-6Q. Cells with little remaining
+  matched-to-\spanref{} diagnostic gap should be read as saturation
+  diagnostics, not as an upper-bound statement.}
   \label{fig:app-operating-regime}
 \end{figure}
 }{}
@@ -998,7 +1001,7 @@ duplicated as wide tables.
   \caption{Per-partition endpoint scores at $K=128$ on the final exact
   evaluations. Gray segments show the change from matched
   no-repair to \idlekv{}, orange points show the benchmark-metadata
-  $\goldk{}$ reference, and labels report the \idlekv{} difference over
+  \spanref{} diagnostic, and labels report the \idlekv{} difference over
   matched no-repair.}
   \label{fig:app-partition-endpoints}
 \end{figure}
@@ -1035,8 +1038,8 @@ duplicated as wide tables.
   \end{minipage}
   \caption{Supplementary portability and scorer-latency diagnostics.
   Left: Llama-3.1-8B-Instruct same-protocol 6Q check, with the gray band
-  spanning matched no-repair and content-agnostic restores; \goldk{} is
-  the span-group reference, not an upper bound. Right:
+  spanning matched no-repair and content-agnostic restores; \spanref{} is
+  the span-group diagnostic, not an upper bound. Right:
   fixed-$K$ exact/proxy scorer probe; in paired $n{=}100$, $K=96$
   probes, the proxy remains above matched no-repair while reducing p50
   total scorer latency from 6.38\,s to 0.83\,s on 4Q and from
@@ -1051,7 +1054,7 @@ duplicated as wide tables.
   \includegraphics[width=\columnwidth]{figures/proxy_controlled_frontier.pdf}
   \caption{Controlled proxy-scorer frontier on MQ-NIAH-4Q/6Q
   ($100$ examples per split). Curves compare matched no-repair,
-  content-agnostic restores, \idlekv{}, and \goldk{} under the same proxy
+  content-agnostic restores, \idlekv{}, and \spanref{} under the same proxy
   scoring path used in the latency probe. At $K=96$, content-agnostic
   restores stay within $0.010$/$0.004$ of matched no-repair while proxy
   \idlekv{} remains well above matched.}

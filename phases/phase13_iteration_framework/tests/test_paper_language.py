@@ -26,6 +26,7 @@ def test_main_paper_body_avoids_internal_run_vocabulary() -> None:
         "matched footprint",
         "h2o-style",
         "streamingllm-style",
+        "gold-k",
         "oracle-k",
         " oracle ",
         "clean suite",
