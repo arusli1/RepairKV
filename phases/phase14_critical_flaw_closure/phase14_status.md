@@ -1,6 +1,6 @@
 # Phase 14 Status
 
-Last updated: 2026-05-03 21:48 UTC.
+Last updated: 2026-05-04 02:21 UTC.
 
 ## Implemented
 
@@ -120,6 +120,27 @@ Last updated: 2026-05-03 21:48 UTC.
   host-memory warm tier where appropriate, and related work now includes
   fine-grained KV retrieval/loading systems as adjacent within-inference
   methods.
+- Added and ran `run_phase14_queued_closure.sh`, which waited for the locked
+  proxy run, postprocessed it, then ran gated calibrated-Llama and
+  selector-variant branches in tmux.
+- Completed the locked controlled proxy frontier. It passed the P0 readiness
+  gate for both tasks: at `K=96`, 4Q proxy \idlekv{} scores `0.970` versus
+  matched `0.245`, with max Random/Oldest lift `0.010`; 6Q proxy \idlekv{}
+  scores `0.894` versus matched `0.422`, with max Random/Oldest lift `0.004`.
+  The readiness audit reports retained exact-gain ratios `1.090` for 4Q and
+  `0.833` for 6Q, above the pre-registered `0.85`/`0.80` gates.
+- Rendered `paper/figures/proxy_controlled_frontier.pdf` from the locked proxy
+  CSV and updated the paper latency paragraph/caption to treat proxy scoring as
+  benchmark evidence for a cheaper scoring path, not a production deployment
+  claim.
+- Completed the gated calibrated Llama branch at `n=24`, `B=16384`,
+  `K={24,32,48,64}` on MQ-NIAH-6Q. The evaluator marked it as pass/run-locked;
+  useful K points are `48` and `64`, while `K=24/32` exceed the span-group
+  \goldk{} reference and should not be used without a short explanation.
+- Completed the selector-variant branch at `n=24`, `K={24,48,96}` on MQ-NIAH-4Q.
+  Coverage passed the selector gate (`+0.431` over current \idlekv{} at
+  `K=48`, no high-K loss); MMR was rejected. This is promising algorithmic
+  evidence, but it has not yet been promoted into the paper.
 
 ## Validation
 
@@ -195,6 +216,17 @@ Last updated: 2026-05-03 21:48 UTC.
     mapping.
 - Rebuilt `paper/main.pdf` after the AdaptFM keyword/abstract edits; log scan
   found no undefined citations, undefined references, or overfull boxes.
+- `bash -n phases/phase14_critical_flaw_closure/scripts/run_phase14_queued_closure.sh`
+- `.venv/bin/python -m pytest phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py phases/phase9_experiment_deepening/tests/test_paper_figure_renderer.py -q`
+  - `26 passed` before queue launch.
+- `bash phases/phase14_critical_flaw_closure/scripts/postprocess_proxy_controlled_locked.sh`
+  - controlled proxy evaluator passed for 4Q and 6Q;
+  - readiness audit reported both proxy branches as `main_ready_proxy_evidence`;
+  - figure rendering and `paper/main.pdf` rebuild completed;
+  - log scan found no undefined citations, undefined references, or overfull
+    boxes.
+- `.venv/bin/python -m pytest phases/phase14_critical_flaw_closure/tests/test_audit_phase14_readiness.py phases/phase13_iteration_framework/tests/test_paper_language.py phases/phase9_experiment_deepening/tests/test_paper_figure_renderer.py -q`
+  - `27 passed` at the end of the queued closure.
 
 ## Paper Economy Audit
 
@@ -218,8 +250,10 @@ The remaining over-detail risks are:
 
 The reviewer holes that remain material are:
 
-- Controlled proxy scoring: the locked run must decide whether the scalable
-  proxy path preserves quality under Random-K/Oldest-K/Gold-K controls.
+- Controlled proxy scoring: closed for the current benchmark. The locked proxy
+  frontier preserves the repair effect under Random-K/Oldest-K/Gold-K controls,
+  but it remains benchmark evidence for a cheaper scoring path rather than a
+  production selector.
 - Trace-scheduled evaluation: the paper cites web/coding-agent wait evidence,
   but it still lacks a real wait-distribution scheduler experiment.
 - Real-content relevance shift: RepoDelta now has CPU-tested generation and
@@ -302,9 +336,10 @@ Decision:
 - Before launching the longer locked proxy run, test the Refresh-K boundary
   smoke because it is short and changes paper framing.
 
-## Active Run
+## Completed Locked Proxy Run
 
-`phase14_proxy_locked` is running in tmux.
+`phase14_proxy_locked` completed on 2026-05-03 and was postprocessed by the
+queued closure runner.
 
 Command:
 
@@ -319,25 +354,20 @@ Purpose:
   path.
 - Settings: 4Q and 6Q, `K={48,64,80,96,128}`, `n=100`, proxy scorer,
   `A/B/B_match/Random-K/Oldest-K/IdleKV/Oracle-K`.
-- Progress at 2026-05-03 19:57 UTC: 4Q is active, around example `19/100`
-  across three splits; 6Q has not started.
-- Progress at 2026-05-03 20:33 UTC: 4Q is active, around example `56/100`
-  across three splits; 6Q has not started.
-- Progress at 2026-05-03 20:44 UTC: 4Q has completed; 6Q is active, around
-  example `10/100` across four splits. Early 6Q partial means still separate
-  proxy IdleKV from matched, Random-K, and Oldest-K, but the final CSV and
-  evaluator remain the decision point.
-- Progress at 2026-05-03 20:50 UTC: 6Q is active, around example `15/100`
-  across four splits; the rough monitor ETA is about 58 minutes.
-- Progress at 2026-05-03 21:39 UTC: 6Q is active, around example `67/100`
-  across four splits; the rough monitor ETA is about 26 minutes.
+Output:
 
-Promotion decision after completion:
+- `phases/phase14_critical_flaw_closure/results/proxy_controlled_locked_n100.csv`
+- `paper/figures/proxy_controlled_locked_n100.csv`
+- `paper/figures/proxy_controlled_frontier.pdf`
 
-- If it passes the controlled proxy evaluator, use it as the primary
-  scalable-scorer quality/latency bridge for this benchmark.
-- If it fails because content-agnostic controls close the gap, demote proxy
-  scoring and keep exact scoring as mechanistic evidence only.
+Result:
+
+- 4Q and 6Q both passed the controlled proxy evaluator.
+- The readiness audit now marks both proxy branches as
+  `main_ready_proxy_evidence`.
+- Paper action: appendix controlled-proxy frontier rendered; main latency text
+  now states the final controlled proxy numbers while keeping the deployment
+  claim scoped.
 
 ### `phase14_refresh_smoke`
 

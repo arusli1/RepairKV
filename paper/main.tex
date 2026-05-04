@@ -551,9 +551,16 @@ The exact scorer used in the quality curves is a research diagnostic,
 not a deployable implementation: at $K=96$, p50 is $6.08$--$7.62$\,s
 across MQ-NIAH-2Q/4Q/6Q/8Q and is dominated by scoring.
 The $Q_2$-appended-state proxy reduces paired 4Q/6Q p50 to
-$0.83$/$0.71$\,s while remaining above $\bmatch$ in preliminary paired
-fixed-$K$ probes; controlled Random/Oldest/Gold proxy frontiers are a
-separate promotion gate.
+$0.83$/$0.71$\,s.
+In the locked controlled proxy frontier
+(Appendix Figure~\ref{fig:app-proxy-controlled}), proxy \idlekv{} still
+separates from matched no-repair and content-agnostic restores: at
+$K=96$, it scores $0.970$/$0.894$ on 4Q/6Q versus $\bmatch$
+$0.245$/$0.422$, while Random-$K$/Oldest-$K$ lift by at most
+$0.010$/$0.004$ over $\bmatch$.
+The readiness audit retains $1.09{\times}$/$0.83{\times}$ of the exact
+$K=96$ repair gain for 4Q/6Q, so the proxy is evidence for a cheaper
+scoring path in this benchmark rather than a production deployment claim.
 The systems question is whether a scalable score/select/promote path can
 fit inside seconds-scale pause budgets, not whether the current exact scorer
 is deployable.
@@ -1035,9 +1042,12 @@ duplicated as wide tables.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/proxy_controlled_frontier.pdf}
-  \caption{Controlled proxy-scorer frontier. Curves compare
-  matched no-repair, content-agnostic restores, \idlekv{}, and
-  \goldk{} under the same proxy scoring path used in the latency probe.}
+  \caption{Controlled proxy-scorer frontier on MQ-NIAH-4Q/6Q
+  ($100$ examples per split). Curves compare matched no-repair,
+  content-agnostic restores, \idlekv{}, and \goldk{} under the same proxy
+  scoring path used in the latency probe. At $K=96$, content-agnostic
+  restores stay within $0.010$/$0.004$ of matched no-repair while proxy
+  \idlekv{} remains well above matched.}
   \label{fig:app-proxy-controlled}
 \end{figure}
 }{}
