@@ -20,10 +20,21 @@ CONTROL_KEYS = (
     "tool_file_k_score",
     "anchor_window_k_score",
 )
+FOLLOWUP_SCORE_KEYS = (
+    "file_gated_idlekv_score",
+    "lexical_anchor_k_score",
+)
+FOLLOWUP_BASELINE_KEYS = (
+    "b_match_score",
+    "idlekv_score",
+    "tool_file_k_score",
+    "anchor_window_k_score",
+)
 WRONG_EVENT_DONOR_KEYS = (
     "wrong_event_donor_example_id",
     "wrong_event_donor_repo_id",
     "wrong_event_donor_answer",
+    "wrong_event_donor_tool_event_sha256",
 )
 
 
@@ -65,6 +76,67 @@ def _repo_lift_summary(rows: list[dict[str, Any]], *, baseline_field: str) -> di
     }
 
 
+def _field_label(field: str) -> str:
+    return str(field)[: -len("_score")] if str(field).endswith("_score") else str(field)
+
+
+def _add_pairwise_summary(
+    payload: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    treatment_field: str,
+    baseline_field: str,
+    bootstrap_draws: int,
+    bootstrap_seed: int,
+) -> None:
+    if treatment_field not in rows[0] or baseline_field not in rows[0]:
+        return
+    treatment = [float(row.get(treatment_field, 0.0)) for row in rows]
+    baseline = [float(row.get(baseline_field, 0.0)) for row in rows]
+    treatment_label = _field_label(treatment_field)
+    baseline_label = _field_label(baseline_field)
+    payload[f"mean_{treatment_label}_minus_{baseline_label}"] = round(
+        _mean([left - right for left, right in zip(treatment, baseline)]),
+        6,
+    )
+    payload[f"wins_{treatment_label}_vs_{baseline_label}"] = sum(
+        left > right for left, right in zip(treatment, baseline)
+    )
+    payload[f"losses_{treatment_label}_vs_{baseline_label}"] = sum(
+        left < right for left, right in zip(treatment, baseline)
+    )
+    repo_lifts: dict[str, list[float]] = {}
+    for row, left, right in zip(rows, treatment, baseline):
+        repo_lifts.setdefault(str(row.get("repo_id", "")), []).append(left - right)
+    repo_mean_lifts = [_mean(values) for values in repo_lifts.values()]
+    if repo_mean_lifts:
+        payload[f"repo_positive_count_{treatment_label}_vs_{baseline_label}"] = sum(
+            value > 0.0 for value in repo_mean_lifts
+        )
+        payload[f"repo_negative_count_{treatment_label}_vs_{baseline_label}"] = sum(
+            value < 0.0 for value in repo_mean_lifts
+        )
+        payload[f"repo_median_lift_{treatment_label}_vs_{baseline_label}"] = round(
+            _median(repo_mean_lifts),
+            6,
+        )
+    ci = paired_cluster_bootstrap(
+        rows,
+        repo_field="repo_id",
+        example_field="example_id",
+        treatment_field=treatment_field,
+        baseline_field=baseline_field,
+        draws=int(bootstrap_draws),
+        seed=int(bootstrap_seed),
+    )
+    payload[f"bootstrap_{treatment_label}_minus_{baseline_label}"] = {
+        "mean": round(ci.mean, 6),
+        "low": round(ci.low, 6),
+        "high": round(ci.high, 6),
+        "draws": ci.draws,
+    }
+
+
 def _summarize_k_results(
     rows: list[dict[str, Any]],
     *,
@@ -87,7 +159,7 @@ def _summarize_k_results(
             if key not in group[0]:
                 continue
             control = [float(row.get(key, 0.0)) for row in group]
-            label = key[: -len("_score")]
+            label = _field_label(key)
             payload_k[f"mean_{label}"] = round(_mean(control), 6)
             payload_k[f"mean_idlekv_minus_{label}"] = round(
                 _mean([left - right for left, right in zip(idlekv, control)]),
@@ -119,6 +191,20 @@ def _summarize_k_results(
                 "high": round(ci.high, 6),
                 "draws": ci.draws,
             }
+        for key in FOLLOWUP_SCORE_KEYS:
+            if key not in group[0]:
+                continue
+            label = _field_label(key)
+            payload_k[f"mean_{label}"] = round(_mean([float(row.get(key, 0.0)) for row in group]), 6)
+            for baseline_key in FOLLOWUP_BASELINE_KEYS:
+                _add_pairwise_summary(
+                    payload_k,
+                    group,
+                    treatment_field=key,
+                    baseline_field=baseline_key,
+                    bootstrap_draws=bootstrap_draws,
+                    bootstrap_seed=bootstrap_seed,
+                )
         tool_file_fractions = [
             float(row["tool_file_k_selected_from_file_fraction"])
             for row in group
@@ -127,7 +213,80 @@ def _summarize_k_results(
         if tool_file_fractions:
             payload_k["mean_tool_file_k_selected_from_file_fraction"] = round(_mean(tool_file_fractions), 6)
             payload_k["min_tool_file_k_selected_from_file_fraction"] = round(min(tool_file_fractions), 6)
-        for prefix in ("tool_file_k", "anchor_window_k"):
+        file_gated_fractions = [
+            float(row["file_gated_idlekv_selected_from_file_fraction"])
+            for row in group
+            if "file_gated_idlekv_selected_from_file_fraction" in row
+        ]
+        if file_gated_fractions:
+            payload_k["mean_file_gated_idlekv_selected_from_file_fraction"] = round(
+                _mean(file_gated_fractions),
+                6,
+            )
+            payload_k["min_file_gated_idlekv_selected_from_file_fraction"] = round(
+                min(file_gated_fractions),
+                6,
+            )
+            payload_k["mean_file_gated_idlekv_backfill_count"] = round(
+                _mean([
+                    float(row["file_gated_idlekv_backfill_count"])
+                    for row in group
+                    if "file_gated_idlekv_backfill_count" in row
+                ]),
+                6,
+            )
+            event_path_flags = [
+                bool(row["file_gated_idlekv_event_contains_q2_path"])
+                for row in group
+                if "file_gated_idlekv_event_contains_q2_path" in row
+            ]
+            if event_path_flags:
+                payload_k["fraction_file_gated_idlekv_event_contains_q2_path"] = round(
+                    _fraction_true(event_path_flags),
+                    6,
+                )
+        lexical_fractions = [
+            float(row["lexical_anchor_k_selected_from_file_fraction"])
+            for row in group
+            if "lexical_anchor_k_selected_from_file_fraction" in row
+        ]
+        if lexical_fractions:
+            payload_k["lexical_anchor_k_answer_sanitized"] = True
+            payload_k["lexical_anchor_k_deployability_note"] = (
+                "LexicalAnchor-K uses the hidden gold identifier only to remove answer-like "
+                "cue terms before selection; treat it as an answer-sanitized diagnostic, "
+                "not as a deployable selector."
+            )
+            payload_k["mean_lexical_anchor_k_selected_from_file_fraction"] = round(
+                _mean(lexical_fractions),
+                6,
+            )
+            payload_k["min_lexical_anchor_k_selected_from_file_fraction"] = round(
+                min(lexical_fractions),
+                6,
+            )
+            payload_k["mean_lexical_anchor_k_term_count"] = round(
+                _mean([
+                    float(row["lexical_anchor_k_term_count"])
+                    for row in group
+                    if "lexical_anchor_k_term_count" in row
+                ]),
+                6,
+            )
+            payload_k["lexical_anchor_k_answer_leak_rows"] = sum(
+                bool(row.get("lexical_anchor_k_answer_leak_flag", False)) for row in group
+            )
+            event_path_flags = [
+                bool(row["lexical_anchor_k_event_contains_q2_path"])
+                for row in group
+                if "lexical_anchor_k_event_contains_q2_path" in row
+            ]
+            if event_path_flags:
+                payload_k["fraction_lexical_anchor_k_event_contains_q2_path"] = round(
+                    _fraction_true(event_path_flags),
+                    6,
+                )
+        for prefix in ("tool_file_k", "anchor_window_k", "file_gated_idlekv", "lexical_anchor_k"):
             budget_values = [row[f"{prefix}_budget_matched"] for row in group if f"{prefix}_budget_matched" in row]
             if budget_values:
                 payload_k[f"fraction_{prefix}_budget_matched"] = round(_fraction_true(budget_values), 6)
@@ -348,6 +507,193 @@ def repair_gate(
     }
 
 
+def _has_followup_results(audit: dict[str, Any], *, primary_k: int) -> bool:
+    primary = audit.get("k_results", {}).get(f"k{int(primary_k)}", {})
+    return "mean_file_gated_idlekv" in primary or "mean_lexical_anchor_k" in primary
+
+
+def _sensitivity_followup_checks(
+    audit: dict[str, Any],
+    *,
+    primary_k: int,
+    min_examples: int,
+) -> dict[str, Any]:
+    checks: dict[str, Any] = {}
+    for name in (
+        "exclude_cue_only_hits",
+        "exclude_answer_retention",
+        "exclude_cue_and_answer_retention",
+    ):
+        slice_payload = audit.get("sensitivity", {}).get(name, {})
+        slice_primary = slice_payload.get("k_results", {}).get(f"k{int(primary_k)}", {})
+        n_examples = int(slice_payload.get("n_examples", 0))
+        margin = float(slice_primary.get("mean_file_gated_idlekv_minus_idlekv", 0.0))
+        checks[name] = {
+            "n_examples": n_examples,
+            "mean_file_gated_idlekv_minus_idlekv": round(margin, 6),
+            "enough_examples": n_examples >= int(min_examples),
+            "nonnegative_margin": margin >= 0.0,
+            "ok": n_examples >= int(min_examples) and margin >= 0.0,
+        }
+    return checks
+
+
+def followup_gate(
+    audit: dict[str, Any],
+    *,
+    primary_k: int,
+    adjacent_k: int,
+    min_filegated_improvement: float = 0.05,
+    min_file_fraction: float = 0.50,
+    min_sensitivity_examples: int = 8,
+) -> dict[str, Any]:
+    """Evaluate whether FileGated/Lexical follow-up results can affect the paper."""
+    primary = audit["k_results"].get(f"k{int(primary_k)}")
+    adjacent = audit["k_results"].get(f"k{int(adjacent_k)}")
+    if primary is None:
+        raise ValueError(f"Missing primary K={primary_k}.")
+    if adjacent is None:
+        raise ValueError(f"Missing adjacent K={adjacent_k}.")
+
+    comparisons = {
+        "mean_file_gated_idlekv_minus_idlekv": round(
+            float(primary.get("mean_file_gated_idlekv_minus_idlekv", 0.0)),
+            6,
+        ),
+        "mean_file_gated_idlekv_minus_tool_file_k": round(
+            float(primary.get("mean_file_gated_idlekv_minus_tool_file_k", 0.0)),
+            6,
+        ),
+        "mean_file_gated_idlekv_minus_anchor_window_k": round(
+            float(primary.get("mean_file_gated_idlekv_minus_anchor_window_k", 0.0)),
+            6,
+        ),
+        "adjacent_mean_file_gated_idlekv_minus_idlekv": round(
+            float(adjacent.get("mean_file_gated_idlekv_minus_idlekv", 0.0)),
+            6,
+        ),
+        "bootstrap_file_gated_idlekv_minus_idlekv": primary.get(
+            "bootstrap_file_gated_idlekv_minus_idlekv"
+        ),
+        "bootstrap_file_gated_idlekv_minus_tool_file_k": primary.get(
+            "bootstrap_file_gated_idlekv_minus_tool_file_k"
+        ),
+        "bootstrap_file_gated_idlekv_minus_anchor_window_k": primary.get(
+            "bootstrap_file_gated_idlekv_minus_anchor_window_k"
+        ),
+    }
+    repo_counts = {
+        "repo_positive_file_gated_idlekv_vs_idlekv": int(
+            primary.get("repo_positive_count_file_gated_idlekv_vs_idlekv", 0)
+        ),
+        "repo_negative_file_gated_idlekv_vs_idlekv": int(
+            primary.get("repo_negative_count_file_gated_idlekv_vs_idlekv", 0)
+        ),
+        "repo_positive_file_gated_idlekv_vs_tool_file_k": int(
+            primary.get("repo_positive_count_file_gated_idlekv_vs_tool_file_k", 0)
+        ),
+        "repo_negative_file_gated_idlekv_vs_tool_file_k": int(
+            primary.get("repo_negative_count_file_gated_idlekv_vs_tool_file_k", 0)
+        ),
+        "repo_positive_file_gated_idlekv_vs_anchor_window_k": int(
+            primary.get("repo_positive_count_file_gated_idlekv_vs_anchor_window_k", 0)
+        ),
+        "repo_negative_file_gated_idlekv_vs_anchor_window_k": int(
+            primary.get("repo_negative_count_file_gated_idlekv_vs_anchor_window_k", 0)
+        ),
+    }
+    metadata = {
+        "fraction_file_gated_idlekv_event_contains_q2_path": round(
+            float(primary.get("fraction_file_gated_idlekv_event_contains_q2_path", 0.0)),
+            6,
+        ),
+        "mean_file_gated_idlekv_selected_from_file_fraction": round(
+            float(primary.get("mean_file_gated_idlekv_selected_from_file_fraction", 0.0)),
+            6,
+        ),
+        "min_file_gated_idlekv_selected_from_file_fraction": round(
+            float(primary.get("min_file_gated_idlekv_selected_from_file_fraction", 0.0)),
+            6,
+        ),
+        "fraction_file_gated_idlekv_budget_matched": round(
+            float(primary.get("fraction_file_gated_idlekv_budget_matched", 0.0)),
+            6,
+        ),
+        "fraction_tool_file_k_budget_matched": round(
+            float(primary.get("fraction_tool_file_k_budget_matched", 0.0)),
+            6,
+        ),
+        "fraction_anchor_window_k_budget_matched": round(
+            float(primary.get("fraction_anchor_window_k_budget_matched", 0.0)),
+            6,
+        ),
+        "lexical_anchor_k_answer_leak_rows": int(
+            primary.get("lexical_anchor_k_answer_leak_rows", 0)
+        ),
+        "fraction_lexical_anchor_k_budget_matched": round(
+            float(primary.get("fraction_lexical_anchor_k_budget_matched", 0.0)),
+            6,
+        ),
+        "lexical_anchor_k_answer_sanitized": bool(
+            primary.get("lexical_anchor_k_answer_sanitized", False)
+        ),
+        "lexical_anchor_k_deployability_note": primary.get(
+            "lexical_anchor_k_deployability_note",
+            "LexicalAnchor-K is absent from this artifact.",
+        ),
+    }
+    sensitivity_checks = _sensitivity_followup_checks(
+        audit,
+        primary_k=int(primary_k),
+        min_examples=int(min_sensitivity_examples),
+    )
+    gate_results = {
+        "file_gated_present": "mean_file_gated_idlekv" in primary,
+        "improves_over_idlekv": comparisons["mean_file_gated_idlekv_minus_idlekv"]
+        >= float(min_filegated_improvement),
+        "beats_tool_file": comparisons["mean_file_gated_idlekv_minus_tool_file_k"] > 0.0,
+        "retains_anchorwindow_headroom": comparisons[
+            "mean_file_gated_idlekv_minus_anchor_window_k"
+        ]
+        < 0.0,
+        "adjacent_nonnegative_vs_idlekv": comparisons[
+            "adjacent_mean_file_gated_idlekv_minus_idlekv"
+        ]
+        >= 0.0,
+        "event_path_available_for_all_rows": metadata[
+            "fraction_file_gated_idlekv_event_contains_q2_path"
+        ]
+        == 1.0,
+        "file_fraction_substantial": metadata[
+            "mean_file_gated_idlekv_selected_from_file_fraction"
+        ]
+        >= float(min_file_fraction),
+        "file_gated_budget_matched": metadata["fraction_file_gated_idlekv_budget_matched"] == 1.0,
+        "tool_file_budget_matched": metadata["fraction_tool_file_k_budget_matched"] == 1.0,
+        "anchor_window_budget_matched": metadata["fraction_anchor_window_k_budget_matched"] == 1.0,
+        "lexical_no_answer_leak_rows": metadata["lexical_anchor_k_answer_leak_rows"] == 0,
+        "sensitivity_nonnegative_vs_idlekv": all(
+            check["ok"] for check in sensitivity_checks.values()
+        ),
+    }
+    passed = all(gate_results.values())
+    return {
+        "primary_k": int(primary_k),
+        "adjacent_k": int(adjacent_k),
+        "comparisons": comparisons,
+        "repo_counts": repo_counts,
+        "metadata": metadata,
+        "sensitivity_checks": sensitivity_checks,
+        "gate_results": gate_results,
+        "recommendation": (
+            "eligible_for_one_cautious_main_sentence_and_explicit_appendix_rows"
+            if passed
+            else "do_not_change_main_text; keep follow-up appendix/status-only or omit"
+        ),
+        "passed": passed,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("artifact", help="Phase 15 repair artifact JSON.")
@@ -386,6 +732,13 @@ def main() -> int:
             toolfile_margin_rows=int(args.toolfile_margin_rows),
             min_toolfile_file_fraction=float(args.min_toolfile_file_fraction),
             anchor_window_margin_rows=int(args.anchor_window_margin_rows),
+        )
+    if _has_followup_results(audit, primary_k=int(args.primary_k)):
+        audit["followup_gate"] = followup_gate(
+            audit,
+            primary_k=int(args.primary_k),
+            adjacent_k=int(args.adjacent_k),
+            min_sensitivity_examples=int(args.min_sensitivity_examples),
         )
     print(json.dumps(audit, indent=2, sort_keys=True))
     if args.gate and not bool(audit["repair_gate"]["passed"]):

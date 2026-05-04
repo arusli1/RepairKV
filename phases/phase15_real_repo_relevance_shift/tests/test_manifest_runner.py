@@ -8,6 +8,7 @@ from phases.phase15_real_repo_relevance_shift.scripts.run_phase15_manifest impor
     _donor_row,
     add_answer_retention_fields,
     map_phase15_conditions,
+    needs_wrong_event_donor,
     strict_rescore_row,
     summarize_rows,
     validate_wrong_event_donors,
@@ -16,13 +17,34 @@ from phases.phase15_real_repo_relevance_shift.scripts import backfill_wrong_even
 
 
 def test_phase15_condition_mapping_includes_mandatory_controls() -> None:
-    assert map_phase15_conditions(["A", "IdleKV-EventOnly-K", "StaleCue-K", "ToolFile-K", "AnchorWindow-K"]) == (
+    assert map_phase15_conditions([
+        "A",
+        "IdleKV-EventOnly-K",
+        "StaleCue-K",
+        "ToolFile-K",
+        "AnchorWindow-K",
+        "FileGatedIdleKV-K",
+        "LexicalAnchor-K",
+    ]) == (
         "A",
         "IdleKV",
         "StaleQ-K",
         "ToolFile-K",
         "AnchorWindow-K",
+        "FileGatedIdleKV-K",
+        "LexicalAnchor-K",
     )
+
+
+def test_followup_conditions_do_not_require_wrong_event_donor() -> None:
+    assert not needs_wrong_event_donor([
+        "A",
+        "B_match",
+        "IdleKV-EventOnly-K",
+        "FileGatedIdleKV-K",
+        "LexicalAnchor-K",
+    ])
+    assert needs_wrong_event_donor(["IdleKV-EventOnly-K", "WrongEvent-K"])
 
 
 def _row(example_id: str, repo_id: str, event: str, answer: str):

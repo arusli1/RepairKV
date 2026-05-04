@@ -1,12 +1,14 @@
 # Phase 15 Status
 
-Last updated: 2026-05-04 21:10 UTC.
+Last updated: 2026-05-04 22:39 UTC.
 
 ## Current State
 
-Phase 15 is complete for this paper pass. The final bounded RepoDelta-Edge
-ability run and the one allowed whole-manifest diagnostic repair run both
-finished. No Phase 15 tmux job is active.
+Phase 15 is complete for this paper pass. No Phase 15 tmux job is active.
+The bounded `phase15_filegated_full` follow-up finished on the frozen v13
+manifest with two locality-aware diagnostic selectors,
+`FileGatedIdleKV-K` and `LexicalAnchor-K`, at `K={96,192}`. It did not build a
+new manifest or change the task distribution.
 
 The first strict RepoDelta-Edge ability smoke,
 `phase15_ability_v10_quick_n10_k96`, the improved redacted-unique ability smoke
@@ -45,10 +47,28 @@ label-assisted locality reference is stronger:
 - All `96` result rows have `phase15_manifest_audit.passed=true`, and each K
   slice has zero duplicate example rows.
 
+The bounded locality-aware follow-up passed the explicit paper-integration
+gate:
+
+- `K=96`: FileGatedIdleKV `0.7292`, IdleKV `0.5625`, ToolFile `0.2083`,
+  AnchorWindow `0.8958`; LexicalAnchor `0.2708`.
+- `K=192`: FileGatedIdleKV `0.8333`, IdleKV `0.7292`, ToolFile `0.1875`,
+  AnchorWindow `0.8958`; LexicalAnchor `0.3958`.
+- FileGated improves over IdleKV by `+0.1042` at `K=192`, beats ToolFile by
+  `+0.6458`, and remains below the label-assisted AnchorWindow reference by
+  `-0.0625`.
+- The event cue contains the target file path for all FileGated rows, all
+  FileGated rows are budget-matched, and sensitivity checks remain
+  nonnegative after excluding cue-only hits or answer-retention rows.
+- LexicalAnchor has zero answer-leak rows but is answer-sanitized: it may use
+  the hidden gold identifier only to remove answer-like cue terms before
+  selection, so it is appendix diagnostic evidence rather than a deployable
+  selector.
+
 Decision: **preliminary main-text evidence plus appendix details**, not a
-headline validation figure or main selection claim. The paper now gives a
-short Results paragraph and reports the full diagnostic in Appendix Figure
-`fig:app-real-repo-diagnostic`.
+headline validation figure or broad real-code benchmark claim. The paper gives
+a short Results paragraph, adds one cautious FileGated sentence, and reports
+the full diagnostic in Appendix Figure `fig:app-real-repo-diagnostic`.
 
 ## Expert Audit Summary
 
@@ -303,18 +323,15 @@ Critical flaws found and resolved into the plan:
 
 ## Immediate Next Tasks
 
-1. Do not run more RepoDelta-Edge GPU experiments for this submission. v13 was
-   the final bounded attempt and is now classified.
-2. Keep Phase 15 as preliminary main-text evidence plus appendix details unless
-   the paper strategy changes explicitly.
-3. If editing the Results paragraph, appendix figure, or prose, preserve the caveats: not
+1. Keep Phase 15 as preliminary main-text evidence plus appendix details.
+2. If editing the Results paragraph, appendix figure, or prose, preserve the caveats: not
    SWE-bench performance, not end-to-end coding validation, AnchorWindow is
-   label-assisted, and ToolFile is file-name-assisted with oldest-row backfill.
-4. Maintain the main evidence stack as MQ-NIAH frontier, specificity,
+   label-assisted, ToolFile is file-name-assisted with oldest-row backfill, and
+   LexicalAnchor is answer-sanitized diagnostic evidence.
+3. Maintain the main evidence stack as MQ-NIAH frontier, specificity,
    multi-turn, retention-rule sensitivity, and runtime capacity.
-5. Future work can build a cleaner real-repository benchmark with a deployable
+4. Future work can build a cleaner real-repository benchmark with a deployable
    locality-aware baseline and serialized wrong-event provenance from the start.
-   real-repo evidence out of the main paper.
 
 ## Current Stop Criteria
 

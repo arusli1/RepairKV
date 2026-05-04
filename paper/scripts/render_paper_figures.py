@@ -1387,6 +1387,9 @@ def _runtime_component_shares(
         records.append(
             {
                 "candidate_tokens": int(getattr(row, "candidate_tokens")),
+                "scan_ms": scan_ms,
+                "topk_ms": topk_ms,
+                "copy_insert_ms": copy_insert_ms,
                 "scan_share": scan_ms / total_ms,
                 "topk_share": topk_ms / total_ms,
                 "copy_insert_share": copy_insert_ms / total_ms,
@@ -1618,45 +1621,40 @@ def render_runtime_repair_scaling() -> bool:
         component_df = component_df.sort_values("candidate_tokens")
         x_values = np.arange(len(component_df))
         labels = [_format_candidate_rows(int(value)) for value in component_df["candidate_tokens"]]
-        scan = component_df["scan_share"].to_numpy(dtype=float)
-        topk = component_df["topk_share"].to_numpy(dtype=float)
-        copy_insert = component_df["copy_insert_share"].to_numpy(dtype=float)
-        ax2.bar(x_values, scan, width=0.72, color=PALETTE["idlekv"], label="scan")
-        ax2.bar(
-            x_values,
-            topk,
-            bottom=scan,
-            width=0.72,
-            color=PALETTE["gold"],
-            edgecolor="#6A5700",
-            linewidth=0.25,
-            label="top-$K$",
-        )
-        ax2.bar(
-            x_values,
-            copy_insert,
-            bottom=scan + topk,
-            width=0.72,
-            color=PALETTE["random"],
-            label="copy+insert",
-        )
-        ax2.set_ylim(0.0, 1.0)
-        ax2.set_yticks([0.0, 0.5, 1.0], ["0", "50", "100"])
+        component_styles = [
+            ("scan", "scan_ms", PALETTE["idlekv"], "o"),
+            ("copy+insert", "copy_insert_ms", PALETTE["random"], "s"),
+            ("top-$K$", "topk_ms", PALETTE["gold"], "^"),
+        ]
+        for label, field, color, marker in component_styles:
+            ax2.plot(
+                x_values,
+                component_df[field].to_numpy(dtype=float),
+                label=label,
+                color=color,
+                marker=marker,
+                linewidth=1.05,
+                markersize=2.5,
+            )
+        ax2.set_yscale("log")
+        ax2.set_ylim(0.05, 6000.0)
+        ax2.set_yticks([0.1, 1.0, 10.0, 100.0, 1000.0], ["0.1", "1", "10", "100", "1k"])
+        ax2.yaxis.set_minor_locator(mpl.ticker.NullLocator())
         ax2.set_xticks(x_values, labels)
-        _format_axes(ax2, x_label="offloaded candidate rows", y_label="p95 share (%)")
+        _format_axes(ax2, x_label="offloaded candidate rows", y_label="p95 component (ms)")
         ax2.grid(axis="y", color=PALETTE["grid"], linewidth=0.42, alpha=0.82)
         ax2.legend(
             loc="upper center",
-            bbox_to_anchor=(0.51, 1.18),
+            bbox_to_anchor=(0.50, 1.18),
             ncol=3,
             frameon=False,
             handlelength=1.0,
             handletextpad=0.28,
-            columnspacing=0.7,
-            fontsize=5.7,
+            columnspacing=0.65,
+            fontsize=5.5,
         )
-        ax.text(0.0, 1.04, "(a)", transform=ax.transAxes, ha="left", va="bottom", fontsize=5.9, fontweight="bold")
         ax2.text(0.0, 1.03, "(b)", transform=ax2.transAxes, ha="left", va="bottom", fontsize=5.9, fontweight="bold")
+        ax.text(0.0, 1.04, "(a)", transform=ax.transAxes, ha="left", va="bottom", fontsize=5.9, fontweight="bold")
     else:
         fig, ax = plt.subplots(1, 1, figsize=(COLUMN_WIDTH_IN, 1.84), constrained_layout=False)
         fig.subplots_adjust(left=0.13, right=0.985, top=0.93, bottom=0.275)
@@ -2601,21 +2599,27 @@ def render_real_repo_repair_diagnostic() -> bool:
             ("No answer retained", audit["sensitivity"]["exclude_answer_retention"]["k_results"]["k192"]),
             ("Strict eligible", audit["sensitivity"]["strict_repair_eligible"]["k_results"]["k192"]),
         ]
-    condition_rows = [
+    condition_row_order = [
         ("Matched", PALETTE["matched"]),
         ("Random", PALETTE["random"]),
         ("Oldest", PALETTE["oldest"]),
         ("Stale cue", PALETTE["stale"]),
         ("Wrong event", PALETTE["wrong"]),
         ("ToolFile", PALETTE["refresh"]),
+        ("Lexical", "#56B4E9"),
         ("IdleKV", PALETTE["idlekv"]),
+        ("File-gated", PALETTE["proxy"]),
         ("AnchorWindow*", PALETTE["gold"]),
     ]
+    condition_rows = []
+    for label, color in condition_row_order:
+        if (label, 96) in whole_values and (label, 192) in whole_values:
+            condition_rows.append((label, color))
 
     fig, axes = plt.subplots(
         1,
         2,
-        figsize=(5.15, 2.25),
+        figsize=(5.15, 2.25 + 0.12 * max(0, len(condition_rows) - 8)),
         gridspec_kw={"width_ratios": [1.35, 1.0]},
         constrained_layout=False,
     )

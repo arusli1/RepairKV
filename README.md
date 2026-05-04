@@ -53,10 +53,10 @@ can directly attend to.
 - Preliminary external-validity check: a controlled real-repository
   relevance-shift diagnostic over pinned third-party repositories drawn from
   the SWE-bench repository pool. It is not a SWE-bench issue-resolution
-  benchmark. The finished v13 run is strong against deployable/content-agnostic
-  controls and is summarized cautiously in the paper's Results section, with
-  full details in the appendix because a label-assisted locality reference is
-  stronger.
+  benchmark. The frozen-manifest diagnostic is strong against
+  deployable/content-agnostic controls. A file-gated follow-up closes part of
+  the gap to a label-assisted locality reference. The result is summarized
+  cautiously in the paper's Results section, with full details in the appendix.
 
 ## Paper
 
@@ -148,8 +148,9 @@ design, then move to a locked run only after the smoke passes a written gate.
 
 ## Active Questions
 
-- What cleaner real-repository benchmark or deployable locality-aware selector
-  would close the remaining gap to the label-assisted AnchorWindow reference?
+- What cleaner real-repository benchmark or stronger deployable
+  locality-aware selector would close the remaining gap to the label-assisted
+  AnchorWindow reference?
 - Does the Coverage selector deserve a future full K-grid, or should it remain
   algorithmic-selection-gap appendix/future-work evidence?
 - Which selector or retention-policy variants add enough signal to replace an

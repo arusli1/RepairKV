@@ -54,6 +54,8 @@ PHASE15_TO_PHASE6_CONDITION = {
     "WrongEvent-K": "WrongQ-K",
     "ToolFile-K": "ToolFile-K",
     "AnchorWindow-K": "AnchorWindow-K",
+    "FileGatedIdleKV-K": "FileGatedIdleKV-K",
+    "LexicalAnchor-K": "LexicalAnchor-K",
 }
 Q2_OUTPUT_SCORE_FIELDS = {
     "condition_a_output": "condition_a_score",
@@ -66,6 +68,8 @@ Q2_OUTPUT_SCORE_FIELDS = {
     "wrong_q_k_output": "wrong_q_k_score",
     "tool_file_k_output": "tool_file_k_score",
     "anchor_window_k_output": "anchor_window_k_score",
+    "file_gated_idlekv_output": "file_gated_idlekv_score",
+    "lexical_anchor_k_output": "lexical_anchor_k_score",
 }
 
 
@@ -104,6 +108,11 @@ def map_phase15_conditions(conditions: Iterable[str]) -> tuple[str, ...]:
             raise ValueError(f"Unsupported Phase 15 condition: {name!r}")
         mapped.append(PHASE15_TO_PHASE6_CONDITION[name])
     return tuple(dict.fromkeys(mapped))
+
+
+def needs_wrong_event_donor(conditions: Iterable[str]) -> bool:
+    """Return whether the public Phase 15 condition list uses WrongEvent-K."""
+    return "WrongEvent-K" in {str(condition) for condition in conditions}
 
 
 def phase6_config_from_protocol(
@@ -187,6 +196,8 @@ def add_answer_retention_fields(result: dict[str, Any], *, audit: Any) -> dict[s
         ("wrong_q_k", "wrong_q_k_selected_positions"),
         ("tool_file_k", "tool_file_k_selected_positions"),
         ("anchor_window_k", "anchor_window_k_selected_positions"),
+        ("file_gated_idlekv", "file_gated_idlekv_selected_positions"),
+        ("lexical_anchor_k", "lexical_anchor_k_selected_positions"),
     ):
         if field in enriched:
             enriched[f"{prefix}_answer_token_overlap_fraction"] = round(
@@ -217,6 +228,8 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "wrong_q_k_score",
         "tool_file_k_score",
         "anchor_window_k_score",
+        "file_gated_idlekv_score",
+        "lexical_anchor_k_score",
         "cue_only_score",
     )
     for k, group in sorted(by_k.items()):
@@ -307,7 +320,8 @@ def run_manifest(args: argparse.Namespace) -> dict[str, Any]:
     k_values = tuple(args.k if args.k else protocol.k_grid)
     conditions = tuple(args.conditions if args.conditions else protocol.conditions)
     rows = load_manifest(Path(args.manifest), limit=args.limit)
-    if "WrongEvent-K" in conditions:
+    uses_wrong_event = needs_wrong_event_donor(conditions)
+    if uses_wrong_event:
         validate_wrong_event_donors(rows)
     config = phase6_config_from_protocol(
         protocol,
@@ -350,8 +364,8 @@ def run_manifest(args: argparse.Namespace) -> dict[str, Any]:
             flush=True,
         )
         split = split_prepared_from_manifest_row(row, tokenizer)
-        wrong_event_donor = _donor_row(rows, index)
-        wrong_row = with_wrong_event(row, wrong_event_donor)
+        wrong_event_donor = _donor_row(rows, index) if uses_wrong_event else None
+        wrong_row = with_wrong_event(row, wrong_event_donor) if wrong_event_donor is not None else None
         full_cache = build_position_tracked_cache(model, split.q1_prepared.context_ids)
         cue_only_output, cue_only_score, cue_only_meta = run_cue_only(model, tokenizer, split)
         example_rows = _run_one_split(
@@ -361,7 +375,11 @@ def run_manifest(args: argparse.Namespace) -> dict[str, Any]:
             split=split,
             full_cache=full_cache,
             index=index,
-            wrong_q2_question_ids=encode_repair_signal(tokenizer, wrong_row, mode="wrong_event"),
+            wrong_q2_question_ids=(
+                encode_repair_signal(tokenizer, wrong_row, mode="wrong_event")
+                if wrong_row is not None
+                else None
+            ),
             repair_question_ids=encode_repair_signal(tokenizer, row, mode="event_only"),
             stale_question_ids=encode_repair_signal(tokenizer, row, mode="stale_event"),
             tool_file_q2_path=str(row.q2.get("path", "")),
@@ -373,31 +391,35 @@ def run_manifest(args: argparse.Namespace) -> dict[str, Any]:
                 q2_gold=row.answer,
             )
             rescored = add_answer_retention_fields(rescored, audit=row.audit)
-            rescored.update(
-                {
-                    "example_id": row.example_id,
-                    "task": "repodelta_edge",
-                    "repo_id": row.repo.repo_id,
-                    "repo_commit_sha": row.repo.commit_sha,
-                    "source_task": row.source_task,
-                    "repair_signal_mode": "event_only",
-                    "decode_prompt_mode": "event_plus_q2",
-                    "q2_path": str(row.q2.get("path", "")),
-                    "q2_line_no": int(row.q2.get("line_no", 0)),
-                    "q2_answer": row.answer,
-                    "cue_only_output": cue_only_output,
-                    "cue_only_score": round(cue_only_score, 6),
-                    **cue_only_meta,
-                    "wrong_event_donor_example_id": wrong_event_donor.example_id,
-                    "wrong_event_donor_repo_id": wrong_event_donor.repo.repo_id,
-                    "wrong_event_donor_answer": wrong_event_donor.answer,
-                    "wrong_event_donor_tool_event_sha256": hashlib.sha256(
-                        wrong_event_donor.tool_event.encode("utf-8")
-                    ).hexdigest(),
-                    "phase15_conditions": list(conditions),
-                    "phase15_manifest_audit": row.audit.to_dict(),
-                }
-            )
+            metadata = {
+                "example_id": row.example_id,
+                "task": "repodelta_edge",
+                "repo_id": row.repo.repo_id,
+                "repo_commit_sha": row.repo.commit_sha,
+                "source_task": row.source_task,
+                "repair_signal_mode": "event_only",
+                "decode_prompt_mode": "event_plus_q2",
+                "q2_path": str(row.q2.get("path", "")),
+                "q2_line_no": int(row.q2.get("line_no", 0)),
+                "q2_answer": row.answer,
+                "cue_only_output": cue_only_output,
+                "cue_only_score": round(cue_only_score, 6),
+                **cue_only_meta,
+                "phase15_conditions": list(conditions),
+                "phase15_manifest_audit": row.audit.to_dict(),
+            }
+            if wrong_event_donor is not None:
+                metadata.update(
+                    {
+                        "wrong_event_donor_example_id": wrong_event_donor.example_id,
+                        "wrong_event_donor_repo_id": wrong_event_donor.repo.repo_id,
+                        "wrong_event_donor_answer": wrong_event_donor.answer,
+                        "wrong_event_donor_tool_event_sha256": hashlib.sha256(
+                            wrong_event_donor.tool_event.encode("utf-8")
+                        ).hexdigest(),
+                    }
+                )
+            rescored.update(metadata)
             result_rows.append(rescored)
         print(
             f"[phase15] row {index + 1}/{len(rows)} done; accumulated_result_rows={len(result_rows)}",

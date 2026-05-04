@@ -258,6 +258,10 @@ Use paper-facing terminology, not internal repo terminology.
   remaining gap as headroom relative to a label-assisted locality reference.
   If shown, visually separate it from deployable controls and label it
   "label-assisted" in the caption or table note.
+- "LexicalAnchor-K": an answer-sanitized lexical locality diagnostic for
+  Phase 15. It may use the hidden gold identifier only to remove answer-like
+  cue terms before selection, so do not frame it as a deployable selector or
+  main-paper method.
 - Current Phase 15 placement: cautious main Results paragraph plus appendix
   figure. The v13 whole-manifest run is positive against matched no-repair,
   content-agnostic restores, stale/wrong event cues, and ToolFile-K, and it
@@ -700,6 +704,12 @@ IdleKV appendix rules:
 - Avoid ending on a mostly blank page caused by a full-width float when a
   one-column figure, shorter caption, or an additional high-signal appendix
   plot can make the page denser without spacing hacks.
+- Open supplementary-figure sections with a short roadmap that states which
+  audit questions the figures answer. This makes the appendix read as a
+  deliberate evidence audit rather than leftover plots.
+- Combine low-density appendix plots when they answer adjacent questions, e.g.
+  query-count breadth plus operating-regime heatmap, instead of spending a
+  separate mostly blank page on each.
 - Do not include alternate figure variants that answer the same question as a
   main figure. Keep only the best view plus, if needed, one audit table.
 - Prefer heatmaps for strict-cap/operating-regime grids and compact scatter or

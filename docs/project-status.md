@@ -85,10 +85,12 @@ kept closure work promotion-gated. Phase 15 completed the bounded
 real-repository diagnostic: at `K=192`, event-only IdleKV improved exact
 identifier accuracy from `0.188` for matched no-repair to `0.729` and beat
 random, oldest, stale-cue, wrong-event, and ToolFile controls with positive
-paired intervals. The label-assisted AnchorWindow reference reached `0.896`,
-so the result is preliminary external-validity evidence rather than a main
-selection claim. It is now visible in Results prose because AdaptFM reviewers
-are not required to read appendices.
+paired intervals. A bounded file-gated follow-up on the same frozen manifest
+reached `0.833` at `K=192`, improving over IdleKV while still trailing the
+label-assisted AnchorWindow reference at `0.896`. The result remains
+preliminary external-validity evidence rather than a broad real-code benchmark
+claim. It is now visible in Results prose because AdaptFM reviewers are not
+required to read appendices.
 
 ## Validation
 
@@ -99,14 +101,14 @@ From the repo root:
 ```
 
 Most recent full test result:
-`295 passed, 16 warnings, 304 subtests passed` on 2026-05-04 after the Phase
-15 main-text cleanup and donor-complete figure-render fallback.
+`302 passed, 16 warnings, 304 subtests passed` on 2026-05-04 after the Phase
+15 FileGated/Lexical follow-up, audit gate, paper integration, and appendix
+layout polish.
 
 Most recent focused Phase 15/Phase 6 result:
-`110 passed, 16 warnings` on 2026-05-04 after the event-only real-repository
-runner, ToolFile/AnchorWindow controls, stricter repair-artifact audit,
-repo-level lift summaries, manifest-audit gates, wrong-event donor provenance,
-and appendix figure generation were added.
+`37 passed, 16 warnings` on 2026-05-04 after FileGated/Lexical selector
+support, the follow-up audit gate, and appendix Figure 7 generation were
+added.
 
 Most recent paper rebuild:
 `paper/scripts/render_paper_figures.py` and

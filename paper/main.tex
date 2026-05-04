@@ -17,6 +17,8 @@
 \makeatletter
 \setlength{\@fptop}{0pt}
 \setlength{\@dblfptop}{0pt}
+\setlength{\@fpsep}{8pt plus 1pt}
+\setlength{\@dblfpsep}{8pt plus 1pt}
 \makeatother
 \newcommand{\idlekv}{\textsc{IdleKV}}
 \newcommand{\bbase}{\ensuremath{B_{\mathrm{base}}}}
@@ -428,8 +430,9 @@ $0.653$ for \idlekv{}.
   \caption{Raw exact $Q_2$ score under matched resumed-cache budgets.
   Solid curves are \idlekv{}; dotted curves are matched no-repair.
   Right-side labels report query count and $\Delta_{96}$, the score
-  difference at $K=96$. Endpoint content-agnostic controls and
-  \spanref{} diagnostics appear in Appendix
+  difference at $K=96$. Endpoint content-agnostic controls and overlap
+  diagnostics appear in Appendix Figure~\ref{fig:app-selection-diagnostic};
+  per-partition \spanref{} endpoints appear in Appendix
   Figure~\ref{fig:app-partition-endpoints}.
   MQ-NIAH-2Q/4Q/6Q use 100 examples; MQ-NIAH-8Q uses 24 examples per
   split over five partitions.}
@@ -475,7 +478,7 @@ On a fixed five-turn MQ-NIAH-8Q revisit schedule ($K=80$, $n=24$),
 paired bootstrap interval $[0.458,0.620]$; Random-$K$ and Oldest-$K$
 gain only $0.010$ and $0.021$.
 The strongest effect appears on the revisit turn; Turn 3 is retained as
-an internal saturation control because matched no-repair is already high.
+a saturation check because matched no-repair is already high.
 A current-query-only audit matches \idlekv{}, while stale-query-only
 repair recovers part of the gap but remains clearly below current-query
 repair.
@@ -561,6 +564,9 @@ A label-assisted locality reference reaches $0.896$, so we treat this as
 preliminary evidence that this controlled real-repository setting
 instantiates repairable KV-state failures, not as a solved real-code
 benchmark.
+A file-gated variant that restricts candidates to the event-named file
+reaches $0.833$, reducing but not closing the gap to the label-assisted
+reference.
 The gain remains positive after excluding the cue-only hit or rows with
 answer-token retention; Appendix
 Figure~\ref{fig:app-real-repo-diagnostic} gives the full diagnostic and
@@ -569,12 +575,12 @@ sensitivity checks.
 \paragraph{Latency accounting.}
 We separate quality-linked scorer diagnostics from systems-capacity
 measurements.
-The exact scorer used in the quality curves is a research diagnostic,
-not a deployable implementation: at $K=96$, p50 is $6.08$--$7.62$\,s
-across MQ-NIAH-2Q/4Q/6Q/8Q and is dominated by scoring.
-The $Q_2$-appended-state proxy reduces paired 4Q/6Q p50 to
-$0.83$/$0.71$\,s.
-In the locked controlled proxy frontier
+Appendix Figure~\ref{fig:app-transfer-runtime} plots the fixed-$K$
+latency/quality probe: the exact scorer used in the quality curves is a
+research diagnostic, with $K=96$ p50 $6.08$--$7.62$\,s across
+MQ-NIAH-2Q/4Q/6Q/8Q; the $Q_2$-appended-state proxy reduces paired
+4Q/6Q p50 to $0.83$/$0.71$\,s.
+In the controlled proxy frontier
 (Appendix Figure~\ref{fig:app-proxy-controlled}), proxy \idlekv{} still
 separates from matched no-repair and content-agnostic restores: at
 $K=96$, it scores $0.970$/$0.894$ on 4Q/6Q versus $\bmatch$
@@ -588,11 +594,10 @@ fit inside seconds-scale pause budgets, not whether the current exact scorer
 is deployable.
 
 \paragraph{Capacity envelope.}
-Figure~\ref{fig:runtime-envelope} reports that path as a single-node,
-component-summed p95 envelope: a chunked GPU selector streams
-Qwen-shaped BF16 key rows from pinned host memory, scores a length-64
-query, selects $K$ rows, and adds the measured 32K-active
-move-and-inject p95 for the same $K$.
+Figure~\ref{fig:runtime-envelope} reports a single-node p95 envelope:
+a chunked GPU selector streams Qwen-shaped BF16 key rows from pinned
+host memory, scores a length-64 query, selects $K$ rows, and adds the
+measured 32K-active move-and-inject p95 for the same $K$.
 Let $N$ denote offloaded candidate rows, $q$ query tokens, and
 $B_{\mathrm{act}}$ active rows before promotion; the profiled service
 time decomposes as
@@ -601,41 +606,29 @@ T_{\mathrm{repair}}\!\approx\!
 T_{\mathrm{scan}}(N,q)+T_{\mathrm{topK}}(N,K)+
 T_{\mathrm{promote}}(K,B_{\mathrm{act}}).
 \]
-For a fixed model shape and $q$, candidate scanning is linear in $N$;
-promotion is independent of $N$ but still depends on restored rows and
-the cache-reinsertion path, and the top-$K$ term is measured separately
-rather than assumed constant.
-The probe is not a joined end-to-end latency distribution and excludes
-router decisions, remote or disk fetch, queueing, generation, and
-overlap with resumed decoding.
-Across $K\in\{96,512,1024,5000\}$, the length-64 p95 curve changes by
-at most $6.1$\,ms, so candidate-store size is the dominant scaling axis.
-At $K=5000$, p95 grows from $50.0$\,ms at 32K candidates to $1.20$\,s
-at 1M and $4.64$\,s at 4M; the 4M endpoint corresponds to about
-240\,GB of full offloaded Qwen-shaped BF16 KV, while the selector
-streams the key half.
-These values are consistent with multi-second tool/environment
-components reported in prior web-agent and coding-agent
-studies~\citep{agent_efficiency,agentcgroup}.
-However, the plot is a capacity envelope, not a measured tool-call trace:
-a real scheduler would need wait distributions, queue state, and overlap
-to decide when repair can run.
-The stage-wise component split shows that candidate scanning dominates
-large stores, while top-$K$ selection and selected-KV copy/reinsertion
-are not the bottleneck.
+For fixed model shape and $q$, candidate scanning is linear in $N$;
+top-$K$ and promotion are measured separately rather than assumed
+constant.
+Across $K\in\{96,512,1024,5000\}$, the length-64 p95 curve changes by at
+most $6.1$\,ms; at $K=5000$, p95 grows from $50.0$\,ms at 32K
+candidates to $1.20$\,s at 1M and $4.64$\,s at 4M, where 4M rows
+correspond to about 240\,GB of full offloaded Qwen-shaped BF16 KV.
+Thus candidate-store size dominates this path, while top-$K$ selection
+and selected-KV copy/reinsertion are smaller measured components in this
+probe.
+The values are consistent with multi-second tool/environment components
+reported in agent studies~\citep{agent_efficiency,agentcgroup}, but the
+plot is a capacity envelope, not a trace-scheduled latency distribution.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/runtime_repair_scaling.pdf}
   \caption{Runtime-capacity probe on the evaluation GPU.
   (a) Component-summed p95 service time at query length 64 over 80
-  trials after five warmups; cells add chunked candidate-key scoring,
-  top-$K$ selection, selected-KV host-to-device transfer, and
-  reinsertion. (b) Share of the stage-wise p95 estimate for $K=5000$.
-  All rows use 32K
-  active rows, pinned host memory, full source-pool coverage, and
-  Qwen-shaped BF16 KV. The probe excludes generation and the research
-  exact answer scorer; colorbar ticks are representative continuous
-  idle-budget checkpoints.}
+  trials after five warmups. (b) Stage-wise p95 component time for $K=5000$
+  on a log-scale axis.
+  Rows use 32K active rows, pinned host memory, full source-pool
+  coverage, and Qwen-shaped BF16 KV; generation and the research exact
+  answer scorer are excluded.}
   \label{fig:runtime-envelope}
 \end{figure}
 
@@ -644,89 +637,32 @@ are not the bottleneck.
 \label{sec:discussion}
 % -----------------------------------------------------------------------
 
-\paragraph{Positioning.}
-\idlekv{} is not a standalone serving stack.
-It is a test-time adaptation operator over active KV state for
-resource-adaptive tiered-KV runtimes.
-It is complementary to serving systems that preserve, route, offload, or
-resume paused requests efficiently~\citep{vllm,infercept,lmcache,ttkv,
-continuum,agentserve}: here the question is how the runtime should adapt
-the active memory state during the interruption.
-The setting is also distinct from within-turn query-aware eviction
-because the request has already been compressed and full-prefix
-recomputation is disallowed.
-
-\paragraph{Applicability and limitations.}
+\idlekv{} is not a standalone serving stack; it is a test-time
+adaptation operator over active KV state for resource-adaptive tiered-KV
+runtimes.
+It complements systems that preserve, route, offload, or resume paused
+requests efficiently~\citep{vllm,infercept,lmcache,ttkv,continuum,
+agentserve}: here the question is how the runtime should adapt active
+memory state during the interruption after the request has already been
+compressed.
 Repair should help when new turn information changes relevance, the base
-eviction policy still has real choice beyond recency, and the idle gap is
-long enough to cover repair overhead.
-The present evidence is controlled: the main quality figures use one
-primary model, one primary first-stage retention rule, one synthetic
-split-query family, and fixed full-cache-generated turn-$N$ transcripts.
-The preliminary real-repository diagnostic in Section~\ref{sec:results}
-is supporting external-validity evidence, not a SWE-bench issue-resolution
-benchmark or an end-to-end coding-agent evaluation.
-The next systems experiment is trace-scheduled repair against real
-tool/environment wait distributions, queue state, and overlap.
-The main algorithmic gaps are also clear: a learned or page-level
-selector, a latency-normalized $Q_2$-time reselection frontier, and a
-full-prefix recompute baseline.
-Figure~\ref{fig:policy-breadth} and Appendix
-Figure~\ref{fig:app-transfer-runtime} give first-stage-retention and
-same-protocol Llama checks, but broader retention-rule and multi-model
-transfer remain open.
+eviction policy still has real choice beyond recency, and the idle gap
+covers repair overhead.
+The evidence remains controlled: one primary model, one primary retention
+rule, a synthetic split-query family, and fixed full-cache-generated
+turn-$N$ transcripts; the real-repository diagnostic is supporting
+external-validity evidence, not a SWE-bench issue-resolution benchmark.
+The next systems experiments are trace-scheduled repair against real wait
+distributions, stronger learned or page-level selectors,
+latency-normalized $Q_2$-time reselection, and full-prefix recompute
+baselines.
 
-\paragraph{Tiered-cache scaling.}
-Repair also creates a two-level retention problem because the curves match
-only the resumed active GPU KV budget, not total host-plus-device storage.
-A strict device-resident policy chooses the active KV budget, while a
-looser off-device policy decides which evicted rows remain searchable,
-compressed, summarized, or recomputable; in our Qwen-shaped accounting,
-4M searchable rows already imply about 240\,GB before metadata.
-\idlekv{} provides evidence for the middle operation in this hierarchy:
-turn-conditioned promotion from a warm tier during an idle gap.
-This is a hardware-facing implication, not a hardware result: the
-measurements motivate tiered-KV interfaces that expose scoring,
-promotion, and demotion, but they do not establish area, energy, or
-bandwidth claims or solve off-device retention.
-
-\paragraph{Future benchmark axes.}
-Future benchmarks should therefore vary the number, timing, and conflict
-structure of new-turn constraints: the 2Q and 8Q breadth checks suggest
-that easy regimes can saturate while stricter multi-query turns expose
-how quickly eviction failures accumulate.
-The five-turn diagnostic in Figure~\ref{fig:multiturn} strengthens
-the dynamic-workflow evidence, but it remains synthetic and a stale
-previous-query scorer still closes part of the gap.
-The current selector also leaves room for stronger selection rules at
-moderate $K$, as shown by Refresh-buffered and the Coverage selector
-diagnostics, motivating broader task families with the same
-matched-budget controls.
-
-% -----------------------------------------------------------------------
-\section{Conclusion}
-\label{sec:conclusion}
-% -----------------------------------------------------------------------
-
-Pauses between agent turns can be treated as part of the inference budget
-rather than as dead time.
-\idlekv{} studies one concrete way to spend that budget: in a single-node
-prototype, promote host-memory KV back into the active GPU cache before
-the next turn under a matched resumed active-cache budget.
-On calibrated pooled split-query MQ-NIAH-4Q/6Q/8Q panels, the final
-exact evaluations show that idle-window repair can substantially
-outperform matched no-repair retention while random and oldest-token
-restores stay near baseline, with targeted checks across first-stage
-retention rules.
-The remaining work is to broaden the evidence beyond this synthetic
-family and to develop stronger selector policies under the same
-matched-budget controls.
-More broadly, long-context agent systems may need to be judged not only
-by how efficiently they decode, but by how well they maintain KV state
-between turns.
-In this view, the adapted object is not the model weights but the active
-inference state that determines which historical context the next decode
-can directly use.
+\paragraph{Conclusion.}
+Pauses between agent turns can be treated as part of the inference budget.
+Across MQ-NIAH-4Q/6Q/8Q, \idlekv{} outperforms matched no-repair
+retention while random and oldest-token restores stay near baseline,
+showing that long-context agent systems should be judged by active-state
+adaptation as well as decode efficiency.
 
 % -----------------------------------------------------------------------
 \begin{thebibliography}{31}
@@ -968,12 +904,40 @@ Recency-favorable splits such as $12{\rightarrow}34$ are left to
 separate diagnostics rather than pooled into the main future-query
 repair result.
 
+\section{Additional Discussion}
+\label{app:additional-discussion}
+
+\paragraph{Tiered-cache scaling.}
+Repair creates a two-level retention problem because the main curves match
+only the resumed active GPU KV budget, not total host-plus-device storage.
+A strict device-resident policy chooses the active KV budget, while a
+looser off-device policy decides which evicted rows remain searchable,
+compressed, summarized, or recomputable; in the Qwen-shaped accounting
+above, 4M searchable rows already imply about 240\,GB before metadata.
+Thus \idlekv{} supports the middle operation in a tiered hierarchy:
+turn-conditioned promotion from a warm tier during an idle gap.
+This is a hardware-facing implication, not a hardware result.
+
+\paragraph{Future benchmark axes.}
+Future benchmarks should vary the number, timing, and conflict structure
+of new-turn constraints.
+The 2Q and 8Q breadth checks suggest that easy regimes can saturate while
+stricter multi-query turns expose how quickly eviction failures
+accumulate.
+The five-turn diagnostic strengthens the dynamic-workflow evidence, but
+it remains synthetic; broader task families should keep the same
+matched-budget controls while adding real tool traces and stronger
+selector families.
+
 \section{Supplementary Experimental Views}
 \label{app:supplementary-figures}
 
-Figures in this section provide compact diagnostic views that support the
-main claims without replacing the primary matched-budget frontier. Exact
-audit values are kept in the released result artifacts rather than
+The supplementary figures answer four audit questions: whether the effect
+extends beyond the main synthetic setting, persists across query counts
+and operating regimes, selects future-relevant spans rather than
+arbitrary cache growth, and preserves quality separation under the
+latency/proxy path.
+Exact audit values are kept in released result artifacts rather than
 duplicated as wide tables.
 \FloatBarrier
 
@@ -988,6 +952,9 @@ duplicated as wide tables.
   identifier accuracy at $K=96$ and $K=192$. Right: $K=192$ \idlekv{}
   gain over matched no-repair after removing cue-only or answer-retention
   rows. ToolFile-$K$ is file-name-assisted with oldest-row backfill.
+  File-gated \idlekv{} restricts candidates to the event-named file before
+  applying the event-only scorer. Lexical is an answer-sanitized diagnostic,
+  not a deployable selector.
   AnchorWindow-$K$ is a label-assisted locality reference, not a
   deployable baseline or end-to-end issue-resolution result.}
   \label{fig:app-real-repo-diagnostic}
@@ -995,38 +962,35 @@ duplicated as wide tables.
 }{}
 
 \IfFileExists{figures/query_count_breadth.pdf}{%
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\columnwidth]{figures/query_count_breadth.pdf}
-  \caption{Query-count breadth check. Points and thin lines show
-  \idlekv{} score gain over matched no-repair for $K=48$ and $K=96$
-  across 2-, 3-, 4-, 6-, and 8-question split-query variants.
-  Figure~\ref{fig:main-frontier} uses full K-grid frontiers for
-  2Q/4Q/6Q/8Q; 3Q remains an appendix breadth check.}
-  \label{fig:app-query-count-breadth}
-\end{figure}
-}{}
-
 \IfFileExists{figures/operating_regime_heatmap.pdf}{%
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\columnwidth]{figures/operating_regime_heatmap.pdf}
-  \caption{Operating-regime heatmap for the final exact $Q_2$
-  evaluations ($n{=}24$ per setting). Cells show the fraction of
-  available \spanref{} diagnostic gain recovered by \idlekv{}, clipped to
-  $[0,1]$: $(S_{\mathrm{IdleKV}}-S_{\bmatch})/
-  (S_{\mathrm{SpanRef}}-S_{\bmatch})$, averaged over pooled balanced
-  splits for MQ-NIAH-4Q and MQ-NIAH-6Q. Cells with little remaining
-  matched-to-\spanref{} diagnostic gap should be read as saturation
-  diagnostics, not as an upper-bound statement.}
-  \label{fig:app-operating-regime}
+  \begin{minipage}[t]{0.43\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/query_count_breadth.pdf}
+    \centerline{\small (a) Query-count breadth}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[t]{0.53\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/operating_regime_heatmap.pdf}
+    \centerline{\small (b) Operating-regime diagnostic}
+  \end{minipage}
+  \caption{Supplementary breadth and operating-regime diagnostics.
+  (a) \idlekv{} score gain over matched no-repair for $K=48$ and $K=96$
+  across 2-, 3-, 4-, 6-, and 8-question split-query variants.
+  (b) Fraction of available \spanref{} diagnostic gain recovered by
+  \idlekv{}, clipped to $[0,1]$, for MQ-NIAH-4Q/6Q. Saturated cells with
+  little matched-to-\spanref{} gap should not be read as upper-bound
+  statements.}
+  \label{fig:app-query-count-breadth}
 \end{figure}
-}{}
+}{}}{}
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/repair_selection_diagnostic.pdf}
-  \caption{Real-data selection diagnostic for the final exact
+  \caption{Selection diagnostic for the final exact MQ-NIAH
   evaluations. The left column shows answer score; the right column
   shows overlap between restored tokens and annotated $Q_2$ answer
   spans. Content-agnostic restores stay near the matched baseline while

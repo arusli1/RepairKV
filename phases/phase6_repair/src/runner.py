@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import itertools
+import keyword
 import shutil
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any, Iterable
 import torch
 
 from phases.phase1_degradation.phase1.evaluation import sample_score
+from phases.phase1_degradation.phase1.prompting import char_span_to_token_positions
 from phases.phase2_kv_cache.src.kv_utils import PositionTrackedCache, inject_kv, slice_kv
 from phases.phase2_kv_cache.src.runtime import MODEL_DIR as DEFAULT_MODEL_DIR
 from phases.phase2_kv_cache.src.runtime import load_model, load_tokenizer
@@ -41,6 +43,8 @@ from .protocol import (
 )
 from .selectors import (
     contrastive_position_scores,
+    pack_anchor_bursts,
+    rank_positions,
     score_evicted_positions,
     select_coverage_aware_positions,
     select_idlekv_positions,
@@ -69,6 +73,8 @@ ALLOWED_CONDITIONS = (
     "Oldest-K",
     "ToolFile-K",
     "AnchorWindow-K",
+    "FileGatedIdleKV-K",
+    "LexicalAnchor-K",
     "Oracle-K",
 )
 ALLOWED_QUERY_SCORING_MODES = ("proxy", "exact_q")
@@ -84,7 +90,36 @@ Q2_SCORE_CONDITIONS = frozenset(
         "ContrastiveQ-K",
         "Refresh-K",
         "Oracle-K",
+        "FileGatedIdleKV-K",
     )
+)
+CODE_IDENTIFIER_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+LEXICAL_ANCHOR_STOPWORDS = frozenset(
+    {
+        "answer",
+        "class",
+        "constructing",
+        "context",
+        "declaration",
+        "event",
+        "executing",
+        "exercising",
+        "failed",
+        "handling",
+        "hidden",
+        "identifier",
+        "includes",
+        "missing",
+        "module",
+        "repository",
+        "report",
+        "redacted",
+        "recover",
+        "statement",
+        "tool",
+        "use",
+        "while",
+    }
 )
 
 STAGE_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -331,6 +366,244 @@ def _select_anchor_window_positions(
         return min(abs(int(position) - anchor) for anchor in anchors)
 
     return sorted(available, key=lambda position: (_distance_to_anchor(position), position))[:target_k]
+
+
+def _segment_ranges_for_name(
+    *,
+    segment_token_ranges: Iterable[tuple[str, int, int]],
+    segment_name: str,
+) -> list[tuple[int, int]]:
+    return [(int(start), int(end)) for name, start, end in segment_token_ranges if str(name) == str(segment_name)]
+
+
+def _position_in_ranges(position: int, ranges: Iterable[tuple[int, int]]) -> bool:
+    return any(int(start) <= int(position) < int(end) for start, end in ranges)
+
+
+def _count_positions_in_ranges(positions: Iterable[int], ranges: Iterable[tuple[int, int]]) -> int:
+    range_list = list(ranges)
+    return sum(1 for position in positions if _position_in_ranges(int(position), range_list))
+
+
+def _contiguous_run_count(positions: Iterable[int]) -> int:
+    """Count contiguous windows in a selected position set."""
+    ordered = sorted(dict.fromkeys(int(position) for position in positions))
+    if not ordered:
+        return 0
+    runs = 1
+    prev = ordered[0]
+    for position in ordered[1:]:
+        if position != prev + 1:
+            runs += 1
+        prev = position
+    return runs
+
+
+def _select_file_gated_idlekv_positions(
+    *,
+    evicted_positions: Iterable[int],
+    segment_token_ranges: Iterable[tuple[str, int, int]],
+    segment_name: str,
+    q2_scores: dict[int, float],
+    turn_n_scores: dict[int, float],
+    k: int,
+    left: int,
+    right: int,
+) -> tuple[list[int], dict[str, Any]]:
+    """Run the IdleKV selector inside the event file, then backfill globally."""
+    available = sorted(dict.fromkeys(int(position) for position in evicted_positions))
+    target_k = min(max(int(k), 0), len(available))
+    ranges = _segment_ranges_for_name(
+        segment_token_ranges=segment_token_ranges,
+        segment_name=segment_name,
+    )
+    file_positions = [position for position in available if _position_in_ranges(position, ranges)]
+    selected = select_idlekv_positions(
+        evicted_positions=file_positions,
+        q2_scores=q2_scores,
+        turn_n_scores=turn_n_scores,
+        k=target_k,
+        left=left,
+        right=right,
+    )
+    selected_set = set(selected)
+    if len(selected) < target_k:
+        global_idlekv = select_idlekv_positions(
+            evicted_positions=available,
+            q2_scores=q2_scores,
+            turn_n_scores=turn_n_scores,
+            k=target_k,
+            left=left,
+            right=right,
+        )
+        for position in global_idlekv:
+            if int(position) in selected_set:
+                continue
+            selected.append(int(position))
+            selected_set.add(int(position))
+            if len(selected) >= target_k:
+                break
+    if len(selected) < target_k:
+        for position in rank_positions(
+            available,
+            primary_scores=q2_scores,
+            secondary_scores=turn_n_scores,
+        ):
+            if int(position) in selected_set:
+                continue
+            selected.append(int(position))
+            selected_set.add(int(position))
+            if len(selected) >= target_k:
+                break
+    selected_from_file = _count_positions_in_ranges(selected, ranges)
+    metadata = {
+        "candidate_count": int(len(file_positions)),
+        "selected_from_file_count": int(selected_from_file),
+        "selected_from_file_fraction": round(selected_from_file / max(1, len(selected)), 6),
+        "backfill_count": int(max(0, len(selected) - selected_from_file)),
+        "budget_matched": len(selected) == target_k,
+    }
+    return selected, metadata
+
+
+def _identifier_parts(value: str) -> set[str]:
+    normalized = re.sub(r"[^A-Za-z0-9_]+", "_", str(value))
+    raw_parts = re.split(r"[_\W]+", normalized)
+    camel_parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)|[0-9]+", str(value))
+    return {
+        part.lower()
+        for part in [normalized, *raw_parts, *camel_parts]
+        if len(part) >= 2
+    }
+
+
+def _extract_lexical_anchor_terms(*, repair_cue: str, answer: str, max_terms: int = 24) -> tuple[str, ...]:
+    """Extract deployable code-like anchors from the answer-redacted event cue."""
+    answer_parts = _identifier_parts(answer)
+    answer_flat = re.sub(r"[^A-Za-z0-9]+", "", str(answer)).lower()
+    terms: list[str] = []
+    seen: set[str] = set()
+    for match in CODE_IDENTIFIER_RE.finditer(str(repair_cue)):
+        term = match.group(0)
+        lower = term.lower()
+        if lower in seen or lower in LEXICAL_ANCHOR_STOPWORDS or keyword.iskeyword(term):
+            continue
+        if len(term) < 3:
+            continue
+        term_flat = re.sub(r"[^A-Za-z0-9]+", "", term).lower()
+        term_parts = _identifier_parts(term)
+        if lower == "identifier" or term_flat == answer_flat:
+            continue
+        if answer_flat and (answer_flat in term_flat or term_flat in answer_flat):
+            continue
+        if answer_parts.intersection(term_parts):
+            continue
+        terms.append(term)
+        seen.add(lower)
+        if len(terms) >= int(max_terms):
+            break
+    return tuple(terms)
+
+
+def _lexical_anchor_positions(
+    *,
+    tokenizer,
+    prepared,
+    terms: Iterable[str],
+    evicted_positions: Iterable[int],
+    preferred_ranges: Iterable[tuple[int, int]],
+) -> tuple[list[int], int]:
+    """Map lexical cue terms to token anchors, preferring the event-named file."""
+    rendered_context = prepared.rendered_context
+    evicted = {int(position) for position in evicted_positions}
+    preferred_range_list = list(preferred_ranges)
+    preferred: list[int] = []
+    global_positions: list[int] = []
+    for term in terms:
+        pattern = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(str(term))}(?![A-Za-z0-9_])")
+        for match in pattern.finditer(rendered_context):
+            token_positions = char_span_to_token_positions(
+                tokenizer,
+                rendered_context,
+                match.start(),
+                match.end(),
+            )
+            usable_positions = [int(position) for position in token_positions if int(position) in evicted]
+            if not usable_positions:
+                continue
+            if any(_position_in_ranges(position, preferred_range_list) for position in usable_positions):
+                preferred.extend(usable_positions)
+            else:
+                global_positions.extend(usable_positions)
+    anchors = list(dict.fromkeys([*preferred, *global_positions]))
+    return anchors, len(set(preferred))
+
+
+def _select_lexical_anchor_positions(
+    *,
+    tokenizer,
+    prepared,
+    evicted_positions: Iterable[int],
+    segment_token_ranges: Iterable[tuple[str, int, int]],
+    segment_name: str,
+    repair_cue: str,
+    answer: str,
+    k: int,
+    left: int,
+    right: int,
+) -> tuple[list[int], dict[str, Any]]:
+    """Select rows near deployable lexical anchors from the event cue."""
+    available = sorted(dict.fromkeys(int(position) for position in evicted_positions))
+    target_k = min(max(int(k), 0), len(available))
+    ranges = _segment_ranges_for_name(
+        segment_token_ranges=segment_token_ranges,
+        segment_name=segment_name,
+    )
+    terms = _extract_lexical_anchor_terms(repair_cue=repair_cue, answer=answer)
+    anchor_positions, preferred_anchor_count = _lexical_anchor_positions(
+        tokenizer=tokenizer,
+        prepared=prepared,
+        terms=terms,
+        evicted_positions=available,
+        preferred_ranges=ranges,
+    )
+    anchor_burst_positions = pack_anchor_bursts(
+        anchor_positions=anchor_positions,
+        available_positions=available,
+        k=target_k,
+        left=left,
+        right=right,
+        backfill_positions=[],
+    )
+    selected = pack_anchor_bursts(
+        anchor_positions=anchor_positions,
+        available_positions=available,
+        k=target_k,
+        left=left,
+        right=right,
+        backfill_positions=available,
+    )
+    selected_from_file = _count_positions_in_ranges(selected, ranges)
+    answer_flat = re.sub(r"[^A-Za-z0-9]+", "", str(answer)).lower()
+    leak_terms = [
+        term
+        for term in terms
+        if answer_flat and answer_flat in re.sub(r"[^A-Za-z0-9]+", "", term).lower()
+    ]
+    metadata = {
+        "terms": list(terms),
+        "term_count": int(len(terms)),
+        "anchor_position_count": int(len(anchor_positions)),
+        "window_count": int(_contiguous_run_count(selected)),
+        "preferred_file_anchor_position_count": int(preferred_anchor_count),
+        "selected_from_file_count": int(selected_from_file),
+        "selected_from_file_fraction": round(selected_from_file / max(1, len(selected)), 6),
+        "backfill_count": int(max(0, len(selected) - len(anchor_burst_positions))),
+        "answer_leak_flag": bool(leak_terms),
+        "answer_leak_terms": leak_terms,
+        "budget_matched": len(selected) == target_k,
+    }
+    return selected, metadata
 
 
 def _sync_if_cuda(device: torch.device) -> None:
@@ -895,6 +1168,55 @@ def _run_one_split(
                 }
             )
 
+        if "FileGatedIdleKV-K" in config.conditions:
+            if not tool_file_q2_path:
+                raise ValueError("FileGatedIdleKV-K requires tool_file_q2_path.")
+            repair_cue = str(split.q2_prepared.example.metadata.get("repair_cue", ""))
+            event_contains_q2_path = str(tool_file_q2_path) in repair_cue
+            select_start = time.perf_counter()
+            file_gated_positions, file_gated_meta = _select_file_gated_idlekv_positions(
+                evicted_positions=evicted_positions,
+                segment_token_ranges=split.q2_prepared.segment_token_ranges,
+                segment_name=f"file:{tool_file_q2_path}",
+                q2_scores=q2_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                k=k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            select_s = time.perf_counter() - select_start
+            payload = _run_selected_position_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                active_cache=base_partition.compressed,
+                evicted_cache=base_partition.evicted,
+                base_positions=base_partition.kept_context_positions,
+                selected_positions=file_gated_positions,
+                relevant_positions=q2_relevant_positions,
+                selection_s=select_s,
+                field_prefix="file_gated_idlekv",
+            )
+            payload.update(
+                {
+                    "file_gated_idlekv_q2_path": str(tool_file_q2_path),
+                    "file_gated_idlekv_path_source": (
+                        "event_repair_cue" if event_contains_q2_path else "q2_metadata"
+                    ),
+                    "file_gated_idlekv_event_contains_q2_path": bool(event_contains_q2_path),
+                    "file_gated_idlekv_candidate_count": int(file_gated_meta["candidate_count"]),
+                    "file_gated_idlekv_selected_from_file_count": int(
+                        file_gated_meta["selected_from_file_count"]
+                    ),
+                    "file_gated_idlekv_selected_from_file_fraction": float(
+                        file_gated_meta["selected_from_file_fraction"]
+                    ),
+                    "file_gated_idlekv_backfill_count": int(file_gated_meta["backfill_count"]),
+                    "file_gated_idlekv_budget_matched": bool(file_gated_meta["budget_matched"]),
+                }
+            )
+            row.update(payload)
+
         if "IdleKV-Coverage" in config.conditions:
             select_start = time.perf_counter()
             idlekv_coverage_positions = select_coverage_aware_positions(
@@ -1354,6 +1676,70 @@ def _run_one_split(
                 }
             )
 
+        if "LexicalAnchor-K" in config.conditions:
+            if not tool_file_q2_path:
+                raise ValueError("LexicalAnchor-K requires tool_file_q2_path.")
+            repair_cue = str(split.q2_prepared.example.metadata.get("repair_cue", ""))
+            answer = str(split.q2_prepared.example.outputs[0])
+            event_contains_q2_path = str(tool_file_q2_path) in repair_cue
+            select_start = time.perf_counter()
+            lexical_positions, lexical_meta = _select_lexical_anchor_positions(
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                evicted_positions=evicted_positions,
+                segment_token_ranges=split.q2_prepared.segment_token_ranges,
+                segment_name=f"file:{tool_file_q2_path}",
+                repair_cue=repair_cue,
+                answer=answer,
+                k=k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            select_s = time.perf_counter() - select_start
+            payload = _run_selected_position_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                active_cache=base_partition.compressed,
+                evicted_cache=base_partition.evicted,
+                base_positions=base_partition.kept_context_positions,
+                selected_positions=lexical_positions,
+                relevant_positions=q2_relevant_positions,
+                selection_s=select_s,
+                field_prefix="lexical_anchor_k",
+            )
+            payload.update(
+                {
+                    "lexical_anchor_k_q2_path": str(tool_file_q2_path),
+                    "lexical_anchor_k_path_source": (
+                        "event_repair_cue" if event_contains_q2_path else "q2_metadata"
+                    ),
+                    "lexical_anchor_k_event_contains_q2_path": bool(event_contains_q2_path),
+                    "lexical_anchor_k_terms": list(lexical_meta["terms"]),
+                    "lexical_anchor_k_term_count": int(lexical_meta["term_count"]),
+                    "lexical_anchor_k_anchor_position_count": int(
+                        lexical_meta["anchor_position_count"]
+                    ),
+                    "lexical_anchor_k_window_count": int(
+                        lexical_meta["window_count"]
+                    ),
+                    "lexical_anchor_k_preferred_file_anchor_position_count": int(
+                        lexical_meta["preferred_file_anchor_position_count"]
+                    ),
+                    "lexical_anchor_k_selected_from_file_count": int(
+                        lexical_meta["selected_from_file_count"]
+                    ),
+                    "lexical_anchor_k_selected_from_file_fraction": float(
+                        lexical_meta["selected_from_file_fraction"]
+                    ),
+                    "lexical_anchor_k_backfill_count": int(lexical_meta["backfill_count"]),
+                    "lexical_anchor_k_answer_leak_flag": bool(lexical_meta["answer_leak_flag"]),
+                    "lexical_anchor_k_answer_leak_terms": list(lexical_meta["answer_leak_terms"]),
+                    "lexical_anchor_k_budget_matched": bool(lexical_meta["budget_matched"]),
+                }
+            )
+            row.update(payload)
+
         if "AnchorWindow-K" in config.conditions:
             select_start = time.perf_counter()
             anchor_window_positions = _select_anchor_window_positions(
@@ -1640,6 +2026,46 @@ def _summarize_rows_by_k(rows: list[dict[str, Any]]) -> dict[str, Any]:
                     "mean_tool_file_k": round(_mean(row["tool_file_k_score"] for row in group), 6),
                     "mean_tool_file_lift": round(
                         _mean(float(row["tool_file_k_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                }
+            )
+        if "file_gated_idlekv_score" in group[0]:
+            payload.update(
+                {
+                    "mean_file_gated_idlekv": round(_mean(row["file_gated_idlekv_score"] for row in group), 6),
+                    "mean_file_gated_idlekv_lift": round(
+                        _mean(float(row["file_gated_idlekv_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "mean_file_gated_idlekv_minus_idlekv": round(
+                        _mean(float(row["file_gated_idlekv_score"]) - float(row["idlekv_score"]) for row in group),
+                        6,
+                    )
+                    if "idlekv_score" in group[0]
+                    else 0.0,
+                    "mean_file_gated_idlekv_selected_from_file_fraction": round(
+                        _mean(row["file_gated_idlekv_selected_from_file_fraction"] for row in group),
+                        6,
+                    ),
+                }
+            )
+        if "lexical_anchor_k_score" in group[0]:
+            payload.update(
+                {
+                    "mean_lexical_anchor_k": round(_mean(row["lexical_anchor_k_score"] for row in group), 6),
+                    "mean_lexical_anchor_lift": round(
+                        _mean(float(row["lexical_anchor_k_score"]) - float(row["b_match_score"]) for row in group),
+                        6,
+                    ),
+                    "mean_lexical_anchor_k_minus_idlekv": round(
+                        _mean(float(row["lexical_anchor_k_score"]) - float(row["idlekv_score"]) for row in group),
+                        6,
+                    )
+                    if "idlekv_score" in group[0]
+                    else 0.0,
+                    "mean_lexical_anchor_k_selected_from_file_fraction": round(
+                        _mean(row["lexical_anchor_k_selected_from_file_fraction"] for row in group),
                         6,
                     ),
                 }

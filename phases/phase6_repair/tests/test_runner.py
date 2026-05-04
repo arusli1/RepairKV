@@ -19,6 +19,10 @@ from phases.phase6_repair.src.runner import (
     _choose_gold_span_oracle_candidate,
     _artifact_path,
     _condition_label,
+    _contiguous_run_count,
+    _extract_lexical_anchor_terms,
+    _select_file_gated_idlekv_positions,
+    _select_lexical_anchor_positions,
     _jaccard_fraction,
     _needs_q2_candidate_scores,
     _restore_positions,
@@ -35,6 +39,11 @@ def _make_cache(positions: list[int]) -> PositionTrackedCache:
     keys = torch.arange(seq_len, dtype=torch.float16).reshape(1, 1, seq_len, 1)
     values = (keys + 100).clone()
     return PositionTrackedCache(((keys, values),), positions)
+
+
+class _CharTokenizer:
+    def __call__(self, text: str, **_kwargs):
+        return {"offset_mapping": [(index, index + 1) for index, _char in enumerate(text)]}
 
 
 class Phase6RunnerTests(unittest.TestCase):
@@ -61,6 +70,7 @@ class Phase6RunnerTests(unittest.TestCase):
                 "B",
                 "B_match",
                 "IdleKV",
+                "FileGatedIdleKV-K",
                 "IdleKV-Coverage",
                 "IdleKV-MMR",
                 "WrongQ-K",
@@ -82,6 +92,7 @@ class Phase6RunnerTests(unittest.TestCase):
                 "B",
                 "B_match",
                 "IdleKV",
+                "FileGatedIdleKV-K",
                 "IdleKV-Coverage",
                 "IdleKV-MMR",
                 "WrongQ-K",
@@ -160,6 +171,68 @@ class Phase6RunnerTests(unittest.TestCase):
     def test_artifact_path_includes_budget_and_recency(self) -> None:
         config = build_config(stage="smoke", task="clean_suite", num_samples=3, k_values=[12], base_context_budget=768, recency_window=64)
         self.assertIn("clean_suite_b768_r64_n3_k12_c", str(_artifact_path(config)))
+
+    def test_file_gated_idlekv_selects_file_rows_then_global_backfill(self) -> None:
+        selected, meta = _select_file_gated_idlekv_positions(
+            evicted_positions=range(10),
+            segment_token_ranges=[("file:pkg/mod.py", 4, 6)],
+            segment_name="file:pkg/mod.py",
+            q2_scores={4: 1.0, 5: 0.9, 8: 0.8, 9: 0.7},
+            turn_n_scores={},
+            k=4,
+            left=0,
+            right=0,
+        )
+
+        self.assertEqual(selected, [4, 5, 8, 9])
+        self.assertEqual(meta["candidate_count"], 2)
+        self.assertEqual(meta["selected_from_file_count"], 2)
+        self.assertEqual(meta["backfill_count"], 2)
+        self.assertEqual(meta["selected_from_file_fraction"], 0.5)
+        self.assertTrue(meta["budget_matched"])
+
+    def test_contiguous_run_count_deduplicates_and_counts_windows(self) -> None:
+        self.assertEqual(_contiguous_run_count([]), 0)
+        self.assertEqual(_contiguous_run_count([5, 4, 4, 7, 8, 10]), 3)
+
+    def test_lexical_anchor_terms_exclude_answer_variants_and_common_words(self) -> None:
+        terms = _extract_lexical_anchor_terms(
+            repair_cue=(
+                "Tool event: a repository check failed while executing "
+                "`pkg/base_finder.py` inside `run_check`. The statement "
+                "`<identifier>(payload, AppGroup)` must be recovered."
+            ),
+            answer="BaseFinder",
+        )
+
+        lowered = {term.lower() for term in terms}
+        self.assertNotIn("tool", lowered)
+        self.assertNotIn("identifier", lowered)
+        self.assertNotIn("base_finder", lowered)
+        self.assertNotIn("base", lowered)
+        self.assertNotIn("finder", lowered)
+        self.assertIn("run_check", lowered)
+        self.assertIn("payload", lowered)
+
+    def test_lexical_anchor_backfill_count_tracks_rows_after_anchor_bursts(self) -> None:
+        rendered = "call foo then continue"
+        selected, meta = _select_lexical_anchor_positions(
+            tokenizer=_CharTokenizer(),
+            prepared=SimpleNamespace(rendered_context=rendered),
+            evicted_positions=range(len(rendered)),
+            segment_token_ranges=[("file:pkg/mod.py", 0, len(rendered))],
+            segment_name="file:pkg/mod.py",
+            repair_cue="Tool event: function foo failed.",
+            answer="bar",
+            k=8,
+            left=1,
+            right=1,
+        )
+
+        self.assertEqual(len(selected), 8)
+        self.assertEqual(meta["anchor_position_count"], 3)
+        self.assertEqual(meta["backfill_count"], 3)
+        self.assertTrue(meta["budget_matched"])
 
     def test_artifact_path_includes_nonzero_seed_offset(self) -> None:
         config = build_config(
@@ -252,6 +325,7 @@ class Phase6RunnerTests(unittest.TestCase):
         self.assertTrue(_needs_q2_candidate_scores(["ContrastiveQ-K"]))
         self.assertTrue(_needs_q2_candidate_scores(["Refresh-K"]))
         self.assertTrue(_needs_q2_candidate_scores(["Oracle-K"]))
+        self.assertTrue(_needs_q2_candidate_scores(["FileGatedIdleKV-K"]))
 
     @patch("phases.phase6_repair.src.runner.build_mismatched_question_ids")
     def test_wrong_query_ids_by_split_keeps_legacy_phantom_key_mode(self, mock_build_mismatched) -> None:
