@@ -1,0 +1,34 @@
+{
+  "base_context_budget": 16384,
+  "bootstrap_seed": 20260504,
+  "conditions": [
+    "A",
+    "B",
+    "B_match",
+    "Random-K",
+    "Oldest-K",
+    "IdleKV-EventOnly-K",
+    "StaleCue-K",
+    "WrongEvent-K",
+    "ToolFile-K"
+  ],
+  "context_tokens": 32768,
+  "k_grid": [
+    32,
+    48,
+    64,
+    96,
+    128
+  ],
+  "metadata": {
+    "status": "dev-default; freeze a copy before locked runs"
+  },
+  "model_dir": "models/Qwen2.5-7B-Instruct",
+  "notes": "Phase 15 CPU-gated default protocol. Locked runs require a frozen copy.",
+  "primary_k": 96,
+  "recency_window": 1024,
+  "scoring_rule": "strict_identifier_first_line",
+  "source_task": "repodelta_edge",
+  "tokenizer_dir": "models/Qwen2.5-7B-Instruct"
+}
+

@@ -167,10 +167,11 @@ Current state after audit:
 
 - File cards are line-numbered.
 - Q2 no longer restates the exact path and line after the tool event.
-- The generator is still only a scaffold; it is not GPU-ready paper evidence.
+- The Edge manifest/scoring/audit package now exists and is CPU-tested.
 - Phase 6 cannot run RepoDelta through its normal synthetic-task registry.
-- The current Phase 6 repair path scores with the full Q2 prompt, so Phase 15
-  needs a separate event-only cue path before any main-claim GPU run.
+- Phase 6 now has a non-invasive optional hook for separate repair question IDs,
+  but Phase 15 still needs a dedicated manifest-consuming GPU wrapper before any
+  main-claim run.
 
 ## Required Implementation Before GPU
 

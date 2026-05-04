@@ -1,6 +1,6 @@
 # Phase 15 Status
 
-Last updated: 2026-05-04 19:05 UTC.
+Last updated: 2026-05-04 19:46 UTC.
 
 ## Current State
 
@@ -66,22 +66,38 @@ Critical flaws found and resolved into the plan:
 - Changed Q2 wording so it no longer restates the exact path and line after the
   tool event.
 - Added/updated RepoDelta unit tests for line visibility and Q2 wording.
-- Ran focused RepoDelta tests successfully.
+- Added the initial Phase 15 CPU-gate package:
+  - `src/edge.py`: Python AST extraction for one-hop callsite-to-callee Edge
+    candidates.
+  - `src/scorer.py`: strict first-line identifier scoring.
+  - `src/manifest.py`: RepoSource records, audited manifest rows, event-only
+    cue IDs, token/span/leakage audits, and stable manifest hashes.
+  - `src/protocol.py`: frozen protocol record and protocol hashing.
+  - `src/bootstrap.py`: paired repo-cluster bootstrap utility.
+  - `src/runner.py`: event-only repair signal object, wrong-event metadata
+    helper, and ToolFile-K position helper.
+  - `scripts/build_phase15_manifest.py`: manifest-builder CLI that rejects
+    unpinned or self-repo sources by default.
+- Added `phase15_protocol.json` and `repo_registry.example.json`.
+- Added a non-invasive Phase 6 hook so `_run_one_split` can accept separate
+  `repair_question_ids` and `stale_question_ids`; existing MQ-NIAH behavior
+  still defaults to full-Q2 scoring.
+- Ran focused Phase 15, RepoDelta, and Phase 6 tests successfully.
 
 ## Immediate Next Tasks
 
-1. Add a Phase 15 manifest package around the Phase 14 generator.
-2. Implement strict identifier scoring and failure taxonomy.
-3. Implement tokenizer-aware manifest audits.
-4. Add Python AST extraction for the Edge candidate: single-line callsite to
-   leaf callee identifier, plus minimal fallback answer types if yield is low.
-5. Add stale/wrong cue construction and metadata fields for
-   `repair_signal_mode` and `decode_prompt_mode`.
-6. Add a Phase 15 runner or wrapper that consumes frozen manifests and supports
-   event-only repair. Do not route this through Phase 6 unchanged.
-7. Run CPU tests for all new code.
-8. Only then build dev manifests and run full-context ability smokes in tmux.
-9. If Edge fails yield or full-context ability, pivot to DocDelta-Anchor rather
+1. Clone or stage 10-15 third-party public Python repo snapshots outside this
+   repository; pin commit SHA, license, and archive SHA256 in a dev registry.
+2. Run the manifest-builder CLI on the dev registry and inspect Edge yield,
+   audit failures, depth bins, answer-token lengths, and per-repo balance.
+3. Add the GPU Phase 15 wrapper that consumes manifest rows and calls the Phase
+   6 repair path with `repair_question_ids=event_only_ids`; do not use full-Q2
+   scoring for the main claim.
+4. Add GPU-run metadata persistence for `repair_signal_mode`,
+   `decode_prompt_mode`, repo ID, edge type, audit flags, and ToolFile-K rows.
+5. Run a full-context ability smoke on the dev manifest in tmux.
+6. Only if ability passes, run the repair smoke with `K={48,96}`.
+7. If Edge fails yield or full-context ability, pivot to DocDelta-Anchor rather
    than browser/chat/notebook traces. If Edge works and time remains, consider a
    small TestLog->Source manifest as a challenger or TraceSched-Repair as a
    systems complement.

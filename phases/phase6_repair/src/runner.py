@@ -551,6 +551,8 @@ def _run_one_split(
     full_cache: PositionTrackedCache,
     index: int,
     wrong_q2_question_ids: torch.Tensor | None = None,
+    repair_question_ids: torch.Tensor | None = None,
+    stale_question_ids: torch.Tensor | None = None,
 ) -> list[dict[str, Any]]:
     example_start = time.perf_counter()
     q1_context_ids = split.q1_prepared.context_ids
@@ -597,18 +599,19 @@ def _run_one_split(
     q2_query_s = 0.0
     q2_score_s = 0.0
     if _needs_q2_candidate_scores(config.conditions):
+        scoring_question_ids = repair_question_ids if repair_question_ids is not None else split.q2_prepared.question_ids
         q2_query_start = time.perf_counter()
         if config.query_scoring_mode == "exact_q":
             q2_query_rows = compute_q2_exact_query_rows(
                 model,
                 active_cache=base_partition.compressed,
-                question_ids=split.q2_prepared.question_ids,
+                question_ids=scoring_question_ids,
             )
         else:
             q2_query_rows = compute_q2_query_rows(
                 model,
                 active_cache=base_partition.compressed,
-                question_ids=split.q2_prepared.question_ids,
+                question_ids=scoring_question_ids,
             )
         q2_query_s = time.perf_counter() - q2_query_start
 
@@ -668,18 +671,19 @@ def _run_one_split(
     stale_q_query_s = 0.0
     stale_q_score_s = 0.0
     if "StaleQ-K" in config.conditions:
+        stale_scoring_question_ids = stale_question_ids if stale_question_ids is not None else split.q1_prepared.question_ids
         stale_q_query_start = time.perf_counter()
         if config.query_scoring_mode == "exact_q":
             stale_q_query_rows = compute_q2_exact_query_rows(
                 model,
                 active_cache=base_partition.compressed,
-                question_ids=split.q1_prepared.question_ids,
+                question_ids=stale_scoring_question_ids,
             )
         else:
             stale_q_query_rows = compute_q2_query_rows(
                 model,
                 active_cache=base_partition.compressed,
-                question_ids=split.q1_prepared.question_ids,
+                question_ids=stale_scoring_question_ids,
             )
         stale_q_query_s = time.perf_counter() - stale_q_query_start
         stale_q_score_start = time.perf_counter()

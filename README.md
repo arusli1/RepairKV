@@ -50,10 +50,11 @@ can directly attend to.
   sensitivity, and runtime-capacity probes.
 - Breadth checks: same-protocol Llama-3.1-8B portability probes,
   protocol-matched retention-rule variants, and active selector variants.
-- Open gap: the current paper is still controlled/synthetic. Phase 15 now tracks
-  a stricter RepoDelta-Edge plan for real-repository relevance-shift evidence,
-  but it is not paper evidence until frozen-manifest CPU gates, GPU ability
-  smokes, and repair smokes pass the written gates.
+- Open gap: the current paper is still controlled/synthetic. Phase 15 now has
+  CPU-tested scaffolding for a stricter RepoDelta-Edge real-repository
+  relevance-shift diagnostic, but it is not paper evidence until a frozen
+  third-party-repo manifest, GPU ability smoke, and repair smoke pass the
+  written gates.
 
 ## Paper
 
