@@ -31,6 +31,9 @@ def test_audit_repair_artifact_reports_control_lifts() -> None:
                 "tool_file_k_budget_matched": True,
                 "anchor_window_k_budget_matched": True,
                 "phase15_manifest_audit": {"passed": True},
+                "wrong_event_donor_example_id": "donor-a",
+                "wrong_event_donor_repo_id": "repo3",
+                "wrong_event_donor_answer": "OtherA",
             },
             {
                 "k": 96,
@@ -47,6 +50,9 @@ def test_audit_repair_artifact_reports_control_lifts() -> None:
                 "tool_file_k_budget_matched": True,
                 "anchor_window_k_budget_matched": True,
                 "phase15_manifest_audit": {"passed": True},
+                "wrong_event_donor_example_id": "donor-b",
+                "wrong_event_donor_repo_id": "repo4",
+                "wrong_event_donor_answer": "OtherB",
             },
         ],
     }
@@ -56,6 +62,7 @@ def test_audit_repair_artifact_reports_control_lifts() -> None:
     assert result["manifest_hash"] == "abc"
     assert result["artifact_checks"]["all_manifest_audits_passed"]
     assert not result["artifact_checks"]["has_duplicate_example_rows_by_k"]
+    assert result["artifact_checks"]["wrong_event_donor_metadata_complete"]
     k96 = result["k_results"]["k96"]
     assert k96["n_rows"] == 2
     assert k96["repo_count"] == 2
@@ -106,6 +113,7 @@ def test_repair_gate_requires_primary_lift_adjacent_and_toolfile_margin() -> Non
         "artifact_checks": {
             "all_manifest_audits_passed": True,
             "has_duplicate_example_rows_by_k": False,
+            "wrong_event_donor_metadata_complete": True,
         },
         "sensitivity": {
             "exclude_cue_only_hits": {
@@ -176,6 +184,7 @@ def test_repair_gate_fails_main_gate_when_label_assisted_anchor_window_dominates
         "artifact_checks": {
             "all_manifest_audits_passed": True,
             "has_duplicate_example_rows_by_k": False,
+            "wrong_event_donor_metadata_complete": True,
         },
         "sensitivity": {
             "exclude_cue_only_hits": {
@@ -237,6 +246,7 @@ def test_repair_gate_fails_when_toolfile_control_is_not_real_file_selection() ->
         "artifact_checks": {
             "all_manifest_audits_passed": True,
             "has_duplicate_example_rows_by_k": False,
+            "wrong_event_donor_metadata_complete": True,
         },
     }
 
@@ -279,6 +289,7 @@ def test_repair_gate_fails_when_required_ci_keys_are_missing() -> None:
         "artifact_checks": {
             "all_manifest_audits_passed": True,
             "has_duplicate_example_rows_by_k": False,
+            "wrong_event_donor_metadata_complete": True,
         },
     }
 
@@ -325,6 +336,7 @@ def test_repair_gate_fails_when_manifest_static_audit_fails() -> None:
         "artifact_checks": {
             "all_manifest_audits_passed": False,
             "has_duplicate_example_rows_by_k": False,
+            "wrong_event_donor_metadata_complete": True,
         },
     }
 
@@ -343,6 +355,52 @@ def test_repair_gate_fails_when_manifest_static_audit_fails() -> None:
 
     assert not result["passed"]
     assert not result["gate_results"]["manifest_audit_ok"]
+
+
+def test_repair_gate_fails_when_wrong_event_donor_metadata_is_missing() -> None:
+    audit = {
+        "k_results": {
+            "k96": {"mean_idlekv_minus_b_match": 0.0},
+            "k192": {
+                "mean_idlekv_minus_b_match": 0.25,
+                "wins_vs_tool_file_k": 3,
+                "losses_vs_tool_file_k": 1,
+                "wins_vs_anchor_window_k": 3,
+                "losses_vs_anchor_window_k": 1,
+                "repo_lift_vs_b_match": {"median": 0.25},
+                "min_tool_file_k_selected_from_file_fraction": 0.5,
+                "fraction_tool_file_k_budget_matched": 1.0,
+                "fraction_anchor_window_k_budget_matched": 1.0,
+                "bootstrap_idlekv_minus_b_match": {"low": 0.05},
+                "bootstrap_idlekv_minus_random_k": {"low": 0.02},
+                "bootstrap_idlekv_minus_oldest_k": {"low": 0.03},
+                "bootstrap_idlekv_minus_stale_q_k": {"low": 0.04},
+                "bootstrap_idlekv_minus_wrong_q_k": {"low": 0.04},
+                "bootstrap_idlekv_minus_tool_file_k": {"low": 0.01},
+            },
+        },
+        "artifact_checks": {
+            "all_manifest_audits_passed": True,
+            "has_duplicate_example_rows_by_k": False,
+            "wrong_event_donor_metadata_complete": False,
+        },
+    }
+
+    result = repair_gate(
+        audit,
+        primary_k=192,
+        adjacent_k=96,
+        min_primary_lift=0.10,
+        require_positive_ci=True,
+        require_sensitivity=False,
+        min_sensitivity_examples=8,
+        toolfile_margin_rows=1,
+        min_toolfile_file_fraction=0.10,
+        anchor_window_margin_rows=0,
+    )
+
+    assert not result["passed"]
+    assert not result["gate_results"]["wrong_event_donor_metadata_ok"]
 
 
 def test_repair_audit_cli_returns_nonzero_when_gate_fails(tmp_path) -> None:
@@ -416,6 +474,7 @@ def test_repair_gate_fails_when_required_ci_is_missing() -> None:
         "artifact_checks": {
             "all_manifest_audits_passed": True,
             "has_duplicate_example_rows_by_k": False,
+            "wrong_event_donor_metadata_complete": True,
         },
     }
 

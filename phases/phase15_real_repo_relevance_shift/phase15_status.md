@@ -1,6 +1,6 @@
 # Phase 15 Status
 
-Last updated: 2026-05-04 20:47 UTC.
+Last updated: 2026-05-04 21:10 UTC.
 
 ## Current State
 
@@ -45,9 +45,10 @@ label-assisted locality reference is stronger:
 - All `96` result rows have `phase15_manifest_audit.passed=true`, and each K
   slice has zero duplicate example rows.
 
-Decision: **appendix evidence only**, not a main-paper validation figure.
-The paper now gives one quantitative main-text pointer and reports the full
-diagnostic in Appendix Figure `fig:app-real-repo-diagnostic`.
+Decision: **preliminary main-text evidence plus appendix details**, not a
+headline validation figure or main selection claim. The paper now gives a
+short Results paragraph and reports the full diagnostic in Appendix Figure
+`fig:app-real-repo-diagnostic`.
 
 ## Expert Audit Summary
 
@@ -257,8 +258,8 @@ Critical flaws found and resolved into the plan:
   `phase15_protocol_v13_callsite_q1redacted_repair_anchor.json`. It uses
   `K={96,192}` and includes all controls, including `ToolFile-K` and
   `AnchorWindow-K`.
-- Focused Phase 15/Phase 6 tests after the repair-control changes:
-  `69 passed`.
+- Focused Phase 15/Phase 6 tests after the repair-control and donor-metadata
+  changes: `110 passed, 16 warnings`.
 - Ran the v13 repair dry-runs:
   - `limit=5`, `K=192`, all controls prepared successfully.
   - Full manifest, `K={96,192}`, all controls prepared successfully.
@@ -290,19 +291,23 @@ Critical flaws found and resolved into the plan:
 - Tightened the repair audit after static review:
   - static manifest audit must pass for every used result row;
   - duplicate `example_id` rows within a K slice are rejected by the gate;
+  - WrongEvent donor metadata is required when `WrongEvent-K` is present;
   - contamination-filtered sensitivity slices are explicit gate inputs;
   - ToolFile selection requires a minimum file-row fraction, and the paper
     names it as file-name-assisted with oldest-row backfill;
-  - future WrongEvent artifacts serialize donor provenance.
-- Added appendix figure generation for the real-repository diagnostic and
-  rebuilt `paper/main.pdf`.
+  - the legacy artifact was CPU-backfilled to
+    `phase15_repair_v13_whole_k96_192_anchor_with_donors.json` without
+    changing scores.
+- Added appendix figure generation and a cautious main Results paragraph for
+  the real-repository diagnostic, then rebuilt `paper/main.pdf`.
 
 ## Immediate Next Tasks
 
 1. Do not run more RepoDelta-Edge GPU experiments for this submission. v13 was
    the final bounded attempt and is now classified.
-2. Keep Phase 15 appendix-only unless the paper strategy changes explicitly.
-3. If editing the appendix figure or prose, preserve the caveats: not
+2. Keep Phase 15 as preliminary main-text evidence plus appendix details unless
+   the paper strategy changes explicitly.
+3. If editing the Results paragraph, appendix figure, or prose, preserve the caveats: not
    SWE-bench performance, not end-to-end coding validation, AnchorWindow is
    label-assisted, and ToolFile is file-name-assisted with oldest-row backfill.
 4. Maintain the main evidence stack as MQ-NIAH frontier, specificity,
@@ -405,19 +410,19 @@ tmux new-session -d -s phase15_repair_v13_full \
     2>&1 | tee phases/phase15_real_repo_relevance_shift/results/swebench_dev/phase15_repair_v13_whole_k96_192_anchor.log"
 ```
 
-Audit the repair artifact immediately after completion:
+Audit the provenance-complete repair artifact:
 
 ```bash
 .venv/bin/python -m phases.phase15_real_repo_relevance_shift.scripts.audit_phase15_repair_artifact \
-  phases/phase15_real_repo_relevance_shift/results/swebench_dev/phase15_repair_v13_whole_k96_192_anchor.json \
+  phases/phase15_real_repo_relevance_shift/results/swebench_dev/phase15_repair_v13_whole_k96_192_anchor_with_donors.json \
   --bootstrap-draws 2000 --gate --primary-k 192 --adjacent-k 96 \
   --min-primary-lift 0.10
 ```
 
 ## Promotion Rule
 
-Phase 15 enters the main paper only if a locked RepoDelta-Edge run is clean under
-the written gate in `phase15_plan.md`. If Edge fails but EventLoc passes, use it
-only as appendix/cautious corroboration unless the result is unexpectedly strong
-and the limitations are explicit. A failed or messy real-repository result stays
-out of the paper.
+Phase 15 gets a headline main-paper claim only if a locked RepoDelta-Edge run is
+clean under the written gate in `phase15_plan.md`. The v13 run does not clear
+that standard because AnchorWindow-K is stronger, but it is strong enough
+against deployable controls to support a cautious preliminary Results paragraph.
+A failed or messy real-repository result would stay out of the paper.

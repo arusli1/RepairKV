@@ -23,7 +23,7 @@ dynamic between-turn cache repair.
 | P12 | Done | Sink-plus-recent policy-breadth `n=24` follow-up passed the gate and is integrated as a main figure with SnapKV and accumulated-attention rows. |
 | P13 | Done for current paper | Iterative gates, live-branch audit script, and paired uncertainty checks are implemented. The locked `n=24`, `K=80` five-turn run passed the main gate and is integrated as a main diagnostic with stale-query caveats. |
 | P14 | Done for current paper | AdaptFM/test-time-adaptation framing, controlled proxy-scorer validation, Llama portability cleanup, and critical-flaw closure are integrated or promotion-gated. |
-| P15 | Appendix diagnostic | The controlled real-repository relevance-shift diagnostic over pinned SWE-bench-pool repositories is complete for this pass: strong against deployable/content-agnostic controls, but appendix-only because the label-assisted AnchorWindow reference remains stronger. |
+| P15 | Preliminary main-text diagnostic | The controlled real-repository relevance-shift diagnostic over pinned SWE-bench-pool repositories is complete for this pass: strong against deployable/content-agnostic controls, included as a cautious Results paragraph plus appendix figure, but not a headline selection claim because the label-assisted AnchorWindow reference remains stronger. |
 
 ## Paper State
 
@@ -47,13 +47,14 @@ dynamic between-turn cache repair.
 
 The main paper currently uses a compact one-column matched-budget raw-score
 frontier for 2Q/4Q/6Q/8Q, a specificity-control figure, a locked five-turn
-relevance-shift figure, and a first-stage policy-breadth figure covering
-SnapKV, accumulated-attention, and sink-plus-recent rows. The 2Q and 8Q curves
-both come from full K-grid runs, not endpoint-only breadth evidence. The
-appendix contains graph-first robustness views for the real-repository
-diagnostic, query-count breadth, the operating-regime heatmap, selection
-diagnostics, partition endpoints, scorer latency, and the plotted Llama
-portability check that is summarized in main prose. The Qwen2.5-3B
+relevance-shift figure, a first-stage policy-breadth figure covering SnapKV,
+accumulated-attention, and sink-plus-recent rows, and a cautious preliminary
+real-repository diagnostic paragraph. The 2Q and 8Q curves both come from full
+K-grid runs, not endpoint-only breadth evidence. The appendix contains
+graph-first robustness views for the real-repository diagnostic, query-count
+breadth, the operating-regime heatmap, selection diagnostics, partition
+endpoints, scorer latency, and the plotted Llama portability check that is
+summarized in main prose. The Qwen2.5-3B
 same-family transfer result remains fallback appendix evidence rather than
 the preferred paper-facing transfer check.
 
@@ -85,7 +86,9 @@ real-repository diagnostic: at `K=192`, event-only IdleKV improved exact
 identifier accuracy from `0.188` for matched no-repair to `0.729` and beat
 random, oldest, stale-cue, wrong-event, and ToolFile controls with positive
 paired intervals. The label-assisted AnchorWindow reference reached `0.896`,
-so the result is appendix evidence rather than a main selection claim.
+so the result is preliminary external-validity evidence rather than a main
+selection claim. It is now visible in Results prose because AdaptFM reviewers
+are not required to read appendices.
 
 ## Validation
 
@@ -96,10 +99,11 @@ From the repo root:
 ```
 
 Most recent focused Phase 15/Phase 6 result:
-`69 passed, 16 warnings` on 2026-05-04 after the event-only real-repository
+`110 passed, 16 warnings` on 2026-05-04 after the event-only real-repository
 runner, ToolFile/AnchorWindow controls, stricter repair-artifact audit,
-repo-level lift summaries, manifest-audit gates, and appendix figure generation
-were added. Re-run the full repo-wide suite before a release snapshot.
+repo-level lift summaries, manifest-audit gates, wrong-event donor provenance,
+and appendix figure generation were added. Re-run the full repo-wide suite
+before a release snapshot.
 
 Most recent paper rebuild:
 `paper/scripts/render_paper_figures.py` and

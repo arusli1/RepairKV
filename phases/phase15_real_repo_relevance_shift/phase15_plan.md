@@ -248,8 +248,9 @@ Strongly recommended if runtime permits:
   reference, not a deployable runtime baseline. It is mandatory for diagnosing
   whether the result is explained by source-local neighborhood restoration.
   Losing to it does not erase a deployable-control win, but it normally makes
-  the diagnostic appendix-only; the paper must then frame the remaining gap as
-  headroom relative to a label-assisted locality reference.
+  the diagnostic preliminary rather than headline evidence; the paper must then
+  frame the remaining gap as headroom relative to a label-assisted locality
+  reference.
 - `LexicalAnchor-K`: optional before-main control that restores rows near
   literal non-answer identifiers from the anchor/redacted statement. This tests
   whether a cheap lexical/anchor heuristic explains exact identifier recovery.
@@ -347,9 +348,9 @@ Main-paper promotion requires a locked run satisfying all of:
   `AnchorWindow-K` is reported separately as a label-assisted locality
   reference, not as a deployable baseline. If IdleKV matches or beats it,
   the result supports a stronger main-paper selection claim; if IdleKV beats
-  deployable controls but loses to AnchorWindow, keep the result appendix-only
-  and frame the remaining gap as headroom relative to a label-assisted locality
-  reference.
+  deployable controls but loses to AnchorWindow, allow only a cautious
+  preliminary main paragraph plus appendix details, and frame the remaining gap
+  as headroom relative to a label-assisted locality reference.
 - Repo-level median lift is positive; no single repo dominates the result.
 - Zero locked-manifest leakage/audit failures.
 - Full-cache misses are not dominated by formatting/truncation.

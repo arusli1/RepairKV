@@ -254,14 +254,15 @@ Use paper-facing terminology, not internal repo terminology.
   restores evicted rows nearest the annotated source/event span. It is not a
   deployable runtime baseline. Use it to diagnose whether a result is explained
   by source-local restoration. Losing to it does not erase a
-  deployable-control win, but it normally makes the diagnostic appendix-only;
-  frame the remaining gap as headroom relative to a label-assisted locality
-  reference. If shown, visually separate it from deployable controls and label
-  it "label-assisted" in the caption or table note.
-- Current Phase 15 placement: appendix-only. The v13 whole-manifest run is
-  positive against matched no-repair, content-agnostic restores, stale/wrong
-  event cues, and ToolFile-K, and it survives cue/answer-retention sensitivity
-  checks. It does not become a main-paper selection claim because
+  deployable-control win, but it blocks a headline selection claim; frame the
+  remaining gap as headroom relative to a label-assisted locality reference.
+  If shown, visually separate it from deployable controls and label it
+  "label-assisted" in the caption or table note.
+- Current Phase 15 placement: cautious main Results paragraph plus appendix
+  figure. The v13 whole-manifest run is positive against matched no-repair,
+  content-agnostic restores, stale/wrong event cues, and ToolFile-K, and it
+  survives cue/answer-retention sensitivity checks. It is preliminary
+  external-validity evidence, not a main-paper selection claim, because
   AnchorWindow-K remains stronger.
 - "H2O-inspired accumulated-attention retention": use this wording for the
   current accumulated-attention policy branch unless the implementation exactly

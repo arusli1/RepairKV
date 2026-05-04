@@ -50,12 +50,13 @@ can directly attend to.
   sensitivity, and runtime-capacity probes.
 - Breadth checks: same-protocol Llama-3.1-8B portability probes,
   protocol-matched retention-rule variants, and active selector variants.
-- Appendix external-validity check: a controlled real-repository
+- Preliminary external-validity check: a controlled real-repository
   relevance-shift diagnostic over pinned third-party repositories drawn from
   the SWE-bench repository pool. It is not a SWE-bench issue-resolution
   benchmark. The finished v13 run is strong against deployable/content-agnostic
-  controls but remains appendix evidence because a label-assisted locality
-  reference is stronger.
+  controls and is summarized cautiously in the paper's Results section, with
+  full details in the appendix because a label-assisted locality reference is
+  stronger.
 
 ## Paper
 

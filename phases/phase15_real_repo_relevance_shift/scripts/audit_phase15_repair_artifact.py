@@ -312,6 +312,9 @@ def repair_gate(
         "no_duplicate_example_rows_by_k": not bool(
             audit.get("artifact_checks", {}).get("has_duplicate_example_rows_by_k", True)
         ),
+        "wrong_event_donor_metadata_ok": bool(
+            audit.get("artifact_checks", {}).get("wrong_event_donor_metadata_complete", False)
+        ),
         "primary_lift_ok": float(primary.get("mean_idlekv_minus_b_match", 0.0)) >= float(min_primary_lift),
         "adjacent_nonnegative_ok": float(adjacent.get("mean_idlekv_minus_b_match", 0.0)) >= 0.0,
         "required_ci_keys_present": ci_keys_present,

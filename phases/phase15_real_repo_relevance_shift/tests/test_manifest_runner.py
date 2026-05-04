@@ -12,6 +12,7 @@ from phases.phase15_real_repo_relevance_shift.scripts.run_phase15_manifest impor
     summarize_rows,
     validate_wrong_event_donors,
 )
+from phases.phase15_real_repo_relevance_shift.scripts import backfill_wrong_event_metadata
 
 
 def test_phase15_condition_mapping_includes_mandatory_controls() -> None:
@@ -78,6 +79,35 @@ def test_wrong_event_preflight_accepts_repo_diverse_rows() -> None:
     ]
 
     validate_wrong_event_donors(rows)
+
+
+def test_wrong_event_metadata_backfill_adds_donor_provenance(monkeypatch) -> None:
+    rows = [
+        _row("a", "django", "event-1", "target"),
+        _row("b", "django", "event-2", "other"),
+        _row("c", "pytest", "event-3", "third"),
+    ]
+    monkeypatch.setattr(backfill_wrong_event_metadata, "stable_manifest_hash", lambda _rows: "manifest-hash")
+
+    payload = {
+        "manifest_hash": "manifest-hash",
+        "rows": [
+            {"k": 96, "example_id": "a"},
+            {"k": 192, "example_id": "a"},
+        ],
+    }
+
+    enriched = backfill_wrong_event_metadata.backfill_wrong_event_metadata(
+        manifest_rows=rows,
+        artifact_payload=payload,
+    )
+
+    for row in enriched["rows"]:
+        assert row["wrong_event_donor_example_id"] == "c"
+        assert row["wrong_event_donor_repo_id"] == "pytest"
+        assert row["wrong_event_donor_answer"] == "third"
+        assert "wrong_event_donor_tool_event_sha256" in row
+    assert enriched["wrong_event_donor_metadata_backfilled"]
 
 
 def test_strict_rescore_rejects_substring_and_case_mismatch() -> None:
