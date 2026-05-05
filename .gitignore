@@ -31,14 +31,9 @@ phases/*/results/
 /*.synctex.gz
 paper/aux/
 paper/**/aux/
-paper/initial_draft/
 paper/*.aux
 paper/*.fdb_latexmk
 paper/*.fls
 paper/*.log
 paper/*.out
-paper/*.pdf
 paper/*.synctex.gz
-paper/figures/*.pdf
-paper/figures/*.png
-paper/figures/*.svg
