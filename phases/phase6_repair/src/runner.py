@@ -80,7 +80,7 @@ ALLOWED_CONDITIONS = (
 ALLOWED_QUERY_SCORING_MODES = ("proxy", "exact_q")
 ALLOWED_ORACLE_MODES = ("burst_hindsight", "gold_spans")
 ALLOWED_WRONG_QUERY_MODES = ("phantom_key", "donor_q2")
-ALLOWED_INITIAL_COMPRESSORS = ("snapkv", "streaming_llm", "h2o")
+ALLOWED_INITIAL_COMPRESSORS = ("snapkv", "streaming_llm", "h2o", "scissorhands")
 DEFAULT_WRONG_QUERY_DONOR_OFFSET = 100_000
 Q2_SCORE_CONDITIONS = frozenset(
     (

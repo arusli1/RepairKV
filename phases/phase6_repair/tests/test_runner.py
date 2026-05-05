@@ -146,6 +146,13 @@ class Phase6RunnerTests(unittest.TestCase):
         )
         self.assertEqual(h2o.initial_compressor, "h2o")
 
+        scissorhands = build_config(
+            stage="smoke",
+            task="clean_suite",
+            initial_compressor="scissorhands",
+        )
+        self.assertEqual(scissorhands.initial_compressor, "scissorhands")
+
     def test_build_config_rejects_invalid_values(self) -> None:
         with self.assertRaises(ValueError):
             build_config(stage="smoke", task="mq_niah_4q_split_14_to_23", k_values=[0])
@@ -311,6 +318,17 @@ class Phase6RunnerTests(unittest.TestCase):
             initial_compressor="h2o",
         )
         self.assertIn("clean_suite_b768_r64_ih2o_n3_k12_c", str(_artifact_path(h2o_config)))
+
+        scissorhands_config = build_config(
+            stage="smoke",
+            task="clean_suite",
+            num_samples=3,
+            k_values=[12],
+            base_context_budget=768,
+            recency_window=64,
+            initial_compressor="scissorhands",
+        )
+        self.assertIn("clean_suite_b768_r64_iscissorhands_n3_k12_c", str(_artifact_path(scissorhands_config)))
 
     def test_condition_label_strips_symbols(self) -> None:
         label = _condition_label(["A", "B_match", "IdleKV", "IdleKV-Coverage", "WrongQ-K", "Refresh-K", "Oracle-K"])

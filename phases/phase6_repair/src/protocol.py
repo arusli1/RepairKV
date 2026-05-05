@@ -33,6 +33,8 @@ def _apply_rotary_pos_emb_for_model(
     model_type = str(getattr(getattr(model, "config", None), "model_type", "")).lower()
     if model_type == "llama":
         from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
+    elif model_type == "mistral":
+        from transformers.models.mistral.modeling_mistral import apply_rotary_pos_emb
     else:
         from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb
 
@@ -525,6 +527,28 @@ def build_turn_n_keep_plan(
             int(position): float(importance[position].item())
             for position in range(int(context_len))
         }
+    elif compressor == "scissorhands":
+        if int(q1_answer_ids.numel()) <= 0:
+            raise ValueError("Scissorhands-style compression requires non-empty recent observation ids.")
+        importance = _score_scissorhands_tokens(
+            post_q1_cache,
+            obs_window_size=int(q1_answer_ids.numel()),
+        )
+        sink_count = min(int(context_len), int(sink_size))
+        recency_count = min(int(recency_window), max(0, int(context_len) - sink_count))
+        recency_start = max(sink_count, int(context_len) - recency_count)
+        mandatory_context_positions = tuple(sorted(set(range(sink_count)) | set(range(recency_start, int(context_len)))))
+        mandatory_set = set(mandatory_context_positions)
+        ranked_candidate_positions = tuple(
+            sorted(
+                (position for position in range(int(context_len)) if position not in mandatory_set),
+                key=lambda position: (-float(importance[position].item()), position),
+            )
+        )
+        importance_scores = {
+            int(position): float(importance[position].item())
+            for position in range(int(context_len))
+        }
     elif compressor == "streaming_llm":
         sink_count = min(int(context_len), int(sink_size))
         mandatory_context_positions = tuple(range(sink_count))
@@ -565,6 +589,38 @@ def _score_h2o_tokens(
         scores = torch.matmul(obs_rows, key_float.transpose(-2, -1)) / math.sqrt(key_float.shape[-1])
         scores = torch.softmax(scores, dim=-1)
         layer_scores.append(scores.sum(dim=2).mean(dim=(0, 1)))
+
+    return torch.stack(layer_scores, dim=0).mean(dim=0)
+
+
+def _score_scissorhands_tokens(
+    full_cache: PositionTrackedCache,
+    *,
+    obs_window_size: int,
+) -> torch.Tensor:
+    """Score tokens by Scissorhands-style persistence over the latest rows.
+
+    The original Scissorhands compressor increments a drop counter for tokens
+    that receive below-average attention within a history window, while recent
+    tokens are protected separately by the caller's recency reserve. This
+    one-shot Phase 6 variant ranks tokens by the fraction of layer/head/history
+    observations for which their attention is at least the uniform threshold.
+    """
+    cache = to_tuple_cache(full_cache)
+    seq_len = len(full_cache)
+    obs_len = min(max(1, int(obs_window_size)), seq_len)
+    obs_start = seq_len - obs_len
+    layer_scores: list[torch.Tensor] = []
+
+    for key, _ in cache:
+        key_float = key.detach().to(dtype=torch.float32)
+        obs_rows = key_float[:, :, obs_start:, :]
+        scores = torch.matmul(obs_rows, key_float.transpose(-2, -1)) / math.sqrt(key_float.shape[-1])
+        scores = torch.softmax(scores, dim=-1)
+        threshold = 1.0 / max(1, int(seq_len))
+        pivotal_fraction = (scores >= threshold).to(dtype=torch.float32).mean(dim=(0, 1, 2))
+        mean_attention = scores.mean(dim=(0, 1, 2))
+        layer_scores.append(pivotal_fraction + 1e-3 * mean_attention)
 
     return torch.stack(layer_scores, dim=0).mean(dim=0)
 

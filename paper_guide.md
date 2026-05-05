@@ -1,13 +1,14 @@
 # IdleKV Paper Guide
 
-Last verified: 2026-05-03.
+Last verified: 2026-05-04.
 
 Read this file before editing `paper/main.tex`. Treat it as the paper
 style contract unless the venue instructions change.
 
 ## Source Of Truth
 
-- AdaptFM workshop site: https://adaptfm.gitlab.io/call-for-papers.html
+- AdaptFM workshop site: https://adaptfm.gitlab.io/
+- AdaptFM call for papers: https://adaptfm.gitlab.io/call-for-papers.html
 - ICML 2026 template/example paper:
   https://media.icml.cc/Conferences/ICML2026/Styles/example_paper.pdf
 - Adjacent KV-cache/effective-inference style references:
@@ -21,6 +22,12 @@ style contract unless the venue instructions change.
     https://arxiv.org/abs/2309.17453
   - QUEST, ICML 2024:
     https://arxiv.org/abs/2406.10774
+  - SCBench, ICLR 2025:
+    https://proceedings.iclr.cc/paper_files/paper/2025/hash/a540b17fb2295c736d5afd6c507acf66-Abstract-Conference.html
+  - MInference, ICML 2024 ES-FoMo workshop:
+    https://openreview.net/forum?id=C5Nh2UFJ9S
+  - AdaInf, ICML 2024 ES-FoMo workshop:
+    https://openreview.net/forum?id=A942VRmfhQ
   - PyramidKV:
     https://arxiv.org/abs/2406.02069
   - KIVI, ICML 2024:
@@ -95,6 +102,52 @@ style contract unless the venue instructions change.
   learning. Those are adjacent meanings of "adaptation," but not this paper's
   contribution.
 
+## Final AdaptFM Positioning Audit
+
+The current AdaptFM call explicitly welcomes dynamic KV cache compression,
+runtime systems for flexible computation, benchmarking/profiling across
+resource budgets, and quality-resource tradeoff analysis. The paper is in
+scope if it is framed as resource-adaptive inference-time state management,
+not as a generic agent benchmark or coding-agent benchmark.
+
+Final framing:
+
+- Primary category: idle-window active-state adaptation for tiered KV caches.
+- Main claim: after a future-turn signal arrives, a runtime can spend available
+  pause time to revise which historical KV rows are active under the same
+  resumed active-cache budget.
+- Evidence standard: controlled diagnostics can support a workshop technical
+  paper when the paper clearly states the matched-budget controls, scope, and
+  remaining systems work.
+- Phase 15/real-repository evidence should be mentioned as preliminary
+  external-validity evidence only. It helps answer "does this failure mode exist
+  outside MQ-NIAH?" but it is not SWE-bench issue resolution, not a coding-agent
+  evaluation, and not a deployability claim because the label-assisted
+  locality reference remains stronger.
+
+Adjacent paper lessons from the May 4 audit:
+
+- SCBench is the closest framing analogue: it makes the KV-cache lifecycle a
+  first-order benchmark object and uses Figure 1 to define missing stages. For
+  IdleKV, the missing stage is post-compression, pre-resume promotion during an
+  idle interval.
+- QUEST is the closest algorithmic analogue: token/page criticality is query
+  dependent. IdleKV should state the additional temporal point: future-turn
+  criticality may be unavailable when the first compression decision is made.
+- ES-FoMo/ICML workshop papers such as AdaInf and MInference show that a
+  workshop submission can be a scoped technical paper with preliminary but
+  well-measured evidence, provided the abstract names the resource problem, the
+  adaptation mechanism, and the limits of the evidence.
+- The current figure package is already dense enough for a workshop paper:
+  eight main figures plus a figure-forward appendix. Do not add another main
+  figure unless it replaces prose or a weaker figure. The real-repository
+  diagnostic can stay in the main paper because it answers the main
+  external-validity objection; keep it compact as a single endpoint chart or
+  small table, with the full audit in the appendix.
+- The appendix should read as an audit trail, not a gallery. Keep the roadmap,
+  combine adjacent low-density plots, and avoid new tables unless exact audit
+  values cannot be read from the plots or committed artifacts.
+
 ## Overall Thesis And Experimental Thesis
 
 The paper is not "better KV compression in general."
@@ -139,7 +192,7 @@ Keep broader claims framed as implications or research agenda:
 
 ICML guidance: one paragraph, self-contained, roughly 4-6 sentences.
 
-Target abstract structure, usually 5 sentences:
+Target abstract structure, usually 5 sentences and roughly 150--200 words:
 
 1. Problem and motivation: why idle gaps and KV compression create a new issue.
 2. Gap: existing compression/serving/query-aware methods do not repair an
@@ -148,10 +201,28 @@ Target abstract structure, usually 5 sentences:
 3. Method: IdleKV buffers evicted KV, scores it after the controlled `Q2`
    signal is known, restores a budget `K`, and resumes under a matched
    active-cache budget.
-4. Main result: the strongest compact numbers from calibrated
-   4Q/6Q/8Q panels.
+4. Main result: one compact headline result from calibrated 4Q/6Q/8Q panels,
+   optionally followed by a short phrase covering specificity or repeated
+   relevance shifts.
 5. Scope and implication: controlled diagnostics, not end-to-end agent proof;
-   supports dynamic cache maintenance/resource-adaptive inference.
+   supports dynamic cache maintenance/resource-adaptive inference for future
+   local, dedicated, and resource-constrained long-context agent runtimes.
+
+Recent abstract audit:
+
+- Strong ICML/KV-cache abstracts usually orient quickly: system pressure,
+  missing dynamic decision, method object, one compact result, and implication.
+  They do not list every promoted diagnostic in the abstract.
+- Workshop abstracts such as AdaInf can be more preliminary, but still avoid
+  artifact-level detail; they say "preliminary results" and then leave most
+  breadth claims to the body.
+- Use at most one dense numeric sentence. Multi-turn and real-repository
+  diagnostics can appear as short phrases unless their exact numbers are the
+  paper's main headline.
+- Optimistic framing is appropriate when it is tied to the resource setting:
+  local/dedicated inference, resource-constrained deployment, longer context
+  windows, and agent idle gaps. Do not imply edge-device measurements or
+  production deployment unless those are actually evaluated.
 
 Avoid:
 
@@ -439,10 +510,16 @@ Target main visual package:
    revisit turns marked. Keep SpanRef-K, CurrentQOnly-K, and StaleQOnly-K as
    appendix audit or caption/prose evidence unless adding them remains clearly
    readable.
-6. Compact algorithm box or pseudocode only if it can replace prose and add
-   reproducible detail beyond the method schematic.
-7. Optional mechanism or latency plot only if it replaces text/table space and
-   adds a distinct claim.
+6. Mechanism plot when it directly supports the selection claim: restored-row
+   overlap with future-relevant spans should rise for IdleKV while matched,
+   random, and oldest controls remain near baseline.
+7. Compact real-repository diagnostic if it answers the external-validity
+   objection in one column. For a small number of endpoint values, prefer a
+   single clean endpoint chart or a small table; put row-exclusion sensitivity
+   in prose or appendix unless it is visually dense.
+8. Runtime/capacity plot if framed as an envelope rather than a production
+   latency claim. Keep scorer and generation exclusions explicit in caption or
+   prose.
 
 Tables should mostly move to appendix unless they summarize a small endpoint
 that cannot be read cleanly from a plot.
@@ -525,6 +602,9 @@ IdleKV-specific figure rules:
 - For contrast plots: use direct y-axis labels and keep legends outside the
   data region. Show uncertainty intervals for promoted runs; no main-paper
   `n=1` smoke plots.
+- For small endpoint diagnostics with only a few methods and budgets, choose
+  between a small table and a single endpoint chart. Avoid hybrid table-plus-plot
+  panels unless both sides are dense.
 - For frontiers: include only baselines that establish the claim. Random/oldest
   are useful anti-generic-reinsertion controls; avoid adding every condition to
   the main plot if the legend becomes the visual center.
@@ -698,9 +778,10 @@ IdleKV appendix rules:
 - Use ordinary float placement (`[tbp]` or `[t]`) by default. Use pinned `[H]`
   only for short appendix figures that would otherwise drift away from their
   local explanation.
-- Include appendix plots at `\columnwidth` in the one-column appendix. Avoid
-  `figure*`/`table*` there because they add no width and can create extra
-  whitespace.
+- Include large appendix plots at `\columnwidth` in the one-column appendix.
+  Pair low-density supplementary plots in minipages when they answer adjacent
+  audit questions and remain readable. Avoid `figure*`/`table*` there because
+  they add no width and can create extra whitespace.
 - Avoid ending on a mostly blank page caused by a full-width float when a
   one-column figure, shorter caption, or an additional high-signal appendix
   plot can make the page denser without spacing hacks.
@@ -818,6 +899,14 @@ Figure and diagram rules:
   active-cache budget. Avoid
   overclaiming a distributed serving system unless the paper actually evaluates
   one.
+- A polished hardware-aware replacement for Figure 1 is desirable if it can be
+  hand-designed cleanly. Use `paper/figure1_system_diagram_spec.md` as the
+  handoff spec. Replace the existing Figure 1 rather than adding a seventh main
+  figure: the figure should show agent timeline, active GPU KV, host-memory warm
+  tier, next-turn signal, score/select, and promote-$K$ rows under a matched
+  resumed active budget.
+- Do not submit a rough text-box placeholder. If the handmade figure is not
+  ready, keep the current TikZ pipeline because it is correct and compact.
 - Heatmaps should be generated as vector assets with a real colorbar,
   square-ish cells, clear axis ticks, and no fake-data warnings inside the
   plotting area. If a panel is preliminary, say so in the caption only and do

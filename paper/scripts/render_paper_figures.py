@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, Rectangle
 
 
 PAPER_DIR = Path(__file__).resolve().parents[1]
@@ -198,7 +198,7 @@ def _plot_score_or_overlap(
 
 
 def render_selection_diagnostic() -> None:
-    """Dense real-data diagnostic: quality and recovered-span overlap."""
+    """Dense real-data diagnostic: recovered-span overlap."""
 
     score_4q = load_numeric_csv(FIGURE_DIR / "phase7_clean_suite_b16384_exact_overall.csv")
     score_6q = load_numeric_csv(FIGURE_DIR / "phase7_mq_niah_6q_clean_suite_b18432_exact_overall.csv")
@@ -207,36 +207,32 @@ def render_selection_diagnostic() -> None:
     merged_4q = pd.merge(score_4q, overlap_4q, on="k", how="inner")
     merged_6q = pd.merge(score_6q, overlap_6q, on="k", how="inner")
 
-    fig, axes = plt.subplots(
+    fig, axes_raw = plt.subplots(
+        1,
         2,
-        2,
-        figsize=(COLUMN_WIDTH_IN, 3.12),
+        figsize=(COLUMN_WIDTH_IN, 1.78),
         sharex=True,
+        sharey=True,
         constrained_layout=False,
     )
-    fig.subplots_adjust(left=0.115, right=0.995, top=0.86, bottom=0.105, wspace=0.25, hspace=0.18)
-    _plot_score_or_overlap(axes[0, 0], merged_4q, mode="score", panel_label="4Q", y_label="$Q_2$ score")
-    _plot_score_or_overlap(axes[1, 0], merged_6q, mode="score", panel_label="6Q", y_label="$Q_2$ score")
+    axes = np.atleast_1d(axes_raw)
+    fig.subplots_adjust(left=0.14, right=0.995, top=0.81, bottom=0.27, wspace=0.20)
     _plot_score_or_overlap(
-        axes[0, 1],
+        axes[0],
         merged_4q,
         mode="overlap",
         panel_label="4Q",
-        y_label="",
+        y_label="span coverage",
     )
     _plot_score_or_overlap(
-        axes[1, 1],
+        axes[1],
         merged_6q,
         mode="overlap",
         panel_label="6Q",
         y_label="",
     )
-    axes[0, 0].set_title("Exact answer", pad=2.0)
-    axes[0, 1].set_title("Restored span coverage", pad=2.0)
-    for ax in axes[1, :]:
+    for ax in axes:
         ax.set_xlabel("restore budget $K$", labelpad=1.0)
-    for ax in axes[:, 1]:
-        ax.tick_params(labelleft=True)
 
     handles = [Line2D([0], [0], **_line_style(label)) for label in ["IdleKV", SPAN_REF_LABEL, "Matched", "Random-K", "Oldest-K"]]
     labels = ["IdleKV", SPAN_REF_LABEL, "Matched", "Random-K", "Oldest-K"]
@@ -245,11 +241,12 @@ def render_selection_diagnostic() -> None:
         labels,
         loc="upper center",
         bbox_to_anchor=(0.52, 0.998),
-        ncol=3,
+        ncol=5,
         frameon=False,
-        columnspacing=0.85,
-        handlelength=1.65,
-        handletextpad=0.35,
+        columnspacing=0.45,
+        handlelength=1.10,
+        handletextpad=0.28,
+        fontsize=5.55,
     )
     save_figure(fig, "repair_selection_diagnostic")
 
@@ -596,8 +593,8 @@ def render_specificity_panel() -> bool:
     condition_order = ["StaleQ-K", "WrongQ-K", "IdleKV", "Refresh-K"]
     labels = {
         "Matched": "Matched",
-        "StaleQ-K": "Stale query",
-        "WrongQ-K": "Donor query",
+        "StaleQ-K": "Stale",
+        "WrongQ-K": "Donor",
         "Refresh-K": "Refresh-buffered",
         "IdleKV": "IdleKV",
     }
@@ -625,38 +622,36 @@ def render_specificity_panel() -> bool:
     matched_row = row_by_condition.get("Matched")
     if matched_row is None or pd.isna(matched_row.mean_score):
         return False
-    y_positions = np.arange(len(condition_order))[::-1]
-    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH_IN, 1.42), constrained_layout=False)
-    fig.subplots_adjust(left=0.30, right=0.985, top=0.93, bottom=0.27)
+    x_positions = np.arange(len(condition_order))
+    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH_IN, 1.18), constrained_layout=False)
+    fig.subplots_adjust(left=0.13, right=0.985, top=0.92, bottom=0.29)
 
-    ax.axvspan(-0.025, 0.025, color="#EFEFEF", alpha=0.82, zorder=0)
-    ax.axhline(1.5, color=PALETTE["grid"], linewidth=0.35, alpha=0.7, zorder=1)
-    ax.axvline(0.0, color=PALETTE["matched"], linewidth=0.95, linestyle=(0, (1.0, 1.3)), zorder=2)
+    ax.axhspan(-0.025, 0.025, color="#EFEFEF", alpha=0.82, zorder=0)
+    ax.axhline(0.0, color=PALETTE["matched"], linewidth=0.95, linestyle=(0, (1.0, 1.3)), zorder=2)
 
-    for y, condition in zip(y_positions, condition_order, strict=True):
+    for x, condition in zip(x_positions, condition_order, strict=True):
         row = row_by_condition.get(condition)
         if row is None or pd.isna(row.mean_score):
             continue
         gain = float(row.mean_gain_vs_matched)
-        ax.hlines(
-            y,
-            min(0.0, gain),
-            max(0.0, gain),
+        alpha = 0.55 if condition in {"StaleQ-K", "WrongQ-K"} else 0.76
+        ax.bar(
+            x,
+            gain,
+            width=0.58,
             color=colors[condition],
-            linewidth=4.4,
-            alpha=0.22 if condition in {"StaleQ-K", "WrongQ-K"} else 0.30,
+            alpha=alpha,
+            edgecolor=colors[condition],
+            linewidth=0.45,
             zorder=2,
         )
         if not pd.isna(row.gain_ci95_low) and not pd.isna(row.gain_ci95_high):
             lo = float(row.gain_ci95_low)
             hi = float(row.gain_ci95_high)
             ax.errorbar(
+                x,
                 gain,
-                y,
-                xerr=[
-                    [max(gain - lo, 0.0)],
-                    [max(hi - gain, 0.0)],
-                ],
+                yerr=[[max(gain - lo, 0.0)], [max(hi - gain, 0.0)]],
                 fmt="none",
                 ecolor=colors[condition],
                 elinewidth=0.78,
@@ -665,39 +660,28 @@ def render_specificity_panel() -> bool:
                 alpha=0.80,
                 zorder=3,
             )
-        facecolor = "white" if condition == "Refresh-K" else colors[condition]
-        ax.scatter(
-            gain,
-            y,
-            s=20 if condition == "IdleKV" else 17,
-            marker=markers[condition],
-            facecolor=facecolor,
-            edgecolor=colors[condition],
-            linewidth=0.82 if condition == "Refresh-K" else 0.32,
-            zorder=4,
-        )
         if condition not in {"StaleQ-K", "WrongQ-K"}:
             ax.text(
-                gain + 0.025,
-                y,
+                x,
+                min(gain + 0.048, 0.86),
                 f"+{gain:.2f}",
-                ha="left",
-                va="center",
+                ha="center",
+                va="bottom",
                 fontsize=5.6,
                 color=colors[condition],
                 fontweight="bold" if condition == "IdleKV" else "normal",
                 clip_on=False,
             )
 
-    ax.set_xlim(-0.07, 0.86)
-    ax.set_xticks([0.0, 0.4, 0.8])
-    ax.set_ylim(-0.55, len(condition_order) - 0.45)
-    _format_axes(ax, x_label="score gain over matched no-repair", y_label=None)
-    ax.grid(axis="x", color=PALETTE["grid"], linewidth=0.42, alpha=0.8)
-    ax.grid(axis="y", visible=False)
-    ax.set_yticks(y_positions, [labels[value] for value in condition_order])
-    ax.tick_params(axis="y", labelsize=6.35, length=0, pad=1.6)
-    ax.tick_params(axis="x", pad=1.1)
+    ax.set_xlim(-0.48, len(condition_order) - 0.52)
+    ax.set_ylim(-0.06, 0.88)
+    ax.set_yticks([0.0, 0.4, 0.8])
+    ax.set_xticks(x_positions, [labels[value] for value in condition_order])
+    _format_axes(ax, x_label=None, y_label="gain")
+    ax.grid(axis="y", color=PALETTE["grid"], linewidth=0.42, alpha=0.8)
+    ax.grid(axis="x", visible=False)
+    ax.tick_params(axis="x", labelsize=6.35, pad=1.0)
+    ax.tick_params(axis="y", pad=1.0)
     save_figure(fig, "specificity_control_dotplot")
     return True
 
@@ -782,62 +766,34 @@ def render_query_count_breadth() -> bool:
         return False
 
     df = pd.DataFrame.from_records(records)
-    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH_IN, 1.55), constrained_layout=False)
-    fig.subplots_adjust(left=0.15, right=0.985, top=0.78, bottom=0.25)
-
-    styles = {
-        48: {"color": PALETTE["idlekv"], "marker": "o", "label": "$K=48$"},
-        96: {"color": PALETTE["proxy"], "marker": "s", "label": "$K=96$"},
+    query_counts = [2, 3, 4, 6, 8]
+    ks = [48, 96]
+    values_by_key = {
+        (int(row.query_count), int(row.k)): float(row.idlekv_gain)
+        for row in df.itertuples(index=False)
     }
-    for k, style in styles.items():
-        subset = df[df["k"] == k].sort_values("query_count")
-        if subset.empty:
-            continue
-        xs = subset["query_count"].to_numpy(dtype=float)
-        gains = subset["idlekv_gain"].to_numpy(dtype=float)
-        ax.plot(
-            xs,
-            gains,
-            color=style["color"],
-            linewidth=1.05,
-            alpha=0.86,
-            zorder=2,
-        )
-        ax.scatter(
-            xs,
-            gains,
-            color=style["color"],
-            marker=style["marker"],
-            label=str(style["label"]),
-            s=16,
-            linewidth=0.35,
-            edgecolor="white",
-            zorder=3,
-        )
-
-    ax.set_xlim(1.55, 8.45)
-    ax.set_ylim(-0.04, 1.04)
-    ax.set_xticks([2, 3, 4, 6, 8])
-    ax.set_yticks([0.0, 0.25, 0.5, 0.75, 1.0])
-    ax.set_xlabel("number of future-turn questions", labelpad=1.0)
-    ax.set_ylabel("score gain over matched", labelpad=1.0)
-    ax.grid(axis="y", color=PALETTE["grid"], linewidth=0.42, alpha=0.82)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.tick_params(pad=1.2)
-    handles, labels = ax.get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="upper center",
-        bbox_to_anchor=(0.52, 0.995),
-        ncol=2,
-        frameon=False,
-        handlelength=1.3,
-        handletextpad=0.35,
-        columnspacing=0.75,
-        borderaxespad=0.0,
+    values = np.array(
+        [[values_by_key.get((query_count, k), np.nan) for query_count in query_counts] for k in ks],
+        dtype=float,
     )
+    norm = Normalize(vmin=0.0, vmax=1.0)
+
+    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH_IN, 1.18), constrained_layout=False)
+    fig.subplots_adjust(left=0.13, right=0.99, top=0.97, bottom=0.27)
+    ax.imshow(np.clip(values, 0.0, 1.0), cmap=GAIN_CMAP, norm=norm, aspect="auto")
+    ax.set_xticks(range(len(query_counts)), [str(query_count) for query_count in query_counts])
+    ax.set_yticks(range(len(ks)), [str(k) for k in ks])
+    ax.set_xlabel("future-turn questions", labelpad=1.0)
+    ax.set_ylabel("restore $K$", labelpad=1.0)
+    ax.tick_params(length=0, pad=1.2)
+    ax.set_xticks(np.arange(-0.5, len(query_counts), 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, len(ks), 1), minor=True)
+    ax.grid(which="minor", color="white", linewidth=1.1)
+    ax.tick_params(which="minor", bottom=False, left=False)
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.55)
+        spine.set_color("#666666")
+    _annotate_heatmap_cells(ax, values, norm=norm)
     save_figure(fig, "query_count_breadth")
     return True
 
@@ -2549,15 +2505,11 @@ def render_policy_breadth_delta() -> bool:
     return True
 
 
-def render_real_repo_repair_diagnostic() -> bool:
-    """Render the Phase 15 real-repository diagnostic as appendix evidence."""
-
+def _load_real_repo_diagnostic() -> tuple[dict[tuple[str, int], float], list[tuple[str, dict[str, float]]]] | None:
     summary_path = FIGURE_DIR / "real_repo_repair_diagnostic_summary.csv"
     audit_path = PHASE15_DIR / "phase15_repair_v13_whole_k96_192_anchor_with_donors_audit.json"
     if not summary_path.exists() and not audit_path.exists():
-        for ext in ("pdf", "png"):
-            (FIGURE_DIR / f"real_repo_repair_diagnostic.{ext}").unlink(missing_ok=True)
-        return False
+        return None
 
     if summary_path.exists():
         summary = load_numeric_csv(summary_path)
@@ -2599,6 +2551,134 @@ def render_real_repo_repair_diagnostic() -> bool:
             ("No answer retained", audit["sensitivity"]["exclude_answer_retention"]["k_results"]["k192"]),
             ("Strict eligible", audit["sensitivity"]["strict_repair_eligible"]["k_results"]["k192"]),
         ]
+    return whole_values, sensitivity_rows
+
+
+def render_real_repo_main_diagnostic() -> bool:
+    """Render a compact Phase 15 diagnostic for the main paper."""
+
+    loaded = _load_real_repo_diagnostic()
+    if loaded is None:
+        for ext in ("pdf", "png"):
+            (FIGURE_DIR / f"real_repo_main_diagnostic.{ext}").unlink(missing_ok=True)
+        return False
+
+    whole_values, sensitivity_rows = loaded
+    control_labels = ["Random", "Oldest", "Stale cue", "Wrong event"]
+    control_values = {
+        k: max(
+            float(whole_values[(label, k)])
+            for label in control_labels
+            if (label, k) in whole_values
+        )
+        for k in (96, 192)
+    }
+    display_rows: list[tuple[str, str, dict[int, float], str]] = [
+        ("Matched", PALETTE["matched"], {96: whole_values[("Matched", 96)], 192: whole_values[("Matched", 192)]}, "D"),
+        ("Best control", PALETTE["random"], control_values, "o"),
+        ("ToolFile", PALETTE["refresh"], {96: whole_values[("ToolFile", 96)], 192: whole_values[("ToolFile", 192)]}, "o"),
+        ("IdleKV", PALETTE["idlekv"], {96: whole_values[("IdleKV", 96)], 192: whole_values[("IdleKV", 192)]}, "o"),
+    ]
+    if ("File-gated", 96) in whole_values and ("File-gated", 192) in whole_values:
+        display_rows.append(
+            ("File-gated", PALETTE["proxy"], {96: whole_values[("File-gated", 96)], 192: whole_values[("File-gated", 192)]}, "o")
+        )
+    if ("AnchorWindow*", 96) in whole_values and ("AnchorWindow*", 192) in whole_values:
+        display_rows.append(
+            ("AnchorWindow*", PALETTE["gold"], {96: whole_values[("AnchorWindow*", 96)], 192: whole_values[("AnchorWindow*", 192)]}, "s")
+        )
+
+    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH_IN, 1.62), constrained_layout=False)
+    fig.subplots_adjust(left=0.015, right=0.985, top=0.97, bottom=0.05)
+    ax.set_axis_off()
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+
+    matched_192 = float(whole_values[("Matched", 192)])
+    row_labels = {
+        "Best control": "Best ctrl.",
+        "AnchorWindow*": "AnchorWin*",
+    }
+    columns = {
+        "method": (0.015, 0.405),
+        "k96": (0.435, 0.585),
+        "k192": (0.610, 0.760),
+        "delta": (0.795, 0.985),
+    }
+    header_y = 0.900
+    ax.text(columns["method"][0], header_y, "condition", ha="left", va="center", fontsize=6.2, fontweight="bold", color=PALETTE["text"])
+    ax.text(np.mean(columns["k96"]), header_y, "$K=96$", ha="center", va="center", fontsize=6.2, fontweight="bold", color=PALETTE["text"])
+    ax.text(np.mean(columns["k192"]), header_y, "$K=192$", ha="center", va="center", fontsize=6.2, fontweight="bold", color=PALETTE["text"])
+    ax.text(np.mean(columns["delta"]), header_y, "$\\Delta$ vs matched", ha="center", va="center", fontsize=6.2, fontweight="bold", color=PALETTE["text"])
+    ax.hlines([0.838, 0.105], 0.0, 1.0, color=PALETTE["matched"], linewidth=[0.72, 0.55])
+
+    row_h = 0.112
+    start_y = 0.765
+    max_positive_delta = max(
+        float(values[192]) - matched_192
+        for _label, _color, values, _marker in display_rows
+    )
+    for idx, (label, color, values, _marker) in enumerate(display_rows):
+        y = start_y - idx * row_h
+        v96 = float(values[96])
+        v192 = float(values[192])
+        delta = v192 - matched_192
+        row_fill = "#F8F8F8" if idx % 2 == 0 else "#FFFFFF"
+        if label == "IdleKV":
+            row_fill = "#EAF4FB"
+        ax.add_patch(Rectangle((0.0, y - row_h * 0.43), 1.0, row_h * 0.86, facecolor=row_fill, edgecolor="none", zorder=0))
+
+        visual_label = row_labels.get(label, label)
+        fontweight = "bold" if label == "IdleKV" else "normal"
+        ax.text(columns["method"][0], y, visual_label, ha="left", va="center", fontsize=6.25, color=color, fontweight=fontweight)
+
+        for col_name, value in (("k96", v96), ("k192", v192)):
+            x0, x1 = columns[col_name]
+            width = (x1 - x0) * max(0.0, min(1.0, value))
+            ax.add_patch(
+                Rectangle(
+                    (x0, y - row_h * 0.30),
+                    width,
+                    row_h * 0.60,
+                    facecolor=color,
+                    edgecolor="none",
+                    alpha=0.12 if label != "IdleKV" else 0.18,
+                    zorder=1,
+                )
+            )
+            ax.text(np.mean([x0, x1]), y, f"{value:.2f}", ha="center", va="center", fontsize=6.45, color=PALETTE["text"], fontweight=fontweight)
+
+        x0, x1 = columns["delta"]
+        if delta >= 0:
+            width = (x1 - x0) * (delta / max_positive_delta if max_positive_delta > 0 else 0.0)
+            ax.add_patch(
+                Rectangle(
+                    (x0, y - row_h * 0.30),
+                    width,
+                    row_h * 0.60,
+                    facecolor=color,
+                    edgecolor="none",
+                    alpha=0.15 if label != "IdleKV" else 0.22,
+                    zorder=1,
+                )
+            )
+        ax.text(np.mean([x0, x1]), y, f"{delta:+.2f}", ha="center", va="center", fontsize=6.45, color=color if delta > 0.02 else PALETTE["text"], fontweight=fontweight)
+
+    for x in [columns["k96"][0] - 0.015, columns["k192"][0] - 0.015, columns["delta"][0] - 0.015]:
+        ax.vlines(x, 0.105, 0.838, color=PALETTE["grid"], linewidth=0.45, alpha=0.95)
+    save_figure(fig, "real_repo_main_diagnostic")
+    return True
+
+
+def render_real_repo_repair_diagnostic() -> bool:
+    """Render the Phase 15 real-repository diagnostic as appendix evidence."""
+
+    loaded = _load_real_repo_diagnostic()
+    if loaded is None:
+        for ext in ("pdf", "png"):
+            (FIGURE_DIR / f"real_repo_repair_diagnostic.{ext}").unlink(missing_ok=True)
+        return False
+    whole_values, sensitivity_rows = loaded
     condition_row_order = [
         ("Matched", PALETTE["matched"]),
         ("Random", PALETTE["random"]),
@@ -2773,6 +2853,7 @@ def generated_assets() -> Iterable[Path]:
         "h2o_compressor_breadth",
         "model_transfer_breadth",
         "policy_breadth_delta",
+        "real_repo_main_diagnostic",
         "real_repo_repair_diagnostic",
     ]:
         yield FIGURE_DIR / f"{stem}.pdf"
@@ -2796,6 +2877,7 @@ def main() -> None:
     render_h2o_compressor_breadth()
     render_model_transfer_breadth()
     render_policy_breadth_delta()
+    render_real_repo_main_diagnostic()
     render_real_repo_repair_diagnostic()
 
 

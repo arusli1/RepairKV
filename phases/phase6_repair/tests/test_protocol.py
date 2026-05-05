@@ -281,13 +281,35 @@ class Phase6ProtocolTests(unittest.TestCase):
         )
         self.assertEqual(partition.kept_context_positions, (0, 2, 4, 5))
 
-    def test_rotary_helper_supports_qwen_and_llama_model_families(self) -> None:
+    def test_scissorhands_keep_plan_uses_persistent_attention_order(self) -> None:
+        cache = _make_scalar_key_cache([0.0, 1.0, 4.0, 2.0, 3.0, 5.0, 0.0, 4.0])
+        keep_plan = build_turn_n_keep_plan(
+            post_q1_cache=cache,
+            q1_answer_ids=torch.tensor([7], dtype=torch.long),
+            context_len=6,
+            sink_size=1,
+            recency_window=1,
+            pooling="max",
+            initial_compressor="scissorhands",
+        )
+
+        self.assertEqual(keep_plan.mandatory_context_positions, (0, 5))
+        self.assertEqual(keep_plan.ranked_candidate_positions, (2, 4, 3, 1))
+
+        partition = materialize_context_partition(
+            full_post_q1_cache=cache,
+            keep_plan=keep_plan,
+            context_budget=4,
+        )
+        self.assertEqual(partition.kept_context_positions, (0, 2, 4, 5))
+
+    def test_rotary_helper_supports_qwen_llama_and_mistral_model_families(self) -> None:
         query = torch.ones((1, 2, 3, 4), dtype=torch.float32)
         key = torch.ones((1, 2, 3, 4), dtype=torch.float32)
         cos = torch.ones((1, 3, 4), dtype=torch.float32)
         sin = torch.zeros((1, 3, 4), dtype=torch.float32)
 
-        for model_type in ("qwen2", "llama"):
+        for model_type in ("qwen2", "llama", "mistral"):
             rotated_query, rotated_key = _apply_rotary_pos_emb_for_model(
                 _FakeModel(model_type),
                 query,

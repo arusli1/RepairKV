@@ -81,6 +81,7 @@ def frontier_rows_for_artifact(artifact: Mapping[str, Any], *, artifact_path: st
             "wrong_query_donor_offset": _config_value(artifact, "wrong_query_donor_offset"),
             "base_context_budget": _config_value(artifact, "base_context_budget"),
             "recency_window": _config_value(artifact, "recency_window"),
+            "initial_compressor": _config_value(artifact, "initial_compressor", "snapkv"),
             "num_samples": _config_value(artifact, "num_samples"),
             "dataset_seed_offset": _config_value(artifact, "dataset_seed_offset", 0),
             "k": k,

@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recency-window", type=int, default=128)
     parser.add_argument(
         "--initial-compressor",
-        choices=("snapkv", "streaming_llm", "h2o"),
+        choices=("snapkv", "streaming_llm", "h2o", "scissorhands"),
         default="snapkv",
         help="First-stage post-Q1 context compressor used before idle repair.",
     )

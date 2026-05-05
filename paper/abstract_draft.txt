@@ -1,0 +1,33 @@
+As Large Language Models (LLMs) are used in longer agentic sessions, the relevant parts of a conversation can shift across user turns, tool outputs, test results, and browser observations.
+At the same time, inference still depends on a limited active Key-Value (KV) cache, and many existing KV-cache compression methods decide which past tokens stay active from the current prefix.
+As a result, tokens that matter in later turns may already have been evicted or compressed away when new information arrives.
+We study post-compression KV repair, a runtime stage that restores previously evicted tokens to the active cache under a matched budget.
+
+
+IdleKV uses the idle interval between turns to reevaluate which tokens are important from a larger KV cache stored in a slower memory tier, then promotes a small subset before decoding resumes.
+Controlled experiments show the same repair effect under changing relevance and different initial eviction rules, and a real-code repository diagnostic shows the same pattern in a non-synthetic setting; on Qwen2.5-7B-Instruct at 32K context, IdleKV reaches 91.0\% retrieval on a two-turn needle-in-a-haystack retrieval task versus 24.5\% for the matched no-repair baseline, using only 96 promoted tokens.
+
+
+
+Old abstract:
+KV-cache compression usually makes a one-way active-memory decision:
+evict or offload historical state so the next decode fits a resource
+budget.
+In multi-turn long-context inference, the relevance signal for a later
+turn can arrive after that decision, so a compressed cache can be stale
+before it is used again.
+We study this missing lifecycle stage as post-compression, pre-resume KV
+repair: revise active KV state under the same resumed active budget,
+without changing model weights or recomputing the full prefix.
+We introduce \idlekv{}, a KV promotion operator that keeps evicted KV in a
+host-memory warm tier, scores it after the next-turn query arrives,
+promotes a budgeted subset, and resumes from a matched active cache
+($|C_{\mathrm{repair}}|=|C_{\mathrm{match}}|$).
+On Qwen2.5-7B-Instruct at 32K context, \idlekv{} improves split-query
+MQ-NIAH $Q_2$ score over matched no-repair by $0.755/0.575/0.435$ on
+4Q/6Q/8Q at $K=128$, remains specific to the current turn, and repeats
+across a five-turn relevance-shift diagnostic.
+A small controlled real-repository diagnostic provides preliminary
+non-synthetic evidence, suggesting mutable KV state as a useful primitive
+for future long-context runtimes while leaving faster scoring and
+stronger end-to-end validation as open systems problems.
