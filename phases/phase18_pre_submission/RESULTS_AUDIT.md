@@ -279,3 +279,46 @@ without paying the full reselection scan" clause is now strongly
 supported. At the budget where RepairKV's repair operation runs
 (~150ms in deployment, mult 0.10), Refresh-K-budgeted reaches only
 0.667 vs RepairKV's 0.917 — Δ=+0.250 in RepairKV's favor.
+
+---
+
+## ADDENDUM (round-9 attack 1, 2, 3 acknowledgements)
+
+**Attack 1 (Q2 projection cost asymmetry):** the W2 measurement of
+~110 ms includes the per-pause Q2 projection (~74 ms) which is
+NOT amortizable across pauses. PageSummary's chunk summaries CAN
+be precomputed at compression time (offline). For a deployment
+with frequent short pauses, the fairer comparison is:
+  - RepairKV per-pause cost: ~110 ms (Q2 + scan + select + move)
+  - PageSummary per-pause cost: ~37 ms (chunk-scan + KV move,
+    summaries precomputed at compression)
+
+In our runner, summaries are computed inline at Q2 time (a
+prototype implementation detail), but the PageSummary *quality*
+result is unchanged because the Stage-2 chunk-granularity
+(~3s/chunk on Qwen 32K) binds before any tested budget. At the
+deployment-realistic 150 ms budget, Stage 2 visits 0-1 chunks
+regardless of whether summaries are precomputed.
+
+The paper §Discussion should note: "PageSummary's per-pause cost
+is bounded by Stage-2 chunk-granularity rather than by total Q2
+budget; precomputing summaries shifts the trade-off to compression
+time but does not improve quality at the tested budgets."
+
+**Attack 2 (V variance, single-sample):** V = 2135 ms p95 was
+measured on n=5 trials with synthetic input_ids. Variance σ across
+5 trials was ~150 ms (~7%). We did NOT measure V across the n=36
+actual MQ-NIAH prompts. Prompt-content variance is uncharacterized.
+We acknowledge this as a single-sample point estimate and report
+the ratio as "10×–19×" range to span attention-impl variation;
+prompt-content variance is folded into this range. A tighter V
+measurement is left to follow-up.
+
+**Attack 3 (Llama low-K may collapse cross-model claim):** Llama
+low-K bands predict Refresh-K-budgeted reaches 0.85-1.00 even
+at K=32 (because at multiplier 1.05 the cap doesn't fire). If
+RepairKV is 0.45-0.75 there, the abstract's "dominates a budgeted
+reselector at deployment-realistic wall-clock" clause becomes
+Qwen-specific. Pre-registered fail mode: if Llama K=32
+RepairKV < Refresh-K-budgeted, the abstract softens to "matches
+on Qwen, mixed cross-model evidence."
