@@ -189,6 +189,12 @@ class Phase6Config:
     # TM-Recompute-BM25 conditions. 1.05 default; bump to 1.20 if Step 1
     # smoke reports σ(T_repair)/μ(T_repair) > 0.10. Pre-registered in v5.
     tm_budget_multiplier: float = 1.05
+    # Phase 18 v5.2: PageSummary-Quest-inspired chunk size for the
+    # cheap-stage chunk summaries. Smaller chunks let Stage 2 visit
+    # more chunks per budget; larger chunks reduce summary count. 128
+    # is the default; sensitivity sweep at {32, 64, 128, 256} addresses
+    # the "fixed-hyperparameter strawman" reviewer attack.
+    page_summary_chunk_size: int = 128
 
 
 def ensure_results_dirs(stage: str) -> Path:
@@ -241,6 +247,7 @@ def build_config(
     model_dir: str | Path | None = DEFAULT_MODEL_DIR,
     initial_compressor: str = "snapkv",
     tm_budget_multiplier: float = 1.05,
+    page_summary_chunk_size: int = 128,
 ) -> Phase6Config:
     """Construct one run config with stage defaults unless overridden."""
     normalized_stage = _normalize_stage(stage)
@@ -297,6 +304,7 @@ def build_config(
         model_dir=str(normalized_model_dir),
         initial_compressor=normalized_initial_compressor,
         tm_budget_multiplier=float(tm_budget_multiplier),
+        page_summary_chunk_size=int(page_summary_chunk_size),
     )
 
 
@@ -1654,7 +1662,7 @@ def _run_one_split(
                 active_cache=base_partition.compressed,
                 pooling=config.pooling,
                 wallclock_deadline_s=budget_s,
-                chunk_size=128,
+                chunk_size=int(config.page_summary_chunk_size),
                 precomputed_evicted_layer_keys=precomputed_evicted_keys,
                 precomputed_active_layer_keys=precomputed_active_keys,
             )
@@ -1715,7 +1723,7 @@ def _run_one_split(
                     "page_summary_stage1_ms": round(float(page_info["stage1_elapsed_s"]) * 1000.0, 6),
                     "page_summary_stage2_ms": round(float(page_info["stage2_elapsed_s"]) * 1000.0, 6),
                     "page_summary_cap_fired": bool(page_info["cap_fired"]),
-                    "page_summary_chunk_size": 128,
+                    "page_summary_chunk_size": int(config.page_summary_chunk_size),
                     "page_summary_selected_positions": page_positions,
                     "page_summary_overlap_fraction": round(
                         _overlap_fraction(page_positions, q2_relevant_positions), 6,

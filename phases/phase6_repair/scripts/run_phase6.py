@@ -82,6 +82,14 @@ def parse_args() -> argparse.Namespace:
         "values force the wall-clock cap to actually bind for the budgeted "
         "scorers. e.g. 0.10 -> ~150ms budget.",
     )
+    parser.add_argument(
+        "--page-summary-chunk-size",
+        type=int,
+        default=128,
+        help="PageSummary-Quest-inspired chunk size. Smaller -> more Stage 2 "
+        "chunks visited per budget. Sensitivity sweep {32, 64, 128, 256} "
+        "addresses the fixed-hyperparameter strawman attack.",
+    )
     return parser.parse_args()
 
 
@@ -104,6 +112,7 @@ def main() -> int:
         model_dir=args.model_dir if args.model_dir is not None else None,
         initial_compressor=args.initial_compressor,
         tm_budget_multiplier=args.tm_budget_multiplier,
+        page_summary_chunk_size=args.page_summary_chunk_size,
     )
     payload = run_experiment(config)
     print(payload["artifact_path"])
