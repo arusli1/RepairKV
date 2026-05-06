@@ -991,12 +991,12 @@ def _run_one_split(
         precomputed_q1tail_keys: list[torch.Tensor | None] | None = None
         if any(
             cond in config.conditions
-            for cond in ("PageSummary-Quest-inspired", "Refresh-K-budgeted")
+            for cond in ("PageSummary-Quest-inspired", "Refresh-K-budgeted", "RepairKV-chunked")
         ):
             from phases.phase6_repair.src.selectors import precompute_host_layer_keys
             n_layers_local = int(q2_query_rows.shape[0])
             heads_per_layer = [int(q2_query_rows[i].shape[0]) for i in range(n_layers_local)]
-            if "PageSummary-Quest-inspired" in config.conditions:
+            if "PageSummary-Quest-inspired" in config.conditions or "RepairKV-chunked" in config.conditions:
                 precomputed_evicted_keys = precompute_host_layer_keys(base_partition.evicted)
                 precomputed_active_keys = list(precompute_host_layer_keys(base_partition.compressed))
             if "Refresh-K-budgeted" in config.conditions:
