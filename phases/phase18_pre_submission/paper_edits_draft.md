@@ -65,8 +65,8 @@ GPU KV rows; other resources are reported separately, not matched.}
 \item \textcolor{green!50!black}{\textbf{Active-cache GPU rows:} matched at $\bbase + K$.}
 \item \textcolor{green!50!black}{\textbf{Host-memory store size:} not matched; $|W_N|$ is reported.}
 \item \textcolor{green!50!black}{\textbf{Peak host RAM:} reported in Appendix; the offloaded BF16 KV store is the dominant term.}
-\item \textcolor{green!50!black}{\textbf{Bytes transferred per repair (host $\to$ GPU):} $K$ rows $\times$ \emph{layer\_kv\_bytes} per token; reported in Table~\ref{tab:runtime-stages}.}
-\item \textcolor{green!50!black}{\textbf{$Q_2$ projection compute, scan + top-$K$ + transfer compute, cache merge / re-layout compute:} stage-decomposed in Figure~\ref{fig:runtime-envelope} and Table~\ref{tab:runtime-stages}.}
+\item \textcolor{green!50!black}{\textbf{Bytes transferred per repair (host $\to$ GPU):} $K$ rows $\times$ \emph{layer\_kv\_bytes} per token; reported in Figure~\ref{fig:runtime-envelope}.}
+\item \textcolor{green!50!black}{\textbf{$Q_2$ projection compute, scan + top-$K$ + transfer compute, cache merge / re-layout compute:} stage-decomposed in Figure~\ref{fig:runtime-envelope}.}
 \item \textcolor{green!50!black}{\textbf{Total wall-clock:} matched in W1 against Refresh-$K$-budgeted and PageSummary-Quest-inspired, both run with the per-example $T_{\text{repair}}$ envelope including amortized $Q_2$ projection and scoring cost.}
 \item \textcolor{green!50!black}{\textbf{FLOPs:} not matched, but reported as a derived ratio. \repairkv{}'s repair operation costs about [fill F-ratio]$\times$ fewer FLOPs than full-prefix prefill at 32K context (analytic from $K$, $|W_N|$, $d_k$, $H$, $L$), since \repairkv{} only touches keys at score time and does no value-side computation until the small post-promotion attention.}
 \end{itemize}
@@ -205,7 +205,7 @@ SnapKV-style first-stage compressor. Cross-model evidence is
 limited to one Llama-3.1-8B-Instruct appendix run. Although the
 method is motivated by tool-call idle windows in agentic workflows,
 the evaluation here is on static prompts; the recompute ratio
-reported in the runtime probe (Table~\ref{tab:runtime-stages})
+reported in the runtime probe (Figure~\ref{fig:runtime-envelope})
 compares to a fresh full-prefix prefill, and a deployed agent with
 prefix caching could see different ratios. A non-needle multi-turn
 benchmark such as SCBench, a symmetric multi-model cross-cut, and
@@ -247,28 +247,93 @@ fixed numbers in the appendix for full audit transparency.}
 
 ```bibtex
 @inproceedings{arkvale,
-  author    = {Liu, Renze and ...},  % TODO author list
+  author    = {Wu, Renze and Su, Yujie and Wang, Shaoyu and Sang, Beicheng and Yan, Tao and Jiang, Yang and Han, Yikun and Liu, Yuanqing and Sun, Hai-Jun},
   title     = {ArkVale: Efficient generative LLM inference with recallable key-value eviction},
   booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year      = {2024},
 }
 
-@article{infinigen,
-  author    = {...},  % TODO
+@inproceedings{infinigen,
+  author    = {Lee, Wonbeom and Lee, Jungi and Seo, Junghwan and Sim, Jaewoong},
   title     = {InfiniGen: Efficient generative inference of large language models with dynamic KV cache management},
-  journal   = {arXiv:2406.19707},
+  booktitle = {Proceedings of the 18th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
   year      = {2024},
 }
 
-@article{emllm,
-  author    = {...},  % TODO
-  title     = {Human-like episodic memory for infinite-context LLMs},
-  journal   = {arXiv:2407.09450},
+@inproceedings{emllm,
+  author    = {Fountas, Zafeirios and Benfeghoul, Martin A. and Oomerjee, Adnan and Christopoulou, Fenia and Lampouras, Gerasimos and Bou-Ammar, Haitham and Wang, Jun},
+  title     = {Human-like episodic memory for infinite context LLMs},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year      = {2024},
+}
+
+@inproceedings{flashattn2,
+  author    = {Dao, Tri},
+  title     = {{FlashAttention}-2: Faster attention with better parallelism and work partitioning},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2024},
+}
+
+@article{flashattn3,
+  author    = {Shah, Jay and Bikshandi, Ganesh and Zhang, Ying and Thakkar, Vijay and Ramani, Pradeep and Dao, Tri},
+  title     = {{FlashAttention}-3: Fast and accurate attention with asynchrony and low-precision},
+  journal   = {arXiv:2407.08608},
   year      = {2024},
 }
 ```
 
 ---
+
+## W4.8 — Existing-paper edits required to coexist with green overlays
+
+Round-7 paper-side critique flagged contradictions between existing
+paper text and the green W4 overlays. These are MANDATORY edits to
+the existing red/blue text (NOT new green prose) before the green
+edits can land cleanly:
+
+**Existing line 60 (abstract clause that hard-codes pre-fix numbers):**
+- Old: "...\repairkv{} \textcolor{red}{achieves} 91.0\% retrieval on a four-query needle-in-a-haystack task versus 24.5\% for the matched no-repair baseline at the same active-cache budget, \textcolor{red}{with} only 96 promoted tokens."
+- New: replace this hard-coded clause with the green W4.5 strong-pass abstract overlay. Numbers will come from the K-sweep redo (post-PageSummary-fix). DELETE the existing red phrasing entirely so the abstract has only one set of numbers.
+
+**Existing lines 525-526 (Matched-budget frontier paragraph):**
+- Old: "At $K=96$, \repairkv{} scores $0.910$ on 4Q, $0.989$ on 6Q, and $0.960$ on 8Q, while matched no-repair scores $0.245$, $0.422$, and $0.546$, respectively"
+- New: replace 0.910 with [fill K-sweep-redo Qwen 4Q K=96 RepairKV]. The 6Q/8Q numbers are from earlier phases and remain valid (we did not rerun those). Keep them.
+
+**Existing line 545 (Figure 2 right labels):**
+- $\Delta_{96}$ on `frontier_raw_overlay.pdf` is computed against the buggy-fusion PageSummary. Either rebuild the figure from the K-sweep-redo CSV or note the figure's $\Delta_{96}$ is against B_match (which it is — re-read the caption) so unaffected.
+
+**Existing lines 736-739 (Discussion sentence that contradicts W4.5):**
+- Old: "\textcolor{red}{The exact-Q$_2$ selector provides a controlled view of the repair signal, and stronger $Q_2$-aware reselectors, page-level policies, or full-prefix recompute may further improve the quality-runtime frontier when enough idle-window slack is available.}"
+- New (proposed green-marked replacement):
+  ```tex
+  \textcolor{green!50!black}{PageSummary-Quest-inspired and Refresh-$K$-budgeted are the $Q_2$-aware time-matched references in W1; full-prefix recompute and persistent low-rank indices remain orthogonal directions and may further improve the quality-runtime frontier when extra slack or pre-built indices are available.}
+  ```
+
+**Existing §Baselines (lines 496-514):**
+- Add a green sentence defining Refresh-$K$-budgeted and PageSummary-Quest-inspired so they're not first introduced in the novelty paragraph. Suggested green addition at end of the paragraph:
+  ```tex
+  \textcolor{green!50!black}{Two additional time-matched baselines are introduced in this version: Refresh-$K$-budgeted, the unbudgeted Refresh-$K$ with a wall-clock cap on its scoring loop; and PageSummary-Quest-inspired, a Quest/ShadowKV-style two-stage scorer adapted to the lifecycle slot (per-chunk max-key summaries; cheap chunk scan; full position scoring of top-N chunks within budget).}
+  ```
+
+## W4.9 — Page-count audit (round-7 critique attack #6)
+
+Existing paper compiles to 13 pages two-column ICML format. AdaptFM
+ceiling: 6 pages main + unlimited appendix. The paper is currently
+~7 pages over the main-body limit BEFORE Phase 18 green edits add
+~50 more lines.
+
+The Phase 18 plan does NOT solve this — it's a pre-existing issue.
+Suggested cuts to bring main body to 6 pages (user decision):
+- Move Algorithm 1 listing (lines 336-357) to appendix.
+- Move §Repeated relevance shifts paragraph (lines 581-599) to appendix.
+- Move §Eviction-policy sensitivity Figure 4 to appendix.
+- Move Scissorhands stress test paragraph (lines 613-615) to appendix.
+- Move §Real-repository diagnostic table (lines 660-684) to appendix.
+- Compact §Future work paragraph (lines 754-771).
+
+Each individual cut is judgment-dependent. The point is: any green
+W4 edit lands ON TOP of an already-overflowed body; the user must
+audit which paragraphs to demote.
 
 ## Sequencing of W4 application
 
