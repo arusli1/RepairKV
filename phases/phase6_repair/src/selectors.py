@@ -42,11 +42,30 @@ def score_evicted_positions(
             f"active_cache layer count {len(active_cache.kv)} does not match evicted cache layers {n_layers}."
         )
 
+    # Optional GPU scoring path (Phase 18 round-5 attack #2 defuse).
+    # When `score_on_gpu=True` (env var PHASE18_SCORE_ON_GPU=1 or
+    # function attribute _score_on_gpu set), matmul + softmax stay on
+    # the model's GPU so the quality numbers come from the same code
+    # path as the runtime probe. Default remains CPU for backward
+    # compatibility with the existing K-sweep results.
+    import os as _os
+    _gpu_attr = bool(getattr(score_evicted_positions, "_score_on_gpu", False))
+    _gpu_env = _os.environ.get("PHASE18_SCORE_ON_GPU", "0") == "1"
+    score_on_gpu = _gpu_attr or _gpu_env
+    target_device = (
+        evicted_cache.kv[0][0].device if score_on_gpu else torch.device("cpu")
+    )
+
     layer_scores: list[torch.Tensor] = []
     for layer_index, (key, _) in enumerate(evicted_cache.kv):
         query_layer = query_rows[layer_index]
         query_heads = int(query_layer.shape[0])
-        evicted_key_float = key.detach().to("cpu", dtype=torch.float32)[0]
+        if score_on_gpu:
+            evicted_key_float = key.detach().to(device=target_device, dtype=torch.float32)[0]
+            query_layer_local = query_layer.to(device=target_device, dtype=torch.float32)
+        else:
+            evicted_key_float = key.detach().to("cpu", dtype=torch.float32)[0]
+            query_layer_local = query_layer
 
         def _repeat_heads(key_rows: torch.Tensor) -> torch.Tensor:
             key_heads = int(key_rows.shape[0])
@@ -62,12 +81,17 @@ def score_evicted_positions(
         score_keys = evicted_key_float
         active_len = 0
         if active_cache is not None and len(active_cache) > 0:
-            active_key_float = active_cache.kv[layer_index][0].detach().to("cpu", dtype=torch.float32)[0]
+            if score_on_gpu:
+                active_key_float = active_cache.kv[layer_index][0].detach().to(
+                    device=target_device, dtype=torch.float32
+                )[0]
+            else:
+                active_key_float = active_cache.kv[layer_index][0].detach().to("cpu", dtype=torch.float32)[0]
             active_key_float = _repeat_heads(active_key_float)
             active_len = int(active_key_float.shape[1])
             score_keys = torch.cat((active_key_float, evicted_key_float), dim=1)
 
-        scores = torch.matmul(query_layer, score_keys.transpose(-2, -1)) / math.sqrt(float(score_keys.shape[-1]))
+        scores = torch.matmul(query_layer_local, score_keys.transpose(-2, -1)) / math.sqrt(float(score_keys.shape[-1]))
         scores = torch.softmax(scores, dim=-1)
         if active_len:
             scores = scores[:, :, active_len:]
@@ -75,7 +99,8 @@ def score_evicted_positions(
             pooled = scores.amax(dim=1).mean(dim=0)
         else:
             pooled = scores.mean(dim=(0, 1))
-        layer_scores.append(pooled)
+        # Bring back to CPU for the final dict; the matmul/softmax was on GPU.
+        layer_scores.append(pooled.detach().to("cpu"))
 
     importance = torch.stack(layer_scores, dim=0).mean(dim=0)
     return {
