@@ -53,7 +53,7 @@ echo "[w1-ksweep] pre-registration commit: $(git rev-parse HEAD)" | tee -a "${LO
     --query-scoring-mode exact_q \
     --oracle-mode gold_spans \
     --k "${K_VALUES[@]}" \
-    --conditions A B B_match Random-K Oldest-K IdleKV Refresh-K \
+    --conditions A B B_match Random-K Oldest-K IdleKV Refresh-K Oracle-K \
                  Refresh-K-budgeted PageSummary-Quest-inspired RepairKV-no-burst \
     2>&1 | tee -a "${LOG_PATH}"
 
