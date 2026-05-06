@@ -74,6 +74,50 @@ def synchronize(device: str | torch.device) -> None:
         torch.cuda.synchronize(target)
 
 
+def _h2d_score_keys(
+    host_chunk: torch.Tensor,
+    *,
+    target: torch.device,
+    pin_memory: bool,
+) -> torch.Tensor:
+    """BF16/FP16 host -> device async copy, then on-device upcast to FP32.
+
+    A single ``.to(device, dtype=torch.float32)`` from a pinned BF16 source
+    silently demotes the H2D to a blocking copy because cudart cannot do an
+    async cross-dtype copy from pinned host. We avoid that by transferring
+    in source dtype first (truly async on pinned), then upcasting on-device
+    where the cast is free.
+    """
+    non_blocking = pin_memory and target.type == "cuda"
+    if host_chunk.dtype == torch.float32:
+        return host_chunk.to(device=target, non_blocking=non_blocking)
+    device_chunk = host_chunk.to(device=target, non_blocking=non_blocking)
+    return device_chunk.float()
+
+
+def _enforce_coverage(
+    *,
+    host_pool_tokens: int,
+    candidate_tokens: int,
+    allow_partial_coverage: bool,
+) -> float:
+    """Refuse to emit a row whose pinned host pool does not cover the full candidate set.
+
+    Phase 17 numbers were computed with ``source_pool_chunks=1`` at very
+    large ``candidate_tokens``, which silently re-read a 16K-token pool 64x
+    instead of measuring 1M of pinned-DRAM faults. Phase 18 forbids that.
+    """
+    coverage = float(host_pool_tokens) / float(candidate_tokens)
+    if coverage < 1.0 and not allow_partial_coverage:
+        raise ValueError(
+            f"host_pool_coverage={coverage:.3f} < 1.0; refusing to emit a "
+            f"non-full-pool runtime row. Set source_pool_chunks high enough "
+            f"so pool_chunks * chunk_tokens >= candidate_tokens, or pass "
+            f"allow_partial_coverage=True if you really want a re-read pool."
+        )
+    return coverage
+
+
 def make_synthetic_cache(
     *,
     seq_len: int,
@@ -215,8 +259,9 @@ def profile_chunked_selection_capacity(
     source_pool_chunks: int = 1,
     device: str | torch.device = "cuda",
     trials: int = 10,
-    warmup_trials: int = 1,
+    warmup_trials: int = 3,
     pin_memory: bool = True,
+    allow_partial_coverage: bool = False,
 ) -> dict[str, float | int | str]:
     """Measure chunked Q2-key scanning and top-K selection over a large store.
 
@@ -282,10 +327,10 @@ def profile_chunked_selection_capacity(
                 stop = min(start + max_chunk, int(candidate_tokens))
                 current = stop - start
                 host_key_chunk = host_key_pool[chunk_idx % pool_chunks]
-                key_chunk = host_key_chunk[:, :current, :].to(
-                    device=target,
-                    dtype=torch.float32,
-                    non_blocking=pin_memory and target.type == "cuda",
+                key_chunk = _h2d_score_keys(
+                    host_key_chunk[:, :current, :],
+                    target=target,
+                    pin_memory=pin_memory,
                 )
                 logits = torch.einsum("hgqd,htd->hgqt", layer_query, key_chunk)
                 pooled = logits.amax(dim=2).mean(dim=(0, 1))
@@ -312,6 +357,11 @@ def profile_chunked_selection_capacity(
         spec.n_kv_heads * spec.head_dim * torch.empty((), dtype=spec.dtype).element_size()
     )
     host_pool_tokens = min(int(candidate_tokens), int(pool_chunks) * int(max_chunk))
+    coverage = _enforce_coverage(
+        host_pool_tokens=int(host_pool_tokens),
+        candidate_tokens=int(candidate_tokens),
+        allow_partial_coverage=bool(allow_partial_coverage),
+    )
     return {
         "candidate_tokens": int(candidate_tokens),
         "k": int(k_tokens),
@@ -320,7 +370,7 @@ def profile_chunked_selection_capacity(
         "candidate_chunks": int(candidate_chunks),
         "source_pool_chunks": int(pool_chunks),
         "host_pool_tokens": int(host_pool_tokens),
-        "host_pool_coverage": float(host_pool_tokens) / float(candidate_tokens),
+        "host_pool_coverage": coverage,
         "trials": int(trials),
         "device": str(target),
         "dtype": str(spec.dtype).replace("torch.", ""),
@@ -399,10 +449,10 @@ def _scan_candidate_scores(
             stop = min(start + int(max_chunk), int(candidate_tokens))
             current = stop - start
             host_key_chunk = host_key_pool[chunk_idx % int(pool_chunks)]
-            key_chunk = host_key_chunk[:, :current, :].to(
-                device=target,
-                dtype=torch.float32,
-                non_blocking=pin_memory and target.type == "cuda",
+            key_chunk = _h2d_score_keys(
+                host_key_chunk[:, :current, :],
+                target=target,
+                pin_memory=pin_memory,
             )
             logits = torch.einsum("hgqd,htd->hgqt", layer_query, key_chunk)
             pooled = logits.amax(dim=2).mean(dim=(0, 1))
@@ -421,8 +471,9 @@ def profile_chunked_selection_capacity_multi_k(
     source_pool_chunks: int = 1,
     device: str | torch.device = "cuda",
     trials: int = 10,
-    warmup_trials: int = 1,
+    warmup_trials: int = 3,
     pin_memory: bool = True,
+    allow_partial_coverage: bool = False,
 ) -> list[dict[str, float | int | str]]:
     """Measure one chunked score scan and multiple top-K budgets per trial."""
     target = torch.device(device)
@@ -491,6 +542,11 @@ def profile_chunked_selection_capacity_multi_k(
         torch.cuda.empty_cache()
 
     scan = percentile_summary(scan_ms)
+    coverage = _enforce_coverage(
+        host_pool_tokens=int(host_pool_tokens),
+        candidate_tokens=int(candidate_tokens),
+        allow_partial_coverage=bool(allow_partial_coverage),
+    )
     key_bytes_per_token = int(
         spec.n_layers
         * spec.n_kv_heads
@@ -510,7 +566,7 @@ def profile_chunked_selection_capacity_multi_k(
                 "candidate_chunks": int(candidate_chunks),
                 "source_pool_chunks": int(pool_chunks),
                 "host_pool_tokens": int(host_pool_tokens),
-                "host_pool_coverage": float(host_pool_tokens) / float(candidate_tokens),
+                "host_pool_coverage": coverage,
                 "trials": int(trials),
                 "device": str(target),
                 "dtype": str(spec.dtype).replace("torch.", ""),
@@ -550,8 +606,9 @@ def profile_end_to_end_repair_capacity(
     source_pool_chunks: int = 1,
     device: str | torch.device = "cuda",
     trials: int = 10,
-    warmup_trials: int = 1,
+    warmup_trials: int = 3,
     pin_memory: bool = True,
+    allow_partial_coverage: bool = False,
 ) -> dict[str, float | int | str]:
     """Measure one synthetic repair path: select from host store, move, inject.
 
@@ -651,6 +708,11 @@ def profile_end_to_end_repair_capacity(
         spec.n_kv_heads * spec.head_dim * torch.empty((), dtype=spec.dtype).element_size()
     )
     host_pool_tokens = min(int(candidate_tokens), int(pool_chunks) * int(max_chunk))
+    coverage = _enforce_coverage(
+        host_pool_tokens=int(host_pool_tokens),
+        candidate_tokens=int(candidate_tokens),
+        allow_partial_coverage=bool(allow_partial_coverage),
+    )
     return {
         "active_tokens": int(active_tokens),
         "candidate_tokens": int(candidate_tokens),
@@ -660,7 +722,7 @@ def profile_end_to_end_repair_capacity(
         "candidate_chunks": int(candidate_chunks),
         "source_pool_chunks": int(pool_chunks),
         "host_pool_tokens": int(host_pool_tokens),
-        "host_pool_coverage": float(host_pool_tokens) / float(candidate_tokens),
+        "host_pool_coverage": coverage,
         "trials": int(trials),
         "device": str(target),
         "dtype": str(spec.dtype).replace("torch.", ""),
@@ -702,8 +764,9 @@ def profile_end_to_end_repair_capacity_multi_k(
     source_pool_chunks: int = 1,
     device: str | torch.device = "cuda",
     trials: int = 10,
-    warmup_trials: int = 1,
+    warmup_trials: int = 3,
     pin_memory: bool = True,
+    allow_partial_coverage: bool = False,
 ) -> list[dict[str, float | int | str]]:
     """Measure integrated repair for several K values after one scan per trial."""
     target = torch.device(device)
@@ -809,6 +872,11 @@ def profile_end_to_end_repair_capacity_multi_k(
         spec.n_kv_heads * spec.head_dim * torch.empty((), dtype=spec.dtype).element_size()
     )
     host_pool_tokens = min(int(candidate_tokens), int(pool_chunks) * int(max_chunk))
+    coverage = _enforce_coverage(
+        host_pool_tokens=int(host_pool_tokens),
+        candidate_tokens=int(candidate_tokens),
+        allow_partial_coverage=bool(allow_partial_coverage),
+    )
     rows = []
     for k_value in k_values:
         topk = percentile_summary(topk_ms[k_value])
@@ -824,7 +892,7 @@ def profile_end_to_end_repair_capacity_multi_k(
                 "candidate_chunks": int(candidate_chunks),
                 "source_pool_chunks": int(pool_chunks),
                 "host_pool_tokens": int(host_pool_tokens),
-                "host_pool_coverage": float(host_pool_tokens) / float(candidate_tokens),
+                "host_pool_coverage": coverage,
                 "trials": int(trials),
                 "device": str(target),
                 "dtype": str(spec.dtype).replace("torch.", ""),

@@ -86,6 +86,15 @@ def parse_args() -> argparse.Namespace:
         help="Override to a cheap validation run.",
     )
     parser.add_argument(
+        "--allow-partial-coverage",
+        action="store_true",
+        help=(
+            "Allow host_pool_coverage<1.0 (re-read pool). Off by default for Phase 18+ "
+            "headline runs so we never silently re-read a 16K pool 64x at 1M candidates. "
+            "Set this only for legacy compatibility runs."
+        ),
+    )
+    parser.add_argument(
         "--out-prefix",
         default="phases/phase4_eviction_buffer/results/runtime_capacity/runtime_capacity",
         help="Output prefix without extension.",
@@ -159,6 +168,7 @@ def main() -> int:
                     trials=trials,
                     warmup_trials=warmup_trials,
                     pin_memory=not args.no_pin_memory,
+                    allow_partial_coverage=bool(args.allow_partial_coverage),
                 )
                 rows.append(row)
                 print(
@@ -190,6 +200,7 @@ def main() -> int:
                 trials=trials,
                 warmup_trials=warmup_trials,
                 pin_memory=not args.no_pin_memory,
+                allow_partial_coverage=bool(args.allow_partial_coverage),
             )
             rows.extend(candidate_rows)
             for row in candidate_rows:
@@ -225,6 +236,7 @@ def main() -> int:
                         trials=trials,
                         warmup_trials=warmup_trials,
                         pin_memory=not args.no_pin_memory,
+                        allow_partial_coverage=bool(args.allow_partial_coverage),
                     )
                     rows.append(row)
                     print(
@@ -261,6 +273,7 @@ def main() -> int:
                     trials=trials,
                     warmup_trials=warmup_trials,
                     pin_memory=not args.no_pin_memory,
+                    allow_partial_coverage=bool(args.allow_partial_coverage),
                 )
                 rows.extend(candidate_rows)
                 for row in candidate_rows:
