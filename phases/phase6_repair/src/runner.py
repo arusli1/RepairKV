@@ -240,6 +240,7 @@ def build_config(
     wrong_query_donor_offset: int = DEFAULT_WRONG_QUERY_DONOR_OFFSET,
     model_dir: str | Path | None = DEFAULT_MODEL_DIR,
     initial_compressor: str = "snapkv",
+    tm_budget_multiplier: float = 1.05,
 ) -> Phase6Config:
     """Construct one run config with stage defaults unless overridden."""
     normalized_stage = _normalize_stage(stage)
@@ -295,6 +296,7 @@ def build_config(
         wrong_query_donor_offset=int(wrong_query_donor_offset),
         model_dir=str(normalized_model_dir),
         initial_compressor=normalized_initial_compressor,
+        tm_budget_multiplier=float(tm_budget_multiplier),
     )
 
 

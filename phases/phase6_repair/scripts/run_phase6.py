@@ -73,6 +73,15 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_WRONG_QUERY_DONOR_OFFSET,
         help="Example-index offset used when --wrong-query-mode donor_q2 is selected.",
     )
+    parser.add_argument(
+        "--tm-budget-multiplier",
+        type=float,
+        default=1.05,
+        help="Per-example T_repair multiplier for the time-matched conditions "
+        "(Refresh-K-budgeted, PageSummary-Quest-inspired). 1.05 default; lower "
+        "values force the wall-clock cap to actually bind for the budgeted "
+        "scorers. e.g. 0.10 -> ~150ms budget.",
+    )
     return parser.parse_args()
 
 
@@ -94,6 +103,7 @@ def main() -> int:
         wrong_query_donor_offset=args.wrong_query_donor_offset,
         model_dir=args.model_dir if args.model_dir is not None else None,
         initial_compressor=args.initial_compressor,
+        tm_budget_multiplier=args.tm_budget_multiplier,
     )
     payload = run_experiment(config)
     print(payload["artifact_path"])
