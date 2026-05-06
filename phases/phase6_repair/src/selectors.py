@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import math
 import random
+import time
 from typing import Sequence
 
 import torch
@@ -81,6 +82,154 @@ def score_evicted_positions(
         int(position): float(importance[dense_index].item())
         for dense_index, position in enumerate(evicted_cache.positions)
     }
+
+
+def score_evicted_positions_budgeted(
+    *,
+    query_rows: torch.Tensor,
+    evicted_cache: PositionTrackedCache,
+    active_cache: PositionTrackedCache | None = None,
+    pooling: str = "max",
+    wallclock_deadline_s: float | None = None,
+    position_chunk_size: int = 1024,
+) -> tuple[dict[int, float], dict[str, int | bool]]:
+    """Score evicted positions with an optional per-call wall-clock cap.
+
+    Iterates the position dimension in chunks of ``position_chunk_size``;
+    inside each chunk, scores are computed across all layers (full
+    layer-aggregation per position). The wall-clock cap is checked between
+    position-chunks, so a scored position is always *fully* aggregated
+    across layers, and unscored positions are simply absent from the
+    returned dict (cleaner semantics than partial layer aggregation).
+
+    NOTE on softmax normalization. The unbudgeted ``score_evicted_positions``
+    softmaxes over (active + ALL evicted) keys; this scorer softmaxes over
+    (active + CHUNK_evicted) keys. The two are equivalent when
+    ``position_chunk_size >= n_evicted`` (single chunk), and differ
+    otherwise because the global softmax denominator is incomputable
+    without scoring every position. Cross-chunk score magnitudes are
+    therefore not directly comparable -- but rankings within each chunk
+    match the unbudgeted scorer restricted to that chunk, and selecting
+    top-``K`` across the union of scored chunks is still a defensible
+    "score-by-attention-evidence" algorithm. Document this choice in the
+    paper W4.1 novelty paragraph.
+
+    For Phase 18 W1, this is the basis of Refresh-K-budgeted: same scorer
+    as the unbudgeted Refresh-K, but stops scoring at wall-clock T_repair.
+    Positions that did not get scored fall back to the runner's existing
+    tiebreaker (zero-score + ascending position).
+
+    Returns ``(scores, info)`` where ``info`` carries:
+      - ``positions_scored``: how many positions got real scores
+      - ``positions_total``: how many positions exist in the evicted cache
+      - ``layer_chunks_completed``: completed (chunk, layer) pairs (audit)
+      - ``cap_fired``: True if wall-clock cap interrupted scoring
+      - ``elapsed_s``: total scoring time in seconds
+    """
+    if pooling not in {"max", "mean"}:
+        raise ValueError(f"pooling must be 'max' or 'mean', got {pooling!r}.")
+    if int(position_chunk_size) <= 0:
+        raise ValueError(f"position_chunk_size must be positive, got {position_chunk_size}.")
+    if len(evicted_cache) == 0:
+        return ({}, {
+            "positions_scored": 0,
+            "positions_total": 0,
+            "layer_chunks_completed": 0,
+            "cap_fired": False,
+            "elapsed_s": 0.0,
+        })
+    if not isinstance(query_rows, torch.Tensor) or query_rows.ndim != 4:
+        raise ValueError("query_rows must have shape [n_layers, n_query_heads, q_len, head_dim].")
+
+    n_layers = len(evicted_cache.kv)
+    if int(query_rows.shape[0]) != n_layers:
+        raise ValueError(
+            f"query_rows layer count {int(query_rows.shape[0])} does not match cache layers {n_layers}."
+        )
+    if active_cache is not None and len(active_cache.kv) != n_layers:
+        raise ValueError(
+            f"active_cache layer count {len(active_cache.kv)} does not match evicted cache layers {n_layers}."
+        )
+
+    n_evicted = len(evicted_cache.positions)
+    chunk_starts = list(range(0, n_evicted, int(position_chunk_size)))
+    deadline = (time.perf_counter() + float(wallclock_deadline_s)) if wallclock_deadline_s is not None else None
+
+    scores: dict[int, float] = {}
+    layer_chunks_completed = 0
+    positions_scored = 0
+    cap_fired = False
+    start_time = time.perf_counter()
+
+    for chunk_start in chunk_starts:
+        # cap check fires BETWEEN chunks (and before the first chunk past
+        # the deadline). Each scored chunk gets its full layer aggregation.
+        if deadline is not None and time.perf_counter() >= deadline:
+            cap_fired = True
+            break
+        chunk_stop = min(chunk_start + int(position_chunk_size), n_evicted)
+        chunk_positions = evicted_cache.positions[chunk_start:chunk_stop]
+        chunk_layer_scores: list[torch.Tensor] = []
+        for layer_index, (key, _) in enumerate(evicted_cache.kv):
+            query_layer = query_rows[layer_index]
+            query_heads = int(query_layer.shape[0])
+
+            evicted_key_float_full = key.detach().to("cpu", dtype=torch.float32)[0]
+
+            def _repeat_heads(key_rows: torch.Tensor) -> torch.Tensor:
+                key_heads = int(key_rows.shape[0])
+                if query_heads == key_heads:
+                    return key_rows
+                if query_heads % key_heads != 0:
+                    raise ValueError(
+                        f"query_rows head count {query_heads} is not compatible with cache heads {key_heads}."
+                    )
+                return key_rows.repeat_interleave(query_heads // key_heads, dim=0)
+
+            evicted_key_float_full = _repeat_heads(evicted_key_float_full)
+            evicted_key_chunk = evicted_key_float_full[:, chunk_start:chunk_stop, :]
+            score_keys = evicted_key_chunk
+            active_len = 0
+            if active_cache is not None and len(active_cache) > 0:
+                active_key_float = active_cache.kv[layer_index][0].detach().to("cpu", dtype=torch.float32)[0]
+                active_key_float = _repeat_heads(active_key_float)
+                active_len = int(active_key_float.shape[1])
+                # IMPORTANT: softmax over active+chunk keys reflects the same
+                # competition for attention mass as the unbudgeted scorer at
+                # this chunk's slice. Across chunks the normalizer differs
+                # (each chunk competes with active separately), but inside a
+                # chunk it is consistent.
+                score_keys = torch.cat((active_key_float, evicted_key_chunk), dim=1)
+
+            attn_logits = (
+                torch.matmul(query_layer, score_keys.transpose(-2, -1))
+                / math.sqrt(float(score_keys.shape[-1]))
+            )
+            attn = torch.softmax(attn_logits, dim=-1)
+            if active_len:
+                attn = attn[:, :, active_len:]
+            if pooling == "max":
+                pooled = attn.amax(dim=1).mean(dim=0)
+            else:
+                pooled = attn.mean(dim=(0, 1))
+            chunk_layer_scores.append(pooled)
+            layer_chunks_completed += 1
+
+        # Average across all layers for this chunk -- full aggregation.
+        chunk_importance = torch.stack(chunk_layer_scores, dim=0).mean(dim=0)
+        for dense_index, position in enumerate(chunk_positions):
+            scores[int(position)] = float(chunk_importance[dense_index].item())
+            positions_scored += 1
+
+    elapsed_s = time.perf_counter() - start_time
+    info: dict[str, int | bool] = {
+        "positions_scored": int(positions_scored),
+        "positions_total": int(n_evicted),
+        "layer_chunks_completed": int(layer_chunks_completed),
+        "cap_fired": bool(cap_fired),
+        "elapsed_s": float(elapsed_s),
+    }
+    return scores, info
 
 
 def rank_positions(
