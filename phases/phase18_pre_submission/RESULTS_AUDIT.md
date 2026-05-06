@@ -519,3 +519,38 @@ that budget, RKB's cap fires aggressively (per the
 multiplier sweep at mult 0.10: RKB scored 0.667). The
 "dominates" claim is reserved for that experimental cell.
 
+
+---
+
+## ADDENDUM (2026-05-06 20:29 UTC): tight K-sweep at 150 ms ABSOLUTE budget
+
+K∈{32, 64, 96, 128}, n=36 paired (n=12 × 3 partitions), 150 ms ABS
+budget for Refresh-K-budgeted (multiplier overridden via
+--tm-budget-absolute-s 0.150).
+
+| K | A | B_match | RepairKV | Refresh-K | RKB(150ms) | PSum(150ms) | NoBurst | RKB cap | RKB pos scored |
+|---|---|---|---|---|---|---|---|---|---|
+| 32 | 1.000 | 0.208 | 0.375 | 1.000 | 0.500 | 0.208 | 0.500 | 36/36 | 3982/32768 |
+| 64 | 1.000 | 0.208 | 0.639 | 1.000 | 0.486 | 0.208 | 0.569 | 36/36 | 4011/32768 |
+| 96 | 1.000 | 0.208 | 0.917 | 1.000 | 0.472 | 0.194 | 0.653 | 36/36 | 3982/32768 |
+| 128 | 1.000 | 0.181 | 1.000 | 1.000 | 0.514 | 0.194 | 0.736 | 36/36 | 4096/32768 |
+
+**Reading:**
+- RKB cap fires 36/36 across all K at 150 ms (the actual scoring time
+  averaged 0.20 s -- the 50 ms over-budget is the per-call setup cost).
+- RKB scores ~12% of evicted positions before cap fires; the partial
+  scan still recovers ~50% answer rate via early-context attention
+  sinks that are sometimes answer-bearing.
+- **At K=96 the headline anchor:** RepairKV 0.917 vs RKB 0.472,
+  Δ=+0.444, Wilcoxon p=2.55e-5 (median Δ=+0.500). The "dominates a
+  budgeted reselector at deployment-realistic wall-clock" clause
+  is now anchored to 150 ms instead of 708 ms.
+- **K-conditional dominance:** at K=32 RepairKV (0.375) actually
+  loses to RKB (0.500) at 150ms by Δ=-0.125. The "dominates RKB
+  at 150ms" clause holds at K≥64. The abstract is K-conditional.
+
+This addendum + the K-sweep redo + the existing tight-budget
+multiplier sweep together form the binding evidence for the
+abstract's "approaches at K≥80, dominates at sub-second budgets at
+K≥64" framing.
+
