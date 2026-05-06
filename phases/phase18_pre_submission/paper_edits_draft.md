@@ -44,11 +44,12 @@ mechanisms separately: (i) the \emph{lifecycle slot} contribution
 (scoring once per pause boundary at full per-position granularity)
 and (ii) the \emph{burst expansion} contribution (selecting top-$K$
 in bursts of $L$ contiguous tokens with $R$-token rescoring). At
-$K=96$ on Qwen we measure $\Delta_\text{slot}=$[fill no-burst minus
-PageSummary] and $\Delta_\text{burst}=$[fill RepairKV minus
-no-burst]; on Llama at low $K$ we report $\Delta_\text{burst}$
-explicitly because the $K=96$ no-burst saturates and is
-uninformative. The lifecycle-slot contribution is the framing
+$K=96$ on Qwen we measure $\Delta_\text{slot}{=}{+}0.459$
+(\repairkv{}-no-burst $0.653$ minus PageSummary-Quest-inspired
+$0.194$) and $\Delta_\text{burst}{=}{+}0.264$ (\repairkv{} $0.917$
+minus \repairkv{}-no-burst $0.653$); on Llama at low $K$ we report
+$\Delta_\text{burst}$ explicitly because the $K{=}96$ no-burst
+saturates at $1.000$ and is uninformative. The lifecycle-slot contribution is the framing
 contribution; the burst contribution is an additional refinement
 that is not necessary for the slot to outperform same-budget
 chunk-summary scoring.}
@@ -180,11 +181,13 @@ context length: at $32$K context with SDPA the ratio is about
 $19\times$, and about $10\times$ with FlashAttention-2; under
 aggressive prefix caching the crossover narrows further and is left
 to follow-up work. On Qwen2.5-7B-Instruct at $32$K context,
-MQ-NIAH-4Q at $K=96$, \repairkv{} scores [fill A] versus [fill B]
-for matched no-repair and [fill C] for the strongest
-time-matched alternative (PageSummary-Quest-inspired); against
+MQ-NIAH-4Q at $K=96$ (n{=}36 paired observations), \repairkv{}
+scores $0.917$ versus $0.208$ for matched no-repair and $0.194$
+for PageSummary-Quest-inspired ($\Delta{=}{+}0.722$, Holm-corrected
+$p{<}10^{-9}$, Hodges--Lehmann CI $[0.75, 0.75]$); against
 Refresh-$K$-budgeted at the deployment-realistic 150\,ms budget,
-$\Delta=$[fill RKB-150ms] (Holm-adjusted $p<$[fill p]).}
+$\Delta{=}$[fill RKB-150ms; pending tight-K-sweep result]
+(Holm-adjusted $p{<}$[fill p]).}
 ```
 
 **Notes:**
