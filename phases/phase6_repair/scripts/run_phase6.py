@@ -90,6 +90,16 @@ def parse_args() -> argparse.Namespace:
         "chunks visited per budget. Sensitivity sweep {32, 64, 128, 256} "
         "addresses the fixed-hyperparameter strawman attack.",
     )
+    parser.add_argument(
+        "--tm-budget-absolute-s",
+        type=float,
+        default=0.0,
+        help="Absolute per-K budget for the time-matched conditions, in "
+        "seconds. When > 0, OVERRIDES the T_repair * multiplier. Use this "
+        "for tight K-sweep experiments where the n_k amortization would "
+        "otherwise produce K-dependent budgets. e.g., 0.150 = 150 ms = "
+        "deployment-realistic.",
+    )
     return parser.parse_args()
 
 
@@ -113,6 +123,7 @@ def main() -> int:
         initial_compressor=args.initial_compressor,
         tm_budget_multiplier=args.tm_budget_multiplier,
         page_summary_chunk_size=args.page_summary_chunk_size,
+        tm_budget_absolute_s=args.tm_budget_absolute_s,
     )
     payload = run_experiment(config)
     print(payload["artifact_path"])

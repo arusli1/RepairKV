@@ -197,6 +197,14 @@ class Phase6Config:
     # is the default; sensitivity sweep at {32, 64, 128, 256} addresses
     # the "fixed-hyperparameter strawman" reviewer attack.
     page_summary_chunk_size: int = 128
+    # Phase 18 v5.3: optional ABSOLUTE per-K budget for the time-matched
+    # conditions, in seconds. When > 0, OVERRIDES the
+    # T_repair-derived budget (idlekv_t_repair_s * tm_budget_multiplier).
+    # Useful for tight-K-sweep experiments where the n_k amortization
+    # would otherwise produce K-dependent budgets — set this to a fixed
+    # ms value (e.g. 0.150 = 150 ms = deployment-realistic) to compare
+    # at the same absolute budget across K.
+    tm_budget_absolute_s: float = 0.0
 
 
 def ensure_results_dirs(stage: str) -> Path:
@@ -250,6 +258,7 @@ def build_config(
     initial_compressor: str = "snapkv",
     tm_budget_multiplier: float = 1.05,
     page_summary_chunk_size: int = 128,
+    tm_budget_absolute_s: float = 0.0,
 ) -> Phase6Config:
     """Construct one run config with stage defaults unless overridden."""
     normalized_stage = _normalize_stage(stage)
@@ -307,6 +316,7 @@ def build_config(
         initial_compressor=normalized_initial_compressor,
         tm_budget_multiplier=float(tm_budget_multiplier),
         page_summary_chunk_size=int(page_summary_chunk_size),
+        tm_budget_absolute_s=float(tm_budget_absolute_s),
     )
 
 
@@ -1644,7 +1654,11 @@ def _run_one_split(
                     "Refresh-K-budgeted requires IdleKV in conditions to source per-example T_repair."
                 )
             # 1.05 buffer per Phase 18 plan.
-            budget_s = float(idlekv_t_repair_s) * float(config.tm_budget_multiplier)
+            budget_s = (
+                float(config.tm_budget_absolute_s)
+                if float(config.tm_budget_absolute_s) > 0.0
+                else float(idlekv_t_repair_s) * float(config.tm_budget_multiplier)
+            )
             score_start = time.perf_counter()
             # Budgeted scorer over (active + evicted-context) — same scope as
             # unbudgeted Refresh-K (entire post-Q1 context plus Q1 tail).
@@ -1716,7 +1730,11 @@ def _run_one_split(
                 raise ValueError(
                     "PageSummary-Quest-inspired requires IdleKV in conditions for per-example T_repair."
                 )
-            budget_s = float(idlekv_t_repair_s) * float(config.tm_budget_multiplier)
+            budget_s = (
+                float(config.tm_budget_absolute_s)
+                if float(config.tm_budget_absolute_s) > 0.0
+                else float(idlekv_t_repair_s) * float(config.tm_budget_multiplier)
+            )
             score_start = time.perf_counter()
             page_partial_scores, page_info = score_evicted_positions_page_summary(
                 query_rows=q2_query_rows,
