@@ -16,9 +16,9 @@ want to defuse HARKing):
 
 ## Headline numbers (all ready to slot into green drafts)
 
-### Quality (W1, K=96 on 4Q, n=12 × 3 partitions = 36 obs)
+### Quality (W1, K=96 on 4Q, n=12 × 3 partitions = 36 obs) -- POST K-SWEEP REDO
 
-| Condition | Qwen2.5-7B | Llama-3.1-8B (appendix, n=36) |
+| Condition | Qwen2.5-7B (post-fix) | Llama-3.1-8B (appendix, n=36) |
 |---|---|---|
 | A (full uncompressed cache) | 1.000 | 1.000 |
 | B (compressed pre-repair) | 0.167 | 0.500 |
@@ -26,41 +26,43 @@ want to defuse HARKing):
 | **RepairKV** | **0.917** | **1.000** |
 | Refresh-K (unbudgeted ceiling) | 1.000 | -- |
 | Refresh-K-budgeted | 1.000 | 1.000 |
-| PageSummary-Quest-inspired | **0.292** | 0.500 |
+| PageSummary-Quest-inspired (post-fix) | **0.194** | 0.500 |
 | RepairKV-no-burst | 0.653 | 1.000 |
+| Oracle-K (gold-span ceiling) | 1.000 | -- |
 | Random-K | 0.222 | -- |
-| Oldest-K | -- | -- |
+| Oldest-K | 0.167 | -- |
 
-### Statistical tests at K=96 4Q on Qwen (binding contrasts)
+### Statistical tests at K=96 4Q on Qwen (binding contrasts) -- POST K-SWEEP REDO
 
 - RepairKV vs PageSummary-Quest-inspired:
-  - Δ = +0.625
-  - paired Wilcoxon (Pratt-exact) p < 1e-4
-  - Holm-corrected (over family of 10 tests = 5 K's × 2 contrasts) p < 1e-4
-  - Hodges-Lehmann CI: [0.500, 0.750]
+  - Δ = +0.722 (was +0.625 with buggy fusion)
+  - paired Wilcoxon (Pratt-exact) p < 1e-9
+  - Holm-corrected (over family of 10 tests = 5 K's × 2 contrasts) p = 2.9e-10
+  - Hodges-Lehmann CI: [0.750, 0.750]
 - RepairKV vs Refresh-K-budgeted:
-  - Δ = -0.083 (RepairKV scores slightly lower)
-  - HL median paired difference = 0.000
-  - "Approaches the quality of" satisfied (|median| ≤ 0.10)
+  - Δ = -0.083 (RepairKV scores slightly lower; RKB ≈ unbudgeted ceiling)
+  - HL median paired difference = 0.000, HL CI [0.000, 0.000]
+  - "Approaches within Δ ≤ 0.10" satisfied at K=96
 - TOST RepairKV vs Condition A at margin 0.20:
-  - Two one-sided signed-rank tests both reject (p<0.05)
+  - p_lower = 0.0189, p_upper = 0.0000, **equivalent = True**
   - **Equivalent to full-cache reference within 0.20**
-- Burst-expansion ablation gate:
-  - RepairKV-no-burst = 0.653 ≥ PageSummary 0.292 - 0.05 ✓
-  - Lifecycle-slot framing survives without burst expansion
+- Burst-expansion attribution at K=96:
+  - Δ_slot = no-burst − PageSummary = +0.459 (lifecycle-slot)
+  - Δ_burst = RepairKV − no-burst = +0.264 (burst expansion)
 - Frontier robustness:
-  - 4 of 5 K's reject Holm vs PageSummary
+  - 4/5 K's reject Holm-corrected vs PageSummary (K=32 fails;
+    K=32 PSum p_holm=0.73). Predicted ≥4/5: ✓
   - **Verdict (corrected gate logic, decide_gate.py): STRONG PASS**
 
-### 4Q frontier across K (n=36 paired obs per K, Qwen)
+### 4Q frontier across K (n=36 paired obs per K, Qwen) -- POST K-SWEEP REDO
 
-| K | A | B_match | RepairKV | Refresh-K | RefK-budgeted | PageSummary | NoBurst |
-|---|---|---|---|---|---|---|---|
-| 32 | 1.000 | 0.208 | 0.375 | 1.000 | 1.000 | 0.264 | 0.500 |
-| 64 | 1.000 | 0.208 | 0.639 | 1.000 | 1.000 | 0.250 | 0.569 |
-| 80 | 1.000 | 0.194 | 0.778 | 1.000 | 1.000 | 0.264 | 0.569 |
-| 96 | 1.000 | 0.208 | **0.917** | 1.000 | 1.000 | 0.292 | 0.653 |
-| 128 | 1.000 | 0.181 | 1.000 | 1.000 | 1.000 | 0.278 | 0.736 |
+| K | A | B_match | RepairKV | Refresh-K | RefK-budgeted | PageSummary | NoBurst | Oracle-K |
+|---|---|---|---|---|---|---|---|---|
+| 32 | 1.000 | 0.208 | 0.375 | 1.000 | 1.000 | 0.208 | 0.500 | 0.861 |
+| 64 | 1.000 | 0.208 | 0.639 | 1.000 | 1.000 | 0.208 | 0.569 | 1.000 |
+| 80 | 1.000 | 0.194 | 0.778 | 1.000 | 1.000 | 0.208 | 0.569 | 1.000 |
+| 96 | 1.000 | 0.208 | **0.917** | 1.000 | 1.000 | 0.194 | 0.653 | 1.000 |
+| 128 | 1.000 | 0.181 | 1.000 | 1.000 | 0.986 | 0.194 | 0.736 | 1.000 |
 
 Frontier figure: `phases/phase18_pre_submission/results/figures/frontier_4q_ksweep.pdf`.
 
