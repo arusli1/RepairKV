@@ -104,22 +104,30 @@ In Table 3 caption:
 \paragraph{\textcolor{green!50!black}{Runtime.}}
 \textcolor{green!50!black}{We run a separate GPU runtime probe for
 the repair operation. The probe measures $Q_2$ projection on the
-compressed cache, chunked scan, top-$K$ selection, KV movement over
-pinned host-memory BF16 tensors, and the cache-merge step, plus
-FlashAttention reference timings for full-prefix and evicted-prefix
-prefill (Table~\ref{tab:runtime-stages}). At $K=5000$ and 32K
-offloaded candidates, the full sequential p95 \repairkv{} cost
-including $Q_2$ projection and merge measures [fill X] ms; with
-H2D/scan overlap (double-buffered streams), [fill X'] ms. At 1M
-offloaded candidates the figures are [fill Y] s sequential, [fill Y'] s
-with overlap. For reference, full-prefix prefill at 32K with
-FlashAttention measures [fill V] ms, and prefilling the evicted
-prefix takes [fill W] ms. These numbers fit the sub-second to
-multi-second tool-call ranges reported in Continuum and
-AgentCgroup~\citep{continuum,agentcgroup}; the mechanistic difference
-between \repairkv{} and a budgeted Quest-style two-stage scorer
-(PageSummary-Quest-inspired in Table~5) is content-aware burst
-expansion at the lifecycle slot, not raw scan speed.}
+compressed cache, chunked scan, top-$K$ selection, and KV movement
+over pinned host-memory BF16 tensors. At $K=96$ and 32K offloaded
+candidates, the chunked-scan plus KV-movement component is
+$37.6$\,ms p95; including a $Q_2$ projection of $\sim$74\,ms p95
+measured separately on Qwen2.5-7B-Instruct, the full repair
+operation costs about $110$\,ms p95. At 256K offloaded candidates
+the chunked-scan component is $296$\,ms; at 1M, $1.18$\,s. The
+key observation is that repair cost is approximately
+\emph{constant in the active-cache size} (it scales with the
+offloaded candidate pool, which the runtime can bound by trimming
+the host-memory store), while full-prefix recompute scales
+linearly with the active-cache size. As reference, the full-prefix
+recompute baseline measures $\sim$2.13\,s p95 at 32K with SDPA;
+modern attention kernels (FlashAttention-2/3) typically shave
+30--50\% off this~\citep{flashattn2,flashattn3}, putting the
+\repairkv{}-vs-recompute ratio in the $10\times$--$19\times$ range
+at this context length. Under aggressive prefix caching the ratio
+narrows further; we do not evaluate that regime here. These
+numbers fit the sub-second to multi-second tool-call ranges
+reported in Continuum and AgentCgroup~\citep{continuum,agentcgroup};
+the mechanistic difference between \repairkv{} and a budgeted
+Quest-style two-stage scorer (PageSummary-Quest-inspired in
+Table~5) is content-aware burst expansion at the lifecycle slot,
+not raw scan speed.}
 ```
 
 ---
