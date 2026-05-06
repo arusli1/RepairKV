@@ -126,32 +126,32 @@ expansion at the lifecycle slot, not raw scan speed.}
 
 ## W4.5 — Pre-registered abstract branches (replace abstract clause)
 
-**Strong-pass abstract sentence (split into two clauses; agentic framing tightened to "motivated by, not evaluated on"):**
+**Strong-pass abstract sentence (round-4 attack #3 defuse: 19× ratio reframed to constant-vs-linear scaling, with caching caveat):**
 
 ```tex
 \textcolor{green!50!black}{At a matched active-cache budget,
 \repairkv{} approaches the quality of a budgeted $Q_2$-aware
 reselector that operates at the same lifecycle slot, without
 requiring a persistent low-rank index or a $Q_2$-time full
-reselection scan. Separately, on a static-prompt repair benchmark,
-\repairkv{}'s repair operation runs in a fraction of the wall-clock
-cost of full-prefix recompute on the evaluation GPU; deployment
-under prefix caching or other agent-scheduling mechanisms is left
-to follow-up work. On Qwen2.5-7B-Instruct at 32K context,
-MQ-NIAH-4Q at $K=96$, \repairkv{} scores [fill A] versus [fill B]
-for matched no-repair and [fill C] for the strongest time-matched
-alternative (PageSummary-Quest-inspired); the runtime probe
-(Table~\ref{tab:runtime-stages}) measures [fill X-ratio]$\times$
-wall-clock advantage over full-prefix recompute on a static prompt.}
+reselection scan. The repair operation costs roughly constant
+wall-clock per $K$ on the evaluation GPU, while full-prefix
+recompute scales linearly with context length: at $32$K context
+with SDPA the ratio is about $19\times$, and about $10\times$ with
+FlashAttention-2; under aggressive prefix caching the crossover
+narrows further and is left to follow-up work. On Qwen2.5-7B-Instruct
+at 32K context, MQ-NIAH-4Q at $K=96$, \repairkv{} scores [fill A]
+versus [fill B] for matched no-repair and [fill C] for the strongest
+time-matched alternative (PageSummary-Quest-inspired).}
 ```
 
-**Note on agentic framing (round-3 reviewer attack #3 defuse):** the
-paper's Method motivates the lifecycle slot via "tool-call idle
-windows," but the experiments are static-prompt MQ-NIAH on Qwen.
-Real agentic systems use prefix caching, so the recompute ratio
-must be qualified as "static-prompt." The deferred Phase 19 SCBench
-evaluation is the right place to measure repair vs prefix-cache-
-aware recompute under a multi-turn schedule.
+**Notes:**
+- **Agentic framing (round-3 attack #3):** abstract no longer makes a
+  static "19× faster than recompute" claim; instead presents the
+  ratio as a function of attention-impl and caching policy.
+- **19× anchoring (round-4 attack #3):** explicit acknowledgement
+  that V depends on attention-impl + caching. Worst case (SDPA
+  cold) is the headline number; FA-2 cold is reported alongside;
+  prefix caching is named as a future direction.
 
 **Weak-pass abstract sentence:**
 
