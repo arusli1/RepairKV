@@ -57,20 +57,7 @@
   As a result, tokens that matter in later turns may already have been \textcolor{red}{evicted or compressed away} in earlier compression decisions. 
   We study post-compression KV cache repair, a runtime mechanism that restores previously evicted tokens to the active cache.
   \repairkv{} uses the interval between turns to reevaluate which tokens are important from evicted KV rows stored in a slower memory tier, then promotes a small subset before decoding resumes.
-  Controlled experiments show \textcolor{blue}{that this recovery persists when relevance changes and across} \textcolor{red}{different initial eviction policies (compression styles)}, and \textcolor{red}{a preliminary diagnostic on open-source repositories} shows \textcolor{blue}{the same pattern}; on Qwen2.5-7B-Instruct at 32K context, \repairkv{} \textcolor{red}{achieves} 91.0\% retrieval on a four-query needle-in-a-haystack task versus 24.5\% for the matched no-repair baseline at the same active-cache budget, \textcolor{red}{with} only 96 promoted tokens.
-  \textcolor{green!50!black}{At a matched active-cache budget,
-  \repairkv{} approaches the quality of a budgeted $Q_2$-aware
-  reselector that operates at the same lifecycle slot, without
-  requiring a persistent low-rank index or a $Q_2$-time full
-  reselection scan; on the MQ-NIAH-4Q sweep at $K=96$ ($n=12$ over
-  three balanced partitions), \repairkv{} scores 0.917 vs 0.292 for
-  the strongest time-matched alternative (PageSummary-Quest-inspired,
-  $\Delta=+0.625$, paired Wilcoxon Holm-adjusted $p<10^{-4}$). The
-  runtime probe (Figure~\ref{fig:runtime-envelope}) measures
-  \repairkv{}'s repair operation including $Q_2$ projection at
-  about 110\,ms p95 at 32K offloaded candidates, an order of magnitude
-  smaller than full-prefix recompute on the evaluation GPU
-  ($\sim$2.1\,s p95).}
+  Controlled experiments show \textcolor{blue}{that this recovery persists when relevance changes and across} \textcolor{red}{different initial eviction policies (compression styles)}, and \textcolor{red}{a preliminary diagnostic on open-source repositories} shows \textcolor{blue}{the same pattern}; on Qwen2.5-7B-Instruct at 32K context, \repairkv{} \textcolor{red}{achieves} 91.0\% retrieval on a four-query needle-in-a-haystack task versus 24.5\% for the matched no-repair baseline at the same active-cache budget, \textcolor{red}{with} only 96 promoted tokens. 
 \end{abstract}
  
 % -----------------------------------------------------------------------
@@ -307,33 +294,7 @@ The repair map chooses $S_K(\textcolor{red}{s})\subseteq W_N$ \textcolor{red}{wi
 $|S_K|\le K$, where $K$ is the restore budget (the number of evicted KV
 rows promoted back into the active cache),} and resumes from
 $C_{\mathrm{repair}}=C_{\mathrm{base}}\cup S_K$ \textcolor{red}{at resumed
-active-cache budget $|C_{\mathrm{repair}}|\le \bbase+K$}.
-
-\paragraph{\textcolor{green!50!black}{Lifecycle position.}}
-\textcolor{green!50!black}{Query-aware KV retrieval methods such as
-Quest, FIER, ShadowKV, and ParisKV reselect rows during \emph{active}
-attention from a retained or indexed full cache, using
-page-criticality envelopes (Quest), low-rank reconstructions
-(ShadowKV), drift-robust ANN indices (ParisKV), or fine-grained
-retrieval (FIER)~\citep{quest,fier,shadowkv,pariskv}. Page-eviction-
-and-recall systems recall query-relevant evicted state at decode
-time. Preservation-and-resume systems (InferCept, Continuum,
-CachedAttention) keep KV across pause boundaries so future turns do
-not re-prefill~\citep{infercept,continuum,cachedattention}. \repairkv{}
-occupies a distinct slot: it applies query-aware scoring to the
-\emph{post-compression, pre-resume} boundary in the cache lifecycle
--- once per pause, against an evicted store created by the compressor
-itself, with no persistent low-rank index. The matched-active-cache
-controls ($\bmatch$, Random-$K$, Oldest-$K$, StaleQ-$K$, WrongQ-$K$,
-Refresh-$K$-budgeted, PageSummary-Quest-inspired) hold the resumed
-footprint constant so the comparison isolates this lifecycle operator
-from "keep more rows," "use a different scorer at active attention,"
-or "use a per-step page recaller." Refresh-$K$-budgeted scores
-positions in chunks under a wall-clock cap; consequently each chunk's
-softmax normalizer is over (active $\cup$ chunk-evicted) rather than
-(active $\cup$ all-evicted). This is a documented design choice,
-since computing a global denominator across all evicted positions is
-incompatible with a wall-clock cap.}
+active-cache budget $|C_{\mathrm{repair}}|\le \bbase+K$}. 
 
 \paragraph{Two-turn protocol.}
 The protocol proceeds in two turns. 
@@ -721,30 +682,19 @@ audit.}
   \end{tabular}
 \end{table}
 
-\paragraph{\textcolor{green!50!black}{Runtime.}}
-\textcolor{green!50!black}{We run a separate GPU runtime probe for
-the repair operation. The probe measures $Q_2$ projection on the
-compressed cache, chunked scan, top-$K$ selection, and KV movement
-over pinned host-memory BF16 tensors with Qwen-shaped dimensions
-(Figure~\ref{fig:runtime-envelope}; we apply the post-Phase-17
-fixes to the dtype-upcast asynchrony and the host-pool coverage
-guard). At $K=96$ and 32K offloaded candidates the p95 chunked-scan
-plus KV-movement component is $37.6$\,ms; including a $Q_2$
-projection of $\sim$74\,ms p95 measured separately on
-Qwen2.5-7B-Instruct, the full repair operation costs about
-$110$\,ms p95. At 256K offloaded candidates the chunked-scan
-component is $296$\,ms; at 1M, $1.18$\,s. For reference, the
-full-prefix recompute baseline -- prefilling the entire 32K context
-from scratch at $Q_2$ time -- costs $\sim$2.1\,s p95 with SDPA on
-the same GPU; \repairkv{}'s repair operation is therefore about
-$19\times$ faster than full-prefix recompute at 32K. These
-measurements show the operating range for a single-node GPU
-implementation; trace-scheduled serving latency is a natural next
-systems step. For context, agent tool calls range from sub-second
-file/shell operations to multi-second tasks such as test execution
-or code interpretation~\citep{continuum}; repair at evaluation-
-relevant offload sizes fits comfortably within these tool-call
-gaps.}
+\paragraph{\textcolor{red}{Runtime.}}
+\textcolor{red}{We run a separate GPU runtime probe for the repair operation.
+The probe measures chunked scan, top-$K$ selection, and KV movement over
+pinned host-memory BF16 tensors with Qwen-shaped dimensions. At $K=5000$,
+p95 repair latency grows from $50.0$\,ms at 32K offloaded candidates to
+$1.20$\,s at 1M and $4.64$\,s at 4M (Figure~\ref{fig:runtime-envelope}).
+These measurements show the operating range for a single-node GPU
+implementation; trace-scheduled serving latency is a natural next systems
+step. For context, agent tool calls range from sub-second file/shell
+operations to multi-second tasks such as test execution or code
+interpretation~\citep{continuum}. Repair at evaluation-relevant offload
+sizes (32K--1M rows) fits within these typical tool-call gaps, and longer
+windows leave room for larger candidate pools.}
 
 \begin{figure}[tbp]
   \centering
@@ -783,20 +733,6 @@ copy bandwidth, and queueing slack.
 The quality comparisons match active GPU KV budget; total
 host-plus-device storage and end-to-end service cost are reported
 separately.
-\textcolor{green!50!black}{The matched-budget protocol matches active
-GPU KV rows at $\bbase + K$; other resources are reported separately
-and are explicitly not matched. Host-memory store size $|W_N|$,
-$Q_2$ projection compute, scan + top-$K$ + transfer compute, and
-cache merge / re-layout compute are stage-decomposed in the runtime
-probe (Figure~\ref{fig:runtime-envelope}). Total wall-clock is
-matched in the W1 contrast against Refresh-$K$-budgeted and
-PageSummary-Quest-inspired, both run under the per-example
-$T_{\text{repair}}$ envelope including amortized $Q_2$ projection
-and scoring cost. FLOPs are not matched; \repairkv{}'s repair
-operation costs roughly an order of magnitude fewer FLOPs than
-full-prefix prefill at 32K context because \repairkv{} only touches
-keys at score time and does no value-side computation until the
-small post-promotion attention.}
 \textcolor{red}{The exact-Q$_2$ selector provides a controlled view of the
 repair signal, and stronger $Q_2$-aware reselectors, page-level policies,
 or full-prefix recompute may further improve the quality-runtime frontier
@@ -804,13 +740,6 @@ when enough idle-window slack is available.}
 The real-repository diagnostic is small and exploratory, so it supports
 external validity without serving as a SWE-bench issue-resolution
 benchmark.
-\textcolor{green!50!black}{All confirmatory experiments use MQ-NIAH
-variants on Qwen2.5-7B-Instruct, with one Llama-3.1-8B-Instruct
-appendix run as preliminary cross-model evidence. A non-needle
-long-context evaluation (e.g.\ SCBench multi-turn QA) and a symmetric
-multi-model cross-cut are the immediate next experiments and are
-written up as separate research plans (Phases 19 and 20 in the
-project repository).}
 \paragraph{Conclusion.}
 \repairkv{} makes the case for revisable KV compression.
 If context relevance changes after eviction, the cache lifecycle can move

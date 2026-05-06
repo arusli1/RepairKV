@@ -87,28 +87,25 @@ def score_evicted_positions(
 def precompute_host_layer_keys(
     cache: PositionTrackedCache,
     *,
-    query_heads_per_layer: list[int],
+    query_heads_per_layer: list[int] | None = None,
 ) -> list[torch.Tensor]:
-    """Convert a PositionTrackedCache to a list of host-FP32 [heads, T, head_dim]
-    tensors, with grouped-attention head expansion baked in.
+    """Convert a PositionTrackedCache to a list of host-FP32 key tensors.
 
-    Useful for the Phase 18 budgeted scorers (Refresh-K-budgeted,
-    PageSummary-Quest-inspired): we call them per K within the example
-    K-loop, but the underlying CPU copy + repeat is K-independent. Precompute
-    once per example and pass the result to keep wall-clock budgets
-    meaningful.
+    Returns a list of ``[n_kv_heads, T, head_dim]`` tensors, ONE per
+    layer. We deliberately do NOT pre-expand grouped-attention heads
+    here -- pre-expanding 4 KV heads -> 28 query heads on a 32K-position
+    cache produces ~13 GB of host memory per cache (28 layers x 470 MB),
+    which on a 64 GB host swaps under PageSummary + Refresh-K-budgeted
+    + Refresh-K (unbudgeted) co-precomputes. Expand at score time
+    instead -- the expansion is cheap relative to the matmul.
+
+    The ``query_heads_per_layer`` argument is accepted for backward
+    compatibility but ignored.
     """
+    del query_heads_per_layer  # unused; expansion deferred to scorer
     layer_keys: list[torch.Tensor] = []
     for layer_index, (key, _) in enumerate(cache.kv):
-        query_heads = int(query_heads_per_layer[layer_index])
         host_key = key.detach().to("cpu", dtype=torch.float32)[0]
-        kv_heads = int(host_key.shape[0])
-        if query_heads != kv_heads:
-            if query_heads % kv_heads != 0:
-                raise ValueError(
-                    f"query head count {query_heads} not divisible by kv head count {kv_heads}"
-                )
-            host_key = host_key.repeat_interleave(query_heads // kv_heads, dim=0)
         layer_keys.append(host_key)
     return layer_keys
 
@@ -187,24 +184,30 @@ def score_evicted_positions_budgeted(
     deadline = (time.perf_counter() + float(wallclock_deadline_s)) if wallclock_deadline_s is not None else None
 
     # Hoist per-layer host-side conversions. If the caller pre-computed
-    # them (Phase 18 W1 K-loop optimization), reuse to avoid 9x redundant
-    # CPU<-GPU copies per example. Otherwise compute inline.
+    # them (Phase 18 W1 K-loop optimization), reuse to avoid Nx redundant
+    # CPU<-GPU copies per example. Precomputed keys are stored at
+    # [n_kv_heads, T, head_dim] -- head expansion is done lazily inside
+    # the chunk loop so we don't blow up host memory by 7x.
     if precomputed_evicted_layer_keys is not None:
         layer_evicted_keys = list(precomputed_evicted_layer_keys)
     else:
-        layer_evicted_keys = precompute_host_layer_keys(
-            evicted_cache,
-            query_heads_per_layer=[int(query_rows[i].shape[0]) for i in range(n_layers)],
-        )
+        layer_evicted_keys = precompute_host_layer_keys(evicted_cache)
     if precomputed_active_layer_keys is not None:
         layer_active_keys = list(precomputed_active_layer_keys)
     elif active_cache is not None and len(active_cache) > 0:
-        layer_active_keys = list(precompute_host_layer_keys(
-            active_cache,
-            query_heads_per_layer=[int(query_rows[i].shape[0]) for i in range(n_layers)],
-        ))
+        layer_active_keys = list(precompute_host_layer_keys(active_cache))
     else:
         layer_active_keys = [None] * n_layers
+
+    def _expand_heads(rows: torch.Tensor, query_heads: int) -> torch.Tensor:
+        kv_heads = int(rows.shape[0])
+        if query_heads == kv_heads:
+            return rows
+        if query_heads % kv_heads != 0:
+            raise ValueError(
+                f"query head count {query_heads} not divisible by kv head count {kv_heads}"
+            )
+        return rows.repeat_interleave(query_heads // kv_heads, dim=0)
 
     scores: dict[int, float] = {}
     layer_chunks_completed = 0
@@ -223,9 +226,14 @@ def score_evicted_positions_budgeted(
         chunk_layer_scores: list[torch.Tensor] = []
         for layer_index in range(n_layers):
             query_layer = query_rows[layer_index]
-            evicted_key_chunk = layer_evicted_keys[layer_index][:, chunk_start:chunk_stop, :]
-            active_key = layer_active_keys[layer_index]
-            if active_key is not None:
+            query_heads = int(query_layer.shape[0])
+            evicted_key_chunk = _expand_heads(
+                layer_evicted_keys[layer_index][:, chunk_start:chunk_stop, :],
+                query_heads,
+            )
+            active_key_raw = layer_active_keys[layer_index]
+            if active_key_raw is not None:
+                active_key = _expand_heads(active_key_raw, query_heads)
                 # IMPORTANT: softmax over active+chunk keys reflects the same
                 # competition for attention mass as the unbudgeted scorer at
                 # this chunk's slice. Across chunks the normalizer differs
