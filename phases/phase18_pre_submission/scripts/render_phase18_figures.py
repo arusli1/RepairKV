@@ -29,6 +29,7 @@ import numpy as np
 
 CONDITION_PLOT_ORDER = [
     ("A", "Condition A (full cache)", "k", "--", 1.0),
+    ("Oracle-K", "Oracle-K (gold-span ceiling)", "tab:brown", "-.", 1.5),
     ("RepairKV", "RepairKV", "tab:blue", "-", 2.0),
     ("Refresh-K", "Refresh-K (unbudgeted ceiling)", "tab:cyan", ":", 1.5),
     ("Refresh-K-budgeted", "Refresh-K-budgeted", "tab:purple", "-", 1.5),
