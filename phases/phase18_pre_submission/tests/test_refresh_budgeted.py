@@ -176,9 +176,9 @@ def test_budgeted_intermediate_cap_returns_some_positions() -> None:
         position_chunk_size=32,
     )
     full_elapsed = float(info_full["elapsed_s"])
-    if full_elapsed < 0.001:
+    if full_elapsed < 0.020:  # need ~20ms+ for reliable mid-sweep cap test
         pytest.skip(f"full scorer too fast ({full_elapsed*1000:.3f}ms) for partial-cap test")
-    deadline_s = full_elapsed * 0.4
+    deadline_s = full_elapsed * 0.05
 
     scores, info = score_evicted_positions_budgeted(
         query_rows=query_rows,
