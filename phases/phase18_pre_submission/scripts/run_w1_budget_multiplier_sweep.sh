@@ -39,6 +39,16 @@ for MULT in "${MULTIPLIERS[@]}"; do
         --conditions A B B_match IdleKV Refresh-K Refresh-K-budgeted PageSummary-Quest-inspired RepairKV-no-burst \
         --tm-budget-multiplier "${MULT}" \
         2>&1 | tee -a "${LOG_PATH}"
+    # Preserve the artifact under a multiplier-tagged name so successive
+    # multipliers don't overwrite each other (the runner's artifact path
+    # is deterministic on the input parameters, but doesn't include
+    # tm_budget_multiplier).
+    LATEST_ART="$(ls -t phases/phase6_repair/results/full/clean_suite_b16384_r128_qexact_q_ogold_spans_n${NUM_SAMPLES}_k96_*.json 2>/dev/null | head -1)"
+    if [[ -n "${LATEST_ART}" ]]; then
+        DEST="${RESULTS_DIR}/tight_mult${MULT}_$(basename "${LATEST_ART}")"
+        cp "${LATEST_ART}" "${DEST}"
+        echo "[tight] preserved -> ${DEST}" | tee -a "${LOG_PATH}"
+    fi
     echo "[tight] mult=${MULT} done $(date -u)" | tee -a "${LOG_PATH}"
 done
 
