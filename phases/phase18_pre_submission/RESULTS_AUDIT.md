@@ -179,12 +179,48 @@ opposite of "approaches." The corrected gate uses TOST/abs-median
 for the approaches clause and Δ-based for the beats clause
 (PageSummary, optional TM-Recompute-BM25).
 
-**This is a documented amendment, not a post-hoc shift.** The
-amendment preceded the K-sweep (commit `55e8bda` was the v5.1
-scope amendment; the gate-logic correction is in commit `af2fd93`
-applied AFTER the K-sweep when the inconsistency surfaced. Cite
-both in the paper §Method or §Appendix Methodology, alongside the
-original `601d807` pre-registration.
+### Amendment ledger -- three classes (transparent for reviewer audit)
+
+The pre-registration chain spans three distinct classes of
+amendment with different epistemic standing. The paper §Method or
+§Appendix Methodology should cite all three classes explicitly:
+
+**Class (a) -- code-fix amendments with bands committed BEFORE rerun:**
+- `c1f08a7` (PageSummary Stage-1/Stage-2 score-scale fusion bug) +
+  `e437c19` (outcome bands committed before rerun data lands).
+- `853dfb1` (chunk_size CLI flag added) -- code path required
+  for chunk-size sensitivity sweep, no result data dependent.
+- `f1f8813`, `29ac393` (additional bands for tight K-sweep and
+  WINS/NULLS distinction).
+- These are **code fixes**, not data-aware design changes. The
+  bands committed before rerun data make this auditable.
+
+**Class (b) -- scope amendment BEFORE rerun data:**
+- `55e8bda` (n=24→12, K=9→5 trim for deadline). Pre-K-sweep
+  data; an honest scope reduction.
+
+**Class (c) -- gate-logic amendment AFTER K-sweep data:**
+- `af2fd93` (gate-logic correction). The K-sweep data showed
+  RepairKV at K=96 had Δ=-0.083 vs Refresh-K-budgeted; the
+  pre-reg "Δ ≥ 0.10" gate would have failed. The amendment
+  reframed to TOST/abs-median for the "approaches" clause.
+- **Reviewer-honest disclosure:** this amendment was made AFTER
+  data was visible. Its defensibility rests on the abstract's
+  *original* "approaches" wording (commit `35a0c3e`, predating
+  the K-sweep), which was always inconsistent with the v5
+  gate's "Δ ≥ 0.10" criterion. The amendment removed the
+  inconsistency rather than re-targeting on data.
+- **Both verdicts reported:** for full transparency, the
+  paper Appendix should report (a) the *original* gate verdict
+  (RepairKV vs Refresh-K-budgeted Δ=-0.083, **fails Δ≥0.10
+  criterion**) AND (b) the *corrected* gate verdict (TOST
+  margin 0.20 satisfied, abs-median ≤ 0.10 satisfied). A
+  reviewer can audit which framing they prefer.
+
+The amendment ledger above is the strongest defense against
+reviewer attack #1 from round-10 (AdaptFM): "gate-logic change
+post-data." We disclose it explicitly as Class (c) and report
+both verdicts.
 
 ---
 
