@@ -53,6 +53,10 @@ from .selectors import (
     select_oracle_positions,
     select_random_positions,
     select_refresh_positions,
+    score_evicted_positions_budgeted,
+)
+from phases.phase18_pre_submission.src.page_summary import (
+    score_evicted_positions_page_summary,
 )
 
 PHASE_ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +73,9 @@ ALLOWED_CONDITIONS = (
     "StaleQ-K",
     "ContrastiveQ-K",
     "Refresh-K",
+    "Refresh-K-budgeted",
+    "PageSummary-Quest-inspired",
+    "RepairKV-no-burst",
     "Random-K",
     "Oldest-K",
     "ToolFile-K",
@@ -89,6 +96,9 @@ Q2_SCORE_CONDITIONS = frozenset(
         "IdleKV-MMR",
         "ContrastiveQ-K",
         "Refresh-K",
+        "Refresh-K-budgeted",
+        "PageSummary-Quest-inspired",
+        "RepairKV-no-burst",
         "Oracle-K",
         "FileGatedIdleKV-K",
     )
@@ -1454,6 +1464,195 @@ def _run_one_split(
                     ),
                 }
             )
+
+        # ---- Phase 18 W1 NEW CONDITIONS -----------------------------------
+        # T_repair, computed per (example, K) from IdleKV's just-measured
+        # wall-clock. Required for Refresh-K-budgeted and
+        # PageSummary-Quest-inspired (deadline) and reported as a runner
+        # field for fairness audit.
+        idlekv_t_repair_s: float | None = None
+        if "IdleKV" in config.conditions and "idlekv_selection_s" in row:
+            idlekv_t_repair_s = (
+                float(row["idlekv_selection_s"])
+                + float(row["idlekv_inject_ms"]) / 1000.0
+                + float(row["idlekv_transfer_ms"]) / 1000.0
+            )
+            row["idlekv_t_repair_s"] = round(idlekv_t_repair_s, 6)
+
+        if "RepairKV-no-burst" in config.conditions:
+            select_start = time.perf_counter()
+            no_burst_positions = select_idlekv_positions(
+                evicted_positions=evicted_positions,
+                q2_scores=q2_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                k=k_int,
+                left=0,
+                right=0,
+            )
+            no_burst_select_s = time.perf_counter() - select_start
+            no_burst_cache, no_burst_timing = _restore_positions(
+                active_cache=base_partition.compressed,
+                evicted_cache=base_partition.evicted,
+                selected_positions=no_burst_positions,
+            )
+            no_burst_output, no_burst_score, no_burst_generation_s = _run_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                cache=no_burst_cache,
+            )
+            row.update(
+                {
+                    "repairkv_no_burst_score": round(no_burst_score, 6),
+                    "repairkv_no_burst_output": no_burst_output,
+                    "repairkv_no_burst_generation_s": round(no_burst_generation_s, 6),
+                    "repairkv_no_burst_selection_s": round(no_burst_select_s, 6),
+                    "repairkv_no_burst_transfer_ms": round(no_burst_timing["transfer_ms"], 6),
+                    "repairkv_no_burst_inject_ms": round(no_burst_timing["inject_ms"], 6),
+                    "repairkv_no_burst_restored_count": int(no_burst_timing["restored_count"]),
+                    "repairkv_no_burst_selected_positions": no_burst_positions,
+                    "repairkv_no_burst_overlap_fraction": round(
+                        _overlap_fraction(no_burst_positions, q2_relevant_positions), 6,
+                    ),
+                }
+            )
+
+        if "Refresh-K-budgeted" in config.conditions:
+            assert q2_query_rows is not None
+            if idlekv_t_repair_s is None:
+                raise ValueError(
+                    "Refresh-K-budgeted requires IdleKV in conditions to source per-example T_repair."
+                )
+            # 1.05 buffer per Phase 18 plan.
+            budget_s = float(idlekv_t_repair_s) * 1.05
+            score_start = time.perf_counter()
+            # Budgeted scorer over (active + evicted-context) — same scope as
+            # unbudgeted Refresh-K (entire post-Q1 context plus Q1 tail).
+            context_cache = _slice_by_original_positions(q1_turn.cache, range(int(context_len)))
+            tail_cache = _slice_by_original_positions(q1_turn.cache, keep_plan.tail_positions)
+            partial_scores, refresh_budgeted_info = score_evicted_positions_budgeted(
+                query_rows=q2_query_rows,
+                evicted_cache=context_cache,
+                active_cache=tail_cache if len(tail_cache) > 0 else None,
+                pooling=config.pooling,
+                wallclock_deadline_s=budget_s,
+                position_chunk_size=1024,
+            )
+            score_s = time.perf_counter() - score_start
+            select_start = time.perf_counter()
+            refresh_budgeted_positions = select_refresh_positions(
+                context_positions=range(context_len),
+                mandatory_positions=keep_plan.mandatory_context_positions,
+                q2_scores=partial_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                context_budget=config.base_context_budget + k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            select_s = time.perf_counter() - select_start
+            materialize_start = time.perf_counter()
+            refresh_budgeted_cache = _materialize_context_positions(
+                full_post_q1_cache=q1_turn.cache,
+                context_positions=refresh_budgeted_positions,
+                tail_positions=keep_plan.tail_positions,
+            )
+            _sync_if_cuda(refresh_budgeted_cache.device)
+            materialize_ms = (time.perf_counter() - materialize_start) * 1000.0
+            refresh_budgeted_output, refresh_budgeted_score, refresh_budgeted_gen_s = _run_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                cache=refresh_budgeted_cache,
+            )
+            row.update(
+                {
+                    "refresh_k_budgeted_score": round(refresh_budgeted_score, 6),
+                    "refresh_k_budgeted_output": refresh_budgeted_output,
+                    "refresh_k_budgeted_generation_s": round(refresh_budgeted_gen_s, 6),
+                    "refresh_k_budgeted_score_s": round(score_s, 6),
+                    "refresh_k_budgeted_selection_s": round(select_s, 6),
+                    "refresh_k_budgeted_materialize_ms": round(materialize_ms, 6),
+                    "refresh_k_budgeted_t_repair_s": round(budget_s, 6),
+                    "refresh_k_budgeted_positions_scored": int(refresh_budgeted_info["positions_scored"]),
+                    "refresh_k_budgeted_positions_total": int(refresh_budgeted_info["positions_total"]),
+                    "refresh_k_budgeted_cap_fired": bool(refresh_budgeted_info["cap_fired"]),
+                    "refresh_k_budgeted_layer_chunks_completed": int(
+                        refresh_budgeted_info["layer_chunks_completed"]
+                    ),
+                    "refresh_k_budgeted_selected_positions": refresh_budgeted_positions,
+                    "refresh_k_budgeted_overlap_fraction": round(
+                        _overlap_fraction(refresh_budgeted_positions, q2_relevant_positions), 6,
+                    ),
+                }
+            )
+
+        if "PageSummary-Quest-inspired" in config.conditions:
+            assert q2_query_rows is not None
+            if idlekv_t_repair_s is None:
+                raise ValueError(
+                    "PageSummary-Quest-inspired requires IdleKV in conditions for per-example T_repair."
+                )
+            budget_s = float(idlekv_t_repair_s) * 1.05
+            score_start = time.perf_counter()
+            page_partial_scores, page_info = score_evicted_positions_page_summary(
+                query_rows=q2_query_rows,
+                evicted_cache=base_partition.evicted,
+                active_cache=base_partition.compressed,
+                pooling=config.pooling,
+                wallclock_deadline_s=budget_s,
+                chunk_size=128,
+            )
+            score_s = time.perf_counter() - score_start
+            select_start = time.perf_counter()
+            # Use the same burst-pack selection as IdleKV but over the
+            # page-summary partial-scored set so direct apples-to-apples
+            # vs RepairKV.
+            page_positions = select_idlekv_positions(
+                evicted_positions=evicted_positions,
+                q2_scores=page_partial_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                k=k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            select_s = time.perf_counter() - select_start
+            page_cache, page_timing = _restore_positions(
+                active_cache=base_partition.compressed,
+                evicted_cache=base_partition.evicted,
+                selected_positions=page_positions,
+            )
+            page_output, page_score, page_generation_s = _run_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                cache=page_cache,
+            )
+            row.update(
+                {
+                    "page_summary_score": round(page_score, 6),
+                    "page_summary_output": page_output,
+                    "page_summary_generation_s": round(page_generation_s, 6),
+                    "page_summary_score_s": round(score_s, 6),
+                    "page_summary_selection_s": round(select_s, 6),
+                    "page_summary_transfer_ms": round(page_timing["transfer_ms"], 6),
+                    "page_summary_inject_ms": round(page_timing["inject_ms"], 6),
+                    "page_summary_restored_count": int(page_timing["restored_count"]),
+                    "page_summary_t_repair_s": round(budget_s, 6),
+                    "page_summary_chunks_visited": int(page_info["chunks_visited"]),
+                    "page_summary_chunks_total": int(page_info["chunks_total"]),
+                    "page_summary_positions_scored": int(page_info["positions_scored"]),
+                    "page_summary_positions_total": int(page_info["positions_total"]),
+                    "page_summary_stage1_ms": round(float(page_info["stage1_elapsed_s"]) * 1000.0, 6),
+                    "page_summary_stage2_ms": round(float(page_info["stage2_elapsed_s"]) * 1000.0, 6),
+                    "page_summary_cap_fired": bool(page_info["cap_fired"]),
+                    "page_summary_chunk_size": 128,
+                    "page_summary_selected_positions": page_positions,
+                    "page_summary_overlap_fraction": round(
+                        _overlap_fraction(page_positions, q2_relevant_positions), 6,
+                    ),
+                }
+            )
+        # ---- end Phase 18 W1 conditions ------------------------------------
 
         if "ContrastiveQ-K" in config.conditions:
             assert wrong_q_scores is not None
