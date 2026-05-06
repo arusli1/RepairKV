@@ -76,6 +76,7 @@ ALLOWED_CONDITIONS = (
     "Refresh-K-budgeted",
     "PageSummary-Quest-inspired",
     "RepairKV-no-burst",
+    "RepairKV-chunked",
     "Random-K",
     "Oldest-K",
     "ToolFile-K",
@@ -99,6 +100,7 @@ Q2_SCORE_CONDITIONS = frozenset(
         "Refresh-K-budgeted",
         "PageSummary-Quest-inspired",
         "RepairKV-no-burst",
+        "RepairKV-chunked",
         "Oracle-K",
         "FileGatedIdleKV-K",
     )
@@ -1536,6 +1538,66 @@ def _run_one_split(
                 "inject_ms": round(float(row["idlekv_inject_ms"]), 6),
                 "n_k_values": int(n_k),
             }
+
+        if "RepairKV-chunked" in config.conditions:
+            # Chunk-restricted softmax variant of RepairKV's scoring,
+            # matching PageSummary-Quest-inspired's denominator regime.
+            # Disambiguates "lifecycle-slot effect" (algorithmic) from
+            # "scorer denominator effect" (chunk_size-dependent
+            # normalization). chunk_size matches PageSummary's
+            # config.page_summary_chunk_size for the apples-to-apples
+            # comparison.
+            assert q2_query_rows is not None
+            chunked_score_start = time.perf_counter()
+            chunked_evicted_scores, chunked_info = score_evicted_positions_budgeted(
+                query_rows=q2_query_rows,
+                evicted_cache=base_partition.evicted,
+                active_cache=base_partition.compressed,
+                pooling=config.pooling,
+                wallclock_deadline_s=None,  # no cap; isolate denominator effect
+                position_chunk_size=int(config.page_summary_chunk_size),
+                precomputed_evicted_layer_keys=precomputed_evicted_keys,
+                precomputed_active_layer_keys=precomputed_active_keys,
+            )
+            chunked_score_s = time.perf_counter() - chunked_score_start
+            chunked_select_start = time.perf_counter()
+            chunked_positions = select_idlekv_positions(
+                evicted_positions=evicted_positions,
+                q2_scores=chunked_evicted_scores,
+                turn_n_scores=keep_plan.importance_scores,
+                k=k_int,
+                left=config.burst_left,
+                right=config.burst_right,
+            )
+            chunked_select_s = time.perf_counter() - chunked_select_start
+            chunked_cache, chunked_timing = _restore_positions(
+                active_cache=base_partition.compressed,
+                evicted_cache=base_partition.evicted,
+                selected_positions=chunked_positions,
+            )
+            chunked_output, chunked_score, chunked_generation_s = _run_condition(
+                model=model,
+                tokenizer=tokenizer,
+                prepared=split.q2_prepared,
+                cache=chunked_cache,
+            )
+            row.update(
+                {
+                    "repairkv_chunked_score": round(chunked_score, 6),
+                    "repairkv_chunked_output": chunked_output,
+                    "repairkv_chunked_generation_s": round(chunked_generation_s, 6),
+                    "repairkv_chunked_score_s": round(chunked_score_s, 6),
+                    "repairkv_chunked_selection_s": round(chunked_select_s, 6),
+                    "repairkv_chunked_transfer_ms": round(chunked_timing["transfer_ms"], 6),
+                    "repairkv_chunked_inject_ms": round(chunked_timing["inject_ms"], 6),
+                    "repairkv_chunked_restored_count": int(chunked_timing["restored_count"]),
+                    "repairkv_chunked_chunk_size": int(config.page_summary_chunk_size),
+                    "repairkv_chunked_selected_positions": chunked_positions,
+                    "repairkv_chunked_overlap_fraction": round(
+                        _overlap_fraction(chunked_positions, q2_relevant_positions), 6,
+                    ),
+                }
+            )
 
         if "RepairKV-no-burst" in config.conditions:
             select_start = time.perf_counter()
