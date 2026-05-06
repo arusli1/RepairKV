@@ -1,0 +1,88 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{quest,fier}
+\citation{continuum,agentserve}
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:pipeline}{{1}{1}{\repairkv {} System Overview: paused-request KV state repair. A paused request offloads evicted KV to host memory, scores and promotes a budgeted subset conditioned on the chosen signal $s$, and exposes a conceptual tiered-memory interface that production engines would materialize through page or block allocators}{figure.caption.1}{}}
+\citation{agentcgroup}
+\citation{vllm}
+\citation{cachedattention}
+\citation{infercept}
+\citation{lmcache,ttkv}
+\citation{pitfalls}
+\citation{snapkv,streamingllm,h2o,quest}
+\citation{longbench,inftybench,ruler,scbench}
+\citation{scbench,shadowkv}
+\citation{quest,fier,pariskv}
+\citation{retrieval_heads,lazy_eviction}
+\newlabel{sec:related}{{2}{2}{}{section.2}{}}
+\citation{vllm}
+\citation{infercept}
+\citation{toollm,webarena,swebench,agentbench}
+\citation{continuum,agentserve,lmcache,ttkv,cachedattention}
+\newlabel{sec:method}{{3}{3}{}{section.3}{}}
+\newlabel{alg:repair}{{1}{3}{General \repairkv {} Execution Framework}{algorithm.1}{}}
+\citation{qwen}
+\citation{snapkv}
+\citation{ruler}
+\newlabel{eq:score-attn}{{1}{4}{}{equation.3.1}{}}
+\newlabel{sec:setup}{{4}{4}{}{section.4}{}}
+\citation{streamingllm}
+\citation{scissorhands}
+\newlabel{sec:results}{{5}{5}{}{section.5}{}}
+\newlabel{fig:main-frontier}{{2}{5}{Raw exact $Q_2$ score under matched resumed-cache budgets. Solid curves are \repairkv {}. Dotted curves are matched no-repair. Right labels report query count and $\Delta _{96}$, the score gain over matched no-repair at $K=96$}{figure.caption.2}{}}
+\newlabel{tab:specificity-control}{{1}{5}{Next-turn signal specificity at $K=48$ on MQ-NIAH-4Q ($72$ paired example-partition cases). Stale and donor controls test whether any query-like signal suffices; Refresh is a full-budget reselector over active and offloaded KV}{table.caption.3}{}}
+\citation{swebench}
+\citation{continuum}
+\citation{vllm,infercept,lmcache,ttkv,continuum,agentserve}
+\newlabel{fig:multiturn}{{3}{6}{Five-turn relevance-shift diagnostic on MQ-NIAH-8Q ($\bbase {=}18{,}432$, $K{=}80$, $n{=}24$). Groups show post-priming exact scores at equal active-cache budget. Intervals are bootstrap $95\%$ CIs for \repairkv {}, and Stale-Q uses the previous-turn query}{figure.caption.4}{}}
+\newlabel{fig:policy-breadth}{{4}{6}{First-stage eviction-policy sensitivity on MQ-NIAH-4Q ($n{=}24$, $\bbase {=}16{,}384$). Curves show exact $Q_2$ gain over each policy's matched no-repair baseline. The gray band spans Random-$K$/Oldest-$K$ gains}{figure.caption.5}{}}
+\newlabel{tab:real-repo-diagnostic}{{2}{6}{Preliminary real-repository diagnostic at $K=192$ over $48$ callsite cases from $12$ open-source repositories (SWE-bench pool, fixed commits). Accuracy is exact target-identifier recovery. Non-query summarizes the best of Random-$K$, Oldest-$K$, StaleQ-$K$, and WrongQ-$K$ analogues. AnchorWindow and File-gated are label-assisted; non-label methods are Matched, RepairKV, and ToolFile-$K$}{table.caption.6}{}}
+\bibcite{infercept}{{1}{2024}{{Abhyankar et~al.}}{{}}}
+\bibcite{longbench}{{2}{2024}{{Bai et~al.}}{{}}}
+\bibcite{agent_efficiency}{{3}{2025a}{{Bian et~al.}}{{}}}
+\newlabel{fig:runtime-envelope}{{5}{7}{Runtime-capacity probe on the evaluation GPU. (a) Component-summed p95 service time for chunked scan, top-$K$ selection, and KV movement at query length 64 over pinned host-memory BF16 KV-shaped tensors. (b) Stage-wise p95 component time for $K=5000$. Generation and answer evaluation are excluded}{figure.caption.7}{}}
+\newlabel{sec:discussion}{{6}{7}{}{section.6}{}}
+\bibcite{tokencake}{{4}{2025b}{{Bian et~al.}}{{}}}
+\bibcite{pitfalls}{{5}{2025}{{Chen et~al.}}{{}}}
+\bibcite{ttkv}{{6}{2026}{{Dzikanyanga et~al.}}{{}}}
+\bibcite{cachedattention}{{7}{2024}{{Gao et~al.}}{{}}}
+\bibcite{ruler}{{8}{2024}{{Hsieh et~al.}}{{}}}
+\bibcite{swebench}{{9}{2024}{{Jimenez et~al.}}{{}}}
+\bibcite{vllm}{{10}{2023}{{Kwon et~al.}}{{}}}
+\bibcite{snapkv}{{11}{2024a}{{Li et~al.}}{{}}}
+\bibcite{pyramidkv}{{12}{2024b}{{Li et~al.}}{{}}}
+\bibcite{scbench}{{13}{2025}{{Li et~al.}}{{}}}
+\bibcite{continuum}{{14}{2026}{{Li et~al.}}{{}}}
+\bibcite{lmcache}{{15}{2025}{{Liu et~al.}}{{}}}
+\bibcite{agentbench}{{16}{2024}{{Liu et~al.}}{{}}}
+\bibcite{scissorhands}{{17}{2023}{{Liu et~al.}}{{}}}
+\bibcite{toollm}{{18}{2024}{{Qin et~al.}}{{}}}
+\bibcite{qwen}{{19}{2024}{{Qwen}}{{}}}
+\bibcite{cortex}{{20}{2025}{{Pagonas et~al.}}{{}}}
+\bibcite{pariskv}{{21}{2026}{{Qi et~al.}}{{}}}
+\bibcite{retrieval_heads}{{22}{2024}{{Wu et~al.}}{{}}}
+\bibcite{shadowkv}{{23}{2025}{{Sun et~al.}}{{}}}
+\bibcite{quest}{{24}{2024}{{Tang et~al.}}{{}}}
+\bibcite{fier}{{25}{2025}{{Wang et~al.}}{{}}}
+\bibcite{streamingllm}{{26}{2024}{{Xiao et~al.}}{{}}}
+\bibcite{h2o}{{27}{2023}{{Zhang et~al.}}{{}}}
+\bibcite{inftybench}{{28}{2024}{{Zhang et~al.}}{{}}}
+\bibcite{lazy_eviction}{{29}{2025}{{Zhang et~al.}}{{}}}
+\bibcite{agentserve}{{30}{2026}{{Zhang et~al.}}{{}}}
+\bibcite{agentcgroup}{{31}{2026}{{Zheng et~al.}}{{}}}
+\bibcite{webarena}{{32}{2024}{{Zhou et~al.}}{{}}}
+\newlabel{app:evaluation-details}{{A}{10}{}{appendix.A}{}}
+\newlabel{tab:app-scissorhands-stress}{{3}{10}{Scissorhands-style persistence stress test on MQ-NIAH-6Q ($\bbase {=}18{,}432$, $n{=}24$). Values are exact scores. Best ctrl. is the stronger of Random-$K$ and Oldest-$K$; the interval is the paired bootstrap $95\%$ CI for \repairkv {}$-\bmatch $}{table.caption.9}{}}
+\newlabel{app:additional-discussion}{{B}{10}{}{appendix.B}{}}
+\newlabel{app:vt8hop-div2}{{B}{11}{}{appendix.B}{}}
+\newlabel{app:supplementary-figures}{{C}{11}{}{appendix.C}{}}
+\newlabel{fig:app-real-repo-diagnostic}{{6}{11}{Controlled real-repository relevance-shift diagnostic over $48$ callsite examples from $12$ repositories drawn from the SWE-bench repository pool at pinned commits. Repair sees only the event cue. All conditions decode the same event-plus-question prompt. Left: exact identifier accuracy at $K=96$ and $K=192$. Right: $K=192$ \repairkv {} gain over matched no-repair after removing cue-only or answer-retention rows. ToolFile-$K$ is file-name-assisted with oldest-row backfill. File-gated \repairkv {} restricts candidates to the event-named file before applying the event-only scorer. Lexical is an answer-sanitized diagnostic outside the deployable-selector comparison. AnchorWindow-$K$ is a label-assisted locality reference outside the deployable-baseline and end-to-end issue-resolution comparisons}{figure.caption.10}{}}
+\newlabel{fig:app-breadth-operating}{{7}{12}{Supplementary breadth diagnostics. (a) Cells show \repairkv {} score gain over matched no-repair for $K=48$ and $K=96$ across 2-, 3-, 4-, 6-, and 8-question split-query variants. (b) Cells show the fraction of available \spanref {} diagnostic gain recovered by \repairkv {}, clipped to $[0,1]$, for MQ-NIAH-4Q/6Q. Saturated cells with little matched-to-\spanref {} gap should not be read as upper-bound statements}{figure.caption.11}{}}
+\newlabel{fig:app-partition-endpoints}{{8}{12}{Per-partition endpoint scores at $K=128$ on the final exact evaluations. Gray segments show the change from matched no-repair to \repairkv {}, orange points show the benchmark-metadata \spanref {} diagnostic, and labels report the \repairkv {} difference over matched no-repair}{figure.caption.12}{}}
+\newlabel{fig:selection-diagnostic}{{9}{13}{Mechanism diagnostic for the final exact MQ-NIAH evaluations. Curves show overlap between promoted tokens and annotated $Q_2$ answer spans. Content-agnostic promotions stay near baseline while \repairkv {} increasingly covers future-relevant spans}{figure.caption.13}{}}
+\newlabel{fig:app-runtime-capacity}{{10}{13}{Supplementary runtime and selector diagnostics. (a) Synthetic move-and-inject capacity for Qwen-shaped BF16 KV on the evaluation GPU, separate from the Figure~\ref {fig:runtime-envelope} scan/select envelope. Measurements use pinned host-memory promoted blocks and report p95 latency as $K$ or active cache size grows. (b) Appendix proxy-selector diagnostic on MQ-NIAH-4Q/6Q ($100$ examples per split). At $K=96$, content-agnostic promotions stay within $0.010$/$0.004$ of matched no-repair while proxy \repairkv {} remains well above matched}{figure.caption.14}{}}
+\newlabel{fig:app-proxy-controlled}{{10}{13}{Supplementary runtime and selector diagnostics. (a) Synthetic move-and-inject capacity for Qwen-shaped BF16 KV on the evaluation GPU, separate from the Figure~\ref {fig:runtime-envelope} scan/select envelope. Measurements use pinned host-memory promoted blocks and report p95 latency as $K$ or active cache size grows. (b) Appendix proxy-selector diagnostic on MQ-NIAH-4Q/6Q ($100$ examples per split). At $K=96$, content-agnostic promotions stay within $0.010$/$0.004$ of matched no-repair while proxy \repairkv {} remains well above matched}{figure.caption.14}{}}
+\gdef \@abspage@last{13}
