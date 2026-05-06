@@ -122,3 +122,43 @@ After each rerun lands:
 This document plus the prior pre-reg commits (601d807, 55e8bda,
 af2fd93, c1f08a7, 853dfb1) constitutes the full pre-registration
 chain for Phase 18. The paper §Method should cite all six.
+
+---
+
+## Tight K-sweep at absolute 150ms budget (queued, ETA ~21:00 UTC)
+
+K∈{32, 64, 96, 128}, n=12, multiplier replaced by absolute
+`--tm-budget-absolute-s 0.150`. The absolute flag bypasses the
+K-dependent multiplier amortization, giving a K-independent
+deployment-realistic budget across all K.
+
+Predicted bands per condition:
+
+| K | A | B_match | RepairKV | Refresh-K-budgeted | PageSummary | RepairKV-no-burst |
+|---|---|---|---|---|---|---|
+| 32 | 1.0 | 0.20-0.22 | 0.34-0.40 | 0.35-0.65 | 0.10-0.30 | 0.45-0.55 |
+| 64 | 1.0 | 0.18-0.22 | 0.60-0.68 | 0.40-0.70 | 0.10-0.30 | 0.50-0.60 |
+| 96 | 1.0 | 0.18-0.22 | 0.88-0.95 | 0.50-0.80 | 0.10-0.30 | 0.60-0.70 |
+| 128 | 1.0 | 0.16-0.20 | 0.95-1.00 | 0.55-0.85 | 0.10-0.30 | 0.70-0.80 |
+
+**Pass conditions:**
+- RepairKV column matches K-sweep redo values (its scoring is
+  outside the budget; should be K-dependent only).
+- Refresh-K-budgeted approximately constant across K (or slightly
+  decreasing as K grows, because larger K needs more positions
+  to be reliably scored).
+- PageSummary stays at floor across all K (chunk-granularity binds
+  before budget; same as tight sweep at K=96).
+
+**Crossover prediction:** at K=32 with budget 150ms, RepairKV
+(0.375) might be CLOSE TO Refresh-K-budgeted (0.50). The "approaches"
+clause may flip direction (RepairKV underperforms Refresh-K-budgeted
+at K=32). Honest result: Refresh-K-budgeted's full reselection over
+small K is more efficient than RepairKV's K-budget burst expansion.
+
+This is a legitimate finding for the paper — the lifecycle-slot
+advantage is K-dependent. At the K's where compression matters most
+(K=64+), RepairKV dominates. At very small K, individual top-K
+selection (with full Refresh-K rescoring) is competitive.
+
+Outcome bands committed before tight K-sweep starts.
