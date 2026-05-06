@@ -184,21 +184,53 @@ will cite this hash in §Method.
 
 ---
 
-## W4.6 — Limitations addition (per AdaptFM reviewer)
+## W4.6 — Limitations addition (per AdaptFM reviewer + round-3 critique)
 
 **Target slot:** Discussion / Limitations.
+
+**Proposed green text (agentic framing softened, multi-amendment scope acknowledged):**
+
+```tex
+\textcolor{green!50!black}{All confirmatory experiments use MQ-NIAH
+variants on Qwen2.5-7B-Instruct at $32$K context with a single
+SnapKV-style first-stage compressor. Cross-model evidence is
+limited to one Llama-3.1-8B-Instruct appendix run. Although the
+method is motivated by tool-call idle windows in agentic workflows,
+the evaluation here is on static prompts; the recompute ratio
+reported in the runtime probe (Table~\ref{tab:runtime-stages})
+compares to a fresh full-prefix prefill, and a deployed agent with
+prefix caching could see different ratios. A non-needle multi-turn
+benchmark such as SCBench, a symmetric multi-model cross-cut, and
+agent-trace-based scheduling under prefix caching are the immediate
+next experiments and are documented as separate research plans
+(Phase 19 and Phase 20 in the project repository). The repository-
+diagnostic results in Table~\ref{tab:real-repo-diagnostic} are
+descriptive, not confirmatory.}
+```
+
+## W4.7 — Pre-registration footnote (round-3 attack #1 defuse)
+
+**Target slot:** end of §Method or §Appendix Methodology.
 
 **Proposed green text:**
 
 ```tex
-\textcolor{green!50!black}{All confirmatory experiments use MQ-NIAH
-variants on Qwen2.5-7B-Instruct, with one Llama-3.1-8B-Instruct
-appendix run as preliminary cross-model evidence. A non-needle
-long-context evaluation (e.g.\ SCBench multi-turn QA) and a
-symmetric multi-model cross-cut are the immediate next experiments
-and are written up as separate research plans. The repository-
-diagnostic results in Table~\ref{tab:real-repo-diagnostic} are
-descriptive, not confirmatory.}
+\textcolor{green!50!black}{\textbf{Pre-registration.} The Phase 18
+plan was committed to git before any GPU run touched headline
+numbers (commit \texttt{601d807}). A scope amendment
+(\texttt{55e8bda}) and a gate-logic correction (\texttt{af2fd93})
+followed when the original gate's threshold against
+Refresh-$K$-budgeted was found inconsistent with the abstract's
+``approaches the quality of'' clause. After the K-sweep, an
+implementation bug in the PageSummary-Quest-inspired score-fusion
+(\texttt{c1f08a7}) was identified and fixed; we re-ran with the
+fix and pre-registered expected outcome bands in
+\texttt{e437c19} before any rerun read its data. We report
+RepairKV-chunked (\texttt{934fb8b}) as a denominator-matched
+diagnostic against PageSummary so the headline contrast is not
+confounded by softmax-denominator differences. Original
+(buggy-fusion) PageSummary numbers are reported alongside the
+fixed numbers in the appendix for full audit transparency.}
 ```
 
 ---
