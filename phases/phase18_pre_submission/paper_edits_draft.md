@@ -39,6 +39,19 @@ Refresh-$K$-budgeted, PageSummary-Quest-inspired) hold the resumed
 footprint constant so the comparison isolates this lifecycle operator
 from "keep more rows," "use a different scorer at active attention,"
 or "use a per-step page recaller."}
+\textcolor{green!50!black}{Within \repairkv{} we attribute lift to two
+mechanisms separately: (i) the \emph{lifecycle slot} contribution
+(scoring once per pause boundary at full per-position granularity)
+and (ii) the \emph{burst expansion} contribution (selecting top-$K$
+in bursts of $L$ contiguous tokens with $R$-token rescoring). At
+$K=96$ on Qwen we measure $\Delta_\text{slot}=$[fill no-burst minus
+PageSummary] and $\Delta_\text{burst}=$[fill RepairKV minus
+no-burst]; on Llama at low $K$ we report $\Delta_\text{burst}$
+explicitly because the $K=96$ no-burst saturates and is
+uninformative. The lifecycle-slot contribution is the framing
+contribution; the burst contribution is an additional refinement
+that is not necessary for the slot to outperform same-budget
+chunk-summary scoring.}
 \textcolor{green!50!black}{Refresh-$K$-budgeted scores positions in
 chunks under a wall-clock cap; consequently each chunk's softmax
 normalizer is over (active $\cup$ chunk-evicted) rather than (active
@@ -46,7 +59,11 @@ $\cup$ all-evicted). The single-chunk degenerate case matches the
 unbudgeted scorer exactly, and within-chunk rankings agree; cross-
 chunk score magnitudes are scaled but not directly comparable. This
 is a documented design choice, since computing a global denominator
-across all evicted positions is incompatible with a wall-clock cap.}
+across all evicted positions is incompatible with a wall-clock cap.
+For a denominator-matched comparison we additionally report
+\repairkv{}-chunked, which uses the same chunk-restricted softmax
+as Refresh-$K$-budgeted; \repairkv{}-chunked vs PageSummary
+isolates the algorithm contribution from the normalizer choice.}
 ```
 
 ---
@@ -67,7 +84,7 @@ GPU KV rows; other resources are reported separately, not matched.}
 \item \textcolor{green!50!black}{\textbf{Peak host RAM:} reported in Appendix; the offloaded BF16 KV store is the dominant term.}
 \item \textcolor{green!50!black}{\textbf{Bytes transferred per repair (host $\to$ GPU):} $K$ rows $\times$ \emph{layer\_kv\_bytes} per token; reported in Figure~\ref{fig:runtime-envelope}.}
 \item \textcolor{green!50!black}{\textbf{$Q_2$ projection compute, scan + top-$K$ + transfer compute, cache merge / re-layout compute:} stage-decomposed in Figure~\ref{fig:runtime-envelope}.}
-\item \textcolor{green!50!black}{\textbf{Total wall-clock:} matched in W1 against Refresh-$K$-budgeted and PageSummary-Quest-inspired, both run with the per-example $T_{\text{repair}}$ envelope including amortized $Q_2$ projection and scoring cost.}
+\item \textcolor{green!50!black}{\textbf{Total wall-clock:} matched in W1 against Refresh-$K$-budgeted and PageSummary-Quest-inspired, both run with the per-example $T_{\text{repair}}$ envelope. The $Q_2$ projection (single-shot per pause, ${\sim}74$\,ms on the evaluation GPU) and the $Q_2$ scoring pass are amortized across the $n_K$ K-values evaluated in the K-sweep -- in single-$K$ deployment the amortization is by definition over $n_K{=}1$. To avoid the per-K-amortization confound, we additionally run a tight K-sweep at an absolute $150$\,ms wall-clock budget (matched to RepairKV's W2-probed GPU-side scoring time, not the per-K T_repair multiplier); this is the deployment-realistic budget anchor the abstract uses for the ``dominates'' clause.}
 \item \textcolor{green!50!black}{\textbf{FLOPs:} not matched, but reported as a derived ratio. \repairkv{}'s repair operation costs about [fill F-ratio]$\times$ fewer FLOPs than full-prefix prefill at 32K context (analytic from $K$, $|W_N|$, $d_k$, $H$, $L$), since \repairkv{} only touches keys at score time and does no value-side computation until the small post-promotion attention.}
 \end{itemize}
 ```
@@ -134,28 +151,30 @@ not raw scan speed.}
 
 ## W4.5 — Pre-registered abstract branches (replace abstract clause)
 
-**Strong-pass abstract sentence (round-8 attack #7 defuse: "approaches" replaced with stronger "matches at loose / dominates at tight" framing per measured budget-quality frontier):**
+**Strong-pass abstract sentence (round-10 AdaptFM attack #1 defuse: "matches" -> "approaches within Δ ≤ 0.10 paired difference, TOST-equivalent at margin 0.20"; round-10 senior-ML attack #1 defuse: budget anchored explicitly to 150 ms wall-clock at all K, not the per-K T_repair multiplier):**
 
 ```tex
 \textcolor{green!50!black}{At a matched active-cache budget,
-\repairkv{} matches the quality of full $Q_2$-aware reselection
-when the reselector has unlimited compute, and dominates a budgeted
-reselector at deployment-realistic wall-clock; PageSummary-Quest-
-inspired (a Quest/ShadowKV-style cheap-then-fine scorer at the
-same lifecycle slot) stays at the matched-no-repair floor across
-all budgets we tested, because chunk-granularity Stage-2 visits
-bind below typical idle-window sizes. The repair operation costs
-roughly constant wall-clock per $K$ on the evaluation GPU, while
-full-prefix recompute scales linearly with context length: at
-$32$K context with SDPA the ratio is about $19\times$, and about
-$10\times$ with FlashAttention-2; under aggressive prefix caching
-the crossover narrows further and is left to follow-up work.
-On Qwen2.5-7B-Instruct at 32K context, MQ-NIAH-4Q at $K=96$,
-\repairkv{} scores [fill A] versus [fill B] for matched no-repair
-and [fill C] for the strongest time-matched alternative
-(PageSummary-Quest-inspired); against Refresh-$K$-budgeted at the
-deployment-realistic 150\,ms budget, $\Delta=+0.250$ (Holm-adjusted
-$p<0.005$).}
+\repairkv{} approaches the quality of unbudgeted $Q_2$-aware full
+reselection (within $\Delta \le 0.10$ median paired difference,
+TOST-equivalent at margin $0.20$) and dominates a wall-clock-
+budgeted reselector at the deployment-realistic 150\,ms scoring
+budget, where neither method has time to scan the full evicted
+store. PageSummary-Quest-inspired (a chunk-summary cheap-then-fine
+scorer at the same lifecycle slot) stays at the matched-no-repair
+floor across all budgets we tested, because chunk-granularity
+Stage-2 visits bind below typical idle-window sizes. The repair
+operation costs roughly constant wall-clock per $K$ on the
+evaluation GPU, while full-prefix recompute scales linearly with
+context length: at $32$K context with SDPA the ratio is about
+$19\times$, and about $10\times$ with FlashAttention-2; under
+aggressive prefix caching the crossover narrows further and is left
+to follow-up work. On Qwen2.5-7B-Instruct at $32$K context,
+MQ-NIAH-4Q at $K=96$, \repairkv{} scores [fill A] versus [fill B]
+for matched no-repair and [fill C] for the strongest
+time-matched alternative (PageSummary-Quest-inspired); against
+Refresh-$K$-budgeted at the deployment-realistic 150\,ms budget,
+$\Delta=$[fill RKB-150ms] (Holm-adjusted $p<$[fill p]).}
 ```
 
 **Notes:**
@@ -166,6 +185,23 @@ $p<0.005$).}
   that V depends on attention-impl + caching. Worst case (SDPA
   cold) is the headline number; FA-2 cold is reported alongside;
   prefix caching is named as a future direction.
+- **Round-10 AdaptFM attack #1 defuse:** "matches" replaced with
+  "approaches within Δ ≤ 0.10". The K-sweep data shows
+  RepairKV at K=96 is Δ=-0.083 below unbudgeted Refresh-K (1.000
+  vs 0.917). Reporting "matches" was an overstatement; the
+  TOST-equivalent at margin 0.20 framing is the strongest
+  defensible claim.
+- **Round-10 senior-ML attack #1 defuse:** the "dominates" claim is
+  now anchored to the 150\,ms absolute budget tight K-sweep, not
+  the per-K T_repair multiplier (which divides Q2 scoring across
+  n_K and inflates the budget). At 150\,ms, neither method scans
+  the full evicted store, so the comparison is deployment-
+  realistic.
+- **Round-10 senior-ML attack #5 defuse:** at 150\,ms wall-clock,
+  RepairKV's GPU-side scoring (per W2 probe ~110 ms) fits the
+  budget; the GPU-verify experiment (Phase 18 W1.gpu) confirms
+  that GPU-scored RepairKV gives the same quality as CPU-scored,
+  bridging the runtime probe and the W1 quality budget anchoring.
 
 **Weak-pass abstract sentence:**
 
