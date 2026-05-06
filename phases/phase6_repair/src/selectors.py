@@ -84,6 +84,35 @@ def score_evicted_positions(
     }
 
 
+def precompute_host_layer_keys(
+    cache: PositionTrackedCache,
+    *,
+    query_heads_per_layer: list[int],
+) -> list[torch.Tensor]:
+    """Convert a PositionTrackedCache to a list of host-FP32 [heads, T, head_dim]
+    tensors, with grouped-attention head expansion baked in.
+
+    Useful for the Phase 18 budgeted scorers (Refresh-K-budgeted,
+    PageSummary-Quest-inspired): we call them per K within the example
+    K-loop, but the underlying CPU copy + repeat is K-independent. Precompute
+    once per example and pass the result to keep wall-clock budgets
+    meaningful.
+    """
+    layer_keys: list[torch.Tensor] = []
+    for layer_index, (key, _) in enumerate(cache.kv):
+        query_heads = int(query_heads_per_layer[layer_index])
+        host_key = key.detach().to("cpu", dtype=torch.float32)[0]
+        kv_heads = int(host_key.shape[0])
+        if query_heads != kv_heads:
+            if query_heads % kv_heads != 0:
+                raise ValueError(
+                    f"query head count {query_heads} not divisible by kv head count {kv_heads}"
+                )
+            host_key = host_key.repeat_interleave(query_heads // kv_heads, dim=0)
+        layer_keys.append(host_key)
+    return layer_keys
+
+
 def score_evicted_positions_budgeted(
     *,
     query_rows: torch.Tensor,
@@ -92,6 +121,8 @@ def score_evicted_positions_budgeted(
     pooling: str = "max",
     wallclock_deadline_s: float | None = None,
     position_chunk_size: int = 1024,
+    precomputed_evicted_layer_keys: list[torch.Tensor] | None = None,
+    precomputed_active_layer_keys: list[torch.Tensor | None] | None = None,
 ) -> tuple[dict[int, float], dict[str, int | bool]]:
     """Score evicted positions with an optional per-call wall-clock cap.
 
@@ -155,6 +186,26 @@ def score_evicted_positions_budgeted(
     chunk_starts = list(range(0, n_evicted, int(position_chunk_size)))
     deadline = (time.perf_counter() + float(wallclock_deadline_s)) if wallclock_deadline_s is not None else None
 
+    # Hoist per-layer host-side conversions. If the caller pre-computed
+    # them (Phase 18 W1 K-loop optimization), reuse to avoid 9x redundant
+    # CPU<-GPU copies per example. Otherwise compute inline.
+    if precomputed_evicted_layer_keys is not None:
+        layer_evicted_keys = list(precomputed_evicted_layer_keys)
+    else:
+        layer_evicted_keys = precompute_host_layer_keys(
+            evicted_cache,
+            query_heads_per_layer=[int(query_rows[i].shape[0]) for i in range(n_layers)],
+        )
+    if precomputed_active_layer_keys is not None:
+        layer_active_keys = list(precomputed_active_layer_keys)
+    elif active_cache is not None and len(active_cache) > 0:
+        layer_active_keys = list(precompute_host_layer_keys(
+            active_cache,
+            query_heads_per_layer=[int(query_rows[i].shape[0]) for i in range(n_layers)],
+        ))
+    else:
+        layer_active_keys = [None] * n_layers
+
     scores: dict[int, float] = {}
     layer_chunks_completed = 0
     positions_scored = 0
@@ -170,36 +221,21 @@ def score_evicted_positions_budgeted(
         chunk_stop = min(chunk_start + int(position_chunk_size), n_evicted)
         chunk_positions = evicted_cache.positions[chunk_start:chunk_stop]
         chunk_layer_scores: list[torch.Tensor] = []
-        for layer_index, (key, _) in enumerate(evicted_cache.kv):
+        for layer_index in range(n_layers):
             query_layer = query_rows[layer_index]
-            query_heads = int(query_layer.shape[0])
-
-            evicted_key_float_full = key.detach().to("cpu", dtype=torch.float32)[0]
-
-            def _repeat_heads(key_rows: torch.Tensor) -> torch.Tensor:
-                key_heads = int(key_rows.shape[0])
-                if query_heads == key_heads:
-                    return key_rows
-                if query_heads % key_heads != 0:
-                    raise ValueError(
-                        f"query_rows head count {query_heads} is not compatible with cache heads {key_heads}."
-                    )
-                return key_rows.repeat_interleave(query_heads // key_heads, dim=0)
-
-            evicted_key_float_full = _repeat_heads(evicted_key_float_full)
-            evicted_key_chunk = evicted_key_float_full[:, chunk_start:chunk_stop, :]
-            score_keys = evicted_key_chunk
-            active_len = 0
-            if active_cache is not None and len(active_cache) > 0:
-                active_key_float = active_cache.kv[layer_index][0].detach().to("cpu", dtype=torch.float32)[0]
-                active_key_float = _repeat_heads(active_key_float)
-                active_len = int(active_key_float.shape[1])
+            evicted_key_chunk = layer_evicted_keys[layer_index][:, chunk_start:chunk_stop, :]
+            active_key = layer_active_keys[layer_index]
+            if active_key is not None:
                 # IMPORTANT: softmax over active+chunk keys reflects the same
                 # competition for attention mass as the unbudgeted scorer at
                 # this chunk's slice. Across chunks the normalizer differs
                 # (each chunk competes with active separately), but inside a
                 # chunk it is consistent.
-                score_keys = torch.cat((active_key_float, evicted_key_chunk), dim=1)
+                score_keys = torch.cat((active_key, evicted_key_chunk), dim=1)
+                active_len = int(active_key.shape[1])
+            else:
+                score_keys = evicted_key_chunk
+                active_len = 0
 
             attn_logits = (
                 torch.matmul(query_layer, score_keys.transpose(-2, -1))

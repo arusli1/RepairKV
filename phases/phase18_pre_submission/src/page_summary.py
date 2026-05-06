@@ -135,6 +135,8 @@ def score_evicted_positions_page_summary(
     chunk_size: int = 128,
     summaries: torch.Tensor | None = None,
     chunk_ranges: Sequence[tuple[int, int]] | None = None,
+    precomputed_evicted_layer_keys: list[torch.Tensor] | None = None,
+    precomputed_active_layer_keys: list[torch.Tensor | None] | None = None,
 ) -> tuple[dict[int, float], dict[str, int | bool | float]]:
     """Two-stage page-summary scorer with optional wall-clock cap.
 
@@ -193,6 +195,28 @@ def score_evicted_positions_page_summary(
     ranked_chunk_indices = chunk_scores.argsort(descending=True).tolist() if chunk_scores.numel() else []
     stage1_elapsed_s = time.perf_counter() - stage1_start
 
+    # Hoist per-layer host-side conversions. Reuse precomputed keys
+    # if the caller passed them (Phase 18 W1 K-loop optimization to
+    # avoid 9x redundant CPU<-GPU copies per example).
+    from phases.phase6_repair.src.selectors import precompute_host_layer_keys
+    n_layers = len(evicted_cache.kv)
+    if precomputed_evicted_layer_keys is not None:
+        layer_evicted_keys = list(precomputed_evicted_layer_keys)
+    else:
+        layer_evicted_keys = precompute_host_layer_keys(
+            evicted_cache,
+            query_heads_per_layer=[int(query_rows[i].shape[0]) for i in range(n_layers)],
+        )
+    if precomputed_active_layer_keys is not None:
+        layer_active_keys = list(precomputed_active_layer_keys)
+    elif active_cache is not None and len(active_cache) > 0:
+        layer_active_keys = list(precompute_host_layer_keys(
+            active_cache,
+            query_heads_per_layer=[int(query_rows[i].shape[0]) for i in range(n_layers)],
+        ))
+    else:
+        layer_active_keys = [None] * n_layers
+
     # Stage 2: expensive per-position scoring of high-priority chunks, with wall-clock cap
     stage2_start = time.perf_counter()
     scores: dict[int, float] = {}
@@ -209,31 +233,16 @@ def score_evicted_positions_page_summary(
         # Full-score this chunk (same softmax-over-active+chunk structure as the
         # chunk-position Refresh-K-budgeted scorer for comparability).
         chunk_layer_scores: list[torch.Tensor] = []
-        for layer_index, (key, _) in enumerate(evicted_cache.kv):
+        for layer_index in range(int(summaries.shape[0])):
             query_layer = query_rows[layer_index]
-            query_heads = int(query_layer.shape[0])
-
-            evicted_key_full = key.detach().to("cpu", dtype=torch.float32)[0]
-
-            def _repeat_heads(rows: torch.Tensor) -> torch.Tensor:
-                kv_heads = int(rows.shape[0])
-                if query_heads == kv_heads:
-                    return rows
-                if query_heads % kv_heads != 0:
-                    raise ValueError(
-                        f"query head count {query_heads} not compatible with kv head count {kv_heads}"
-                    )
-                return rows.repeat_interleave(query_heads // kv_heads, dim=0)
-
-            evicted_key_full = _repeat_heads(evicted_key_full)
-            evicted_key_chunk = evicted_key_full[:, start:stop, :]
-            score_keys = evicted_key_chunk
-            active_len = 0
-            if active_cache is not None and len(active_cache) > 0:
-                active_key = active_cache.kv[layer_index][0].detach().to("cpu", dtype=torch.float32)[0]
-                active_key = _repeat_heads(active_key)
-                active_len = int(active_key.shape[1])
+            evicted_key_chunk = layer_evicted_keys[layer_index][:, start:stop, :]
+            active_key = layer_active_keys[layer_index]
+            if active_key is not None:
                 score_keys = torch.cat((active_key, evicted_key_chunk), dim=1)
+                active_len = int(active_key.shape[1])
+            else:
+                score_keys = evicted_key_chunk
+                active_len = 0
             attn_logits = (
                 torch.matmul(query_layer, score_keys.transpose(-2, -1))
                 / math.sqrt(float(score_keys.shape[-1]))

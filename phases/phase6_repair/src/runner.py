@@ -184,6 +184,11 @@ class Phase6Config:
     wrong_query_donor_offset: int = DEFAULT_WRONG_QUERY_DONOR_OFFSET
     model_dir: str = str(DEFAULT_MODEL_DIR)
     initial_compressor: str = "snapkv"
+    # Phase 18 W1: TM budget multiplier applied to per-example T_repair when
+    # running Refresh-K-budgeted, PageSummary-Quest-inspired, and
+    # TM-Recompute-BM25 conditions. 1.05 default; bump to 1.20 if Step 1
+    # smoke reports σ(T_repair)/μ(T_repair) > 0.10. Pre-registered in v5.
+    tm_budget_multiplier: float = 1.05
 
 
 def ensure_results_dirs(stage: str) -> Path:
@@ -964,6 +969,42 @@ def _run_one_split(
         )
         q2_score_s = time.perf_counter() - q2_score_start
 
+        # Phase 18 W1: precompute host-CPU FP32 layer keys once per example
+        # (NOT per K) so Refresh-K-budgeted and PageSummary-Quest-inspired
+        # don't pay 9x redundant CPU<-GPU copies inside the K-loop. Each
+        # copy is ~1.8GB on Qwen-shaped 32K context, so this matters.
+        precomputed_evicted_keys: list[torch.Tensor] | None = None
+        precomputed_active_keys: list[torch.Tensor | None] | None = None
+        precomputed_context_keys: list[torch.Tensor] | None = None
+        precomputed_q1tail_keys: list[torch.Tensor | None] | None = None
+        if any(
+            cond in config.conditions
+            for cond in ("PageSummary-Quest-inspired", "Refresh-K-budgeted")
+        ):
+            from phases.phase6_repair.src.selectors import precompute_host_layer_keys
+            n_layers_local = int(q2_query_rows.shape[0])
+            heads_per_layer = [int(q2_query_rows[i].shape[0]) for i in range(n_layers_local)]
+            if "PageSummary-Quest-inspired" in config.conditions:
+                precomputed_evicted_keys = precompute_host_layer_keys(
+                    base_partition.evicted, query_heads_per_layer=heads_per_layer,
+                )
+                precomputed_active_keys = list(precompute_host_layer_keys(
+                    base_partition.compressed, query_heads_per_layer=heads_per_layer,
+                ))
+            if "Refresh-K-budgeted" in config.conditions:
+                context_cache_pre = _slice_by_original_positions(q1_turn.cache, range(int(context_len)))
+                tail_cache_pre = _slice_by_original_positions(q1_turn.cache, keep_plan.tail_positions)
+                precomputed_context_keys = precompute_host_layer_keys(
+                    context_cache_pre, query_heads_per_layer=heads_per_layer,
+                )
+                if len(tail_cache_pre) > 0:
+                    precomputed_q1tail_keys = list(precompute_host_layer_keys(
+                        tail_cache_pre, query_heads_per_layer=heads_per_layer,
+                    ))
+                else:
+                    precomputed_q1tail_keys = [None] * n_layers_local
+
+
     refresh_scores: dict[int, float] | None = None
     refresh_score_s = 0.0
     if "Refresh-K" in config.conditions:
@@ -1466,18 +1507,33 @@ def _run_one_split(
             )
 
         # ---- Phase 18 W1 NEW CONDITIONS -----------------------------------
-        # T_repair, computed per (example, K) from IdleKV's just-measured
-        # wall-clock. Required for Refresh-K-budgeted and
-        # PageSummary-Quest-inspired (deadline) and reported as a runner
-        # field for fairness audit.
+        # T_repair, computed per (example, K). Includes the example-level
+        # Q2 projection cost q2_query_s and the example-level Q2 scoring
+        # cost q2_score_s, both amortized across len(k_values) (because
+        # they happen once per example but cover all K's), plus the
+        # per-(example, K) selection + movement work. This matches the
+        # Phase 18 v5 plan W4.4 stage decomposition.
         idlekv_t_repair_s: float | None = None
         if "IdleKV" in config.conditions and "idlekv_selection_s" in row:
+            n_k = max(1, len(config.k_values))
+            amortized_q2_s = (float(q2_query_s) + float(q2_score_s)) / float(n_k)
             idlekv_t_repair_s = (
-                float(row["idlekv_selection_s"])
+                amortized_q2_s
+                + float(row["idlekv_selection_s"])
                 + float(row["idlekv_inject_ms"]) / 1000.0
                 + float(row["idlekv_transfer_ms"]) / 1000.0
             )
             row["idlekv_t_repair_s"] = round(idlekv_t_repair_s, 6)
+            row["idlekv_q2_proj_ms"] = round(float(q2_query_s) * 1000.0, 6)
+            row["idlekv_q2_score_ms"] = round(float(q2_score_s) * 1000.0, 6)
+            row["idlekv_t_repair_components"] = {
+                "amortized_q2_proj_ms": round(float(q2_query_s) * 1000.0 / n_k, 6),
+                "amortized_q2_score_ms": round(float(q2_score_s) * 1000.0 / n_k, 6),
+                "selection_ms": round(float(row["idlekv_selection_s"]) * 1000.0, 6),
+                "transfer_ms": round(float(row["idlekv_transfer_ms"]), 6),
+                "inject_ms": round(float(row["idlekv_inject_ms"]), 6),
+                "n_k_values": int(n_k),
+            }
 
         if "RepairKV-no-burst" in config.conditions:
             select_start = time.perf_counter()
@@ -1524,10 +1580,12 @@ def _run_one_split(
                     "Refresh-K-budgeted requires IdleKV in conditions to source per-example T_repair."
                 )
             # 1.05 buffer per Phase 18 plan.
-            budget_s = float(idlekv_t_repair_s) * 1.05
+            budget_s = float(idlekv_t_repair_s) * float(config.tm_budget_multiplier)
             score_start = time.perf_counter()
             # Budgeted scorer over (active + evicted-context) — same scope as
             # unbudgeted Refresh-K (entire post-Q1 context plus Q1 tail).
+            # Reuse precomputed host-FP32 keys to avoid 9x redundant CPU
+            # copies inside the K-loop.
             context_cache = _slice_by_original_positions(q1_turn.cache, range(int(context_len)))
             tail_cache = _slice_by_original_positions(q1_turn.cache, keep_plan.tail_positions)
             partial_scores, refresh_budgeted_info = score_evicted_positions_budgeted(
@@ -1537,6 +1595,8 @@ def _run_one_split(
                 pooling=config.pooling,
                 wallclock_deadline_s=budget_s,
                 position_chunk_size=1024,
+                precomputed_evicted_layer_keys=precomputed_context_keys,
+                precomputed_active_layer_keys=precomputed_q1tail_keys,
             )
             score_s = time.perf_counter() - score_start
             select_start = time.perf_counter()
@@ -1592,7 +1652,7 @@ def _run_one_split(
                 raise ValueError(
                     "PageSummary-Quest-inspired requires IdleKV in conditions for per-example T_repair."
                 )
-            budget_s = float(idlekv_t_repair_s) * 1.05
+            budget_s = float(idlekv_t_repair_s) * float(config.tm_budget_multiplier)
             score_start = time.perf_counter()
             page_partial_scores, page_info = score_evicted_positions_page_summary(
                 query_rows=q2_query_rows,
@@ -1601,6 +1661,8 @@ def _run_one_split(
                 pooling=config.pooling,
                 wallclock_deadline_s=budget_s,
                 chunk_size=128,
+                precomputed_evicted_layer_keys=precomputed_evicted_keys,
+                precomputed_active_layer_keys=precomputed_active_keys,
             )
             score_s = time.perf_counter() - score_start
             select_start = time.perf_counter()

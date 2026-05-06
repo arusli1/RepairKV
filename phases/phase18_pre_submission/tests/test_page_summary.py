@@ -126,11 +126,13 @@ def test_page_summary_partial_cap_visits_chunks_in_priority_order() -> None:
         wallclock_deadline_s=None,
     )
     full_elapsed = float(info_full["elapsed_s"])
-    if full_elapsed < 0.001:
+    if full_elapsed < 0.005:
         pytest.skip(f"full scorer too fast ({full_elapsed*1000:.3f}ms) for partial-cap test")
     full_ranking = info_full["ranked_chunk_indices"]
 
-    deadline_s = full_elapsed * 0.4
+    # 0.1x of full elapsed should reliably trigger the cap mid-sweep
+    # even after the precompute hoist made chunks much cheaper.
+    deadline_s = full_elapsed * 0.02
     _, info_partial = score_evicted_positions_page_summary(
         query_rows=query_rows,
         evicted_cache=evicted,

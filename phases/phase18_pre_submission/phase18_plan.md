@@ -69,11 +69,11 @@ Close five reviewer-style objections from the Phase 17 audit:
 4. Reduce overclaiming on agentic workloads.
 5. Cost accounting (host store, scan/index, transfer, projection).
 
-The single sentence we want a reviewer to walk away with, **revised** per the F-decision reframe:
+The single sentence we want a reviewer to walk away with, **revised** per the F-decision reframe **and** the post-Step-0d AdaptFM-reviewer note that softens the recompute clause to a one-sided cost claim (since TM-Recompute-BM25 is a single-K add-on, not part of the K-sweep):
 
 > RepairKV approaches `Q_2`-aware reselection quality without paying for
 > a persistent low-rank index or a Q_2-time full reselection scan, and
-> at much smaller wall-clock cost than full-prefix recompute.
+> without paying the wall-clock cost of full-prefix recompute.
 
 This now has three falsifiable thresholds, pre-registered below:
 - (a) CI-above-zero against TM-Recompute-BM25 (recompute camp).
@@ -243,6 +243,16 @@ Step 1 smoke must report `σ(T_repair) / μ(T_repair)` per (task, K) configurati
 σ/μ > 0.10 on the K=96 run, the budget multiplier bumps from 1.05
 to 1.20 for all TM conditions. Pin the multiplier in writing before
 headline runs start. We do not change the multiplier post-hoc.
+
+### Per-K wall-clock budget guard (new post-Step-0d, from senior ML researcher's mid-execution review)
+
+Before launching Step 3, the orchestrator MUST:
+
+1. Read Step 1 smoke σ/μ T_repair.
+2. Set the runner's TM budget multiplier (1.05 default; 1.20 if σ/μ > 0.10).
+3. Estimate Step 3 wall-clock from smoke per-K timings × n=24/n=4 scaling.
+4. Hard-abort if estimated total > 130 min (110 budget + 20% slack).
+5. Log all four numbers to the run header before any K's run.
 
 ### Pre-commit to git before headline runs
 
