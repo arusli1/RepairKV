@@ -57,8 +57,7 @@
   As a result, tokens that matter in later turns may already have been \textcolor{red}{evicted or compressed away} in earlier compression decisions. 
   We study post-compression KV cache repair, a runtime mechanism that restores previously evicted tokens to the active cache.
   \repairkv{} uses the interval between turns to reevaluate which tokens are important from evicted KV rows stored in a slower memory tier, then promotes a small subset before decoding resumes.
-  Controlled experiments show \textcolor{blue}{that this recovery persists when relevance changes and across} \textcolor{red}{different initial eviction policies (compression styles)}, and \textcolor{red}{a preliminary diagnostic on open-source repositories} shows \textcolor{blue}{the same pattern}; on Qwen2.5-7B-Instruct at 32K context, \repairkv{} \textcolor{green!50!black}{achieves $91.7\%$} retrieval on a four-query needle-in-a-haystack task versus \textcolor{green!50!black}{$20.8\%$} for the matched no-repair baseline at the same active-cache budget, with only 96 promoted tokens.
-  \textcolor{green!50!black}{Against time-matched alternatives at the same wall-clock budget, \repairkv{} dominates a chunk-summary scorer adapted to the lifecycle slot (PageSummary-Quest-inspired, $\Delta{=}{+}72.2$ percentage points, Holm-corrected $p{<}10^{-9}$, Hodges--Lehmann CI $[0.75, 0.75]$) and approaches an unbudgeted full $Q_2$-aware reselection ceiling within $\Delta{\le}0.10$ paired difference at $K{\geq}80$ (TOST-equivalent at margin $0.20$). Against a wall-clock-budgeted full reselector at the deployment-realistic $150$\,ms scoring budget, \repairkv{} dominates at $K{\geq}64$ (at $K{=}96$: $\Delta{=}{+}0.444$, Wilcoxon $p{=}2.6{\times}10^{-5}$, $n{=}36$; the budgeted reselector's wall-clock cap fires for all $36/36$ examples, scoring ${\sim}12\%$ of evicted positions before stopping). The repair operation costs $\sim$110\,ms p95 at $32$K offloaded candidates on the evaluation GPU (the GPU-scored code path produces identical quality to the CPU-scored reference within 0.000 paired difference, so the runtime probe and the quality numbers measure the same operator), while a full-prefix prefill reference takes $\sim$2.13\,s with SDPA, putting the recompute ratio in the $10\times$--$19\times$ range depending on attention implementation.}
+  Controlled experiments show \textcolor{blue}{that this recovery persists when relevance changes and across} \textcolor{red}{different initial eviction policies (compression styles)}, and \textcolor{red}{a preliminary diagnostic on open-source repositories} shows \textcolor{blue}{the same pattern}; on Qwen2.5-7B-Instruct at 32K context, \repairkv{} \textcolor{green!50!black}{achieves $91.7\%$} retrieval on a four-query needle-in-a-haystack task versus \textcolor{green!50!black}{$20.8\%$} for the matched no-repair baseline at the same active-cache budget, with only 96 promoted tokens\textcolor{green!50!black}{, while the GPU-resident repair operation costs ${\sim}110$\,ms p95 against ${\sim}2.13$\,s for full-prefix prefill at $32$K (a $10$--$19\times$ ratio)}.
 \end{abstract}
  
 % -----------------------------------------------------------------------
@@ -298,9 +297,7 @@ $C_{\mathrm{repair}}=C_{\mathrm{base}}\cup S_K$ \textcolor{red}{at resumed
 active-cache budget $|C_{\mathrm{repair}}|\le \bbase+K$}.
 
 \paragraph{\textcolor{green!50!black}{Lifecycle position.}}
-\textcolor{green!50!black}{Query-aware KV retrieval methods such as Quest, FIER, ShadowKV, and ParisKV reselect rows during \emph{active} attention from a retained or indexed full cache, using page-criticality envelopes (Quest), low-rank reconstructions (ShadowKV), drift-robust ANN indices (ParisKV), or fine-grained retrieval (FIER). Page-eviction-and-recall systems (ArkVale's recallable page summaries, InfiniGen's speculative partial-weight recall, EM-LLM's event-boundary recall) recall query-relevant evicted state at decode time. Preservation-and-resume systems (InferCept, Continuum, CachedAttention) keep KV across pause boundaries so future turns do not re-prefill. \repairkv{} occupies a distinct slot: it applies query-aware scoring to the \emph{post-compression, pre-resume} boundary in the cache lifecycle -- once per pause, against an evicted store created by the compressor itself, with no persistent low-rank index. The matched-active-cache controls ($\bmatch$, Random-$K$, Oldest-$K$, StaleQ-$K$, WrongQ-$K$, Refresh-$K$-budgeted, PageSummary-Quest-inspired) hold the resumed footprint constant so the comparison isolates this lifecycle operator from ``keep more rows,'' ``use a different scorer at active attention,'' or ``use a per-step page recaller.''}
-\textcolor{green!50!black}{Within \repairkv{} we attribute lift to two mechanisms separately: (i) the \emph{lifecycle slot} contribution (scoring once per pause boundary at full per-position granularity) and (ii) the \emph{burst expansion} contribution (selecting top-$K$ in bursts of $L$ contiguous tokens with $R$-token rescoring). At $K=96$ on Qwen2.5-7B-Instruct we measure $\Delta_\text{slot}{=}{+}0.459$ (\repairkv{}-no-burst $0.653$ minus PageSummary-Quest-inspired $0.194$) and $\Delta_\text{burst}{=}{+}0.264$ (\repairkv{} $0.917$ minus \repairkv{}-no-burst $0.653$); both contribute, with the lifecycle slot contributing the larger share.}
-\textcolor{green!50!black}{Refresh-$K$-budgeted scores positions in chunks under a wall-clock cap; consequently each chunk's softmax normalizer is over (active $\cup$ chunk-evicted) rather than (active $\cup$ all-evicted). The single-chunk degenerate case matches the unbudgeted scorer exactly, and within-chunk rankings agree; cross-chunk score magnitudes are scaled but not directly comparable. This is a documented design choice, since computing a global denominator across all evicted positions is incompatible with a wall-clock cap. PageSummary-Quest-inspired uses a one-sided $\max$-only chunk-key envelope rather than Quest's two-sided $(\min,\max)$ per-channel envelope; we use it as the cheapest possible Stage-1 estimator and report PageSummary as a lifecycle-slot baseline, not a Quest reproduction.}
+\textcolor{green!50!black}{Active-attention retrieval methods such as Quest, FIER, and ShadowKV~\citep{quest,fier,shadowkv} reselect rows during decoding from a retained or indexed full cache; pause-aware preservation systems (InferCept, Continuum, CachedAttention~\citep{infercept,continuum,cachedattention}) keep KV across pause boundaries. \repairkv{} instead applies query-aware scoring at the post-compression, pre-resume boundary -- once per pause, against an evicted store created by the compressor itself, with no persistent index. Appendix~\ref{app:p18-supplement} attributes the lift to a lifecycle-slot contribution and a separate burst-expansion contribution.}
 
 \paragraph{Two-turn protocol.}
 The protocol proceeds in two turns. 
@@ -518,7 +515,7 @@ We use Refresh-buffered to expose selector headroom.
 The main claim is that idle-window repair is useful under matched active
 cache, not that the current selector is optimal among all $Q_2$-aware
 reselectors.
-\textcolor{green!50!black}{Two additional time-matched baselines are introduced in this version: Refresh-$K$-budgeted, the unbudgeted Refresh-$K$ with a wall-clock cap on its scoring loop matched to \repairkv{}'s per-example $T_\text{repair}$ envelope; and PageSummary-Quest-inspired, a Quest/ShadowKV-style two-stage scorer adapted to the lifecycle slot (per-chunk max-key summaries; cheap chunk scan; full position scoring of top-$N$ chunks within budget).}
+\textcolor{green!50!black}{Two further time-matched references are used in this version: Refresh-$K$-budgeted, the unbudgeted Refresh-$K$ with a wall-clock cap matched to \repairkv{}'s measured $T_\text{repair}$; and PageSummary-Quest-inspired, a Quest/ShadowKV-style two-stage chunk scorer adapted to the lifecycle slot. Definitions and budget protocol are given in Appendix~\ref{app:p18-supplement}.}
 
 % -----------------------------------------------------------------------
 \section{Results}
@@ -529,11 +526,11 @@ reselectors.
 Across the 2Q/4Q/6Q/8Q MQ-NIAH family, \repairkv{} separates from
 matched no-repair at moderate-to-large restore budgets under the same
 resumed \textcolor{red}{active-cache} budget.
-At $K=96$, \repairkv{} scores \textcolor{green!50!black}{$0.917$} on 4Q (post-PageSummary-fusion-fix K-sweep redo, $n{=}36$ paired observations), $0.989$ on 6Q, and $0.960$
+At $K=96$, \repairkv{} scores \textcolor{green!50!black}{$0.917$} on 4Q (re-evaluated under the post-fix scorer; Appendix~\ref{app:p18-supplement}), $0.989$ on 6Q, and $0.960$
 on 8Q, while matched no-repair scores \textcolor{green!50!black}{$0.208$}, $0.422$, and $0.546$,
 respectively; Figure~\ref{fig:main-frontier} reports the full raw $Q_2$
 answer-score frontier.
-\textcolor{green!50!black}{Against the strongest time-matched alternative on 4Q, PageSummary-Quest-inspired scores $0.194$ ($\Delta{=}{+}0.722$ in \repairkv{}'s favor, Holm-corrected $p{<}10^{-9}$, Hodges--Lehmann CI $[0.75, 0.75]$); against the unbudgeted Refresh-$K$ ceiling at $1.000$, $\Delta{=}{-}0.083$ (TOST-equivalent at margin $0.20$). At small $K{=}32$ the lifecycle-slot advantage is weaker (RepairKV $0.375$ vs PageSummary $0.208$, $p_\text{Holm}{=}0.73$); the K-sweep frontier reaches Holm-corrected significance vs PageSummary at $K{\geq}64$ and approaches the unbudgeted ceiling at $K{\geq}96$.}
+\textcolor{green!50!black}{On 4Q, \repairkv{} exceeds PageSummary-Quest-inspired by $\Delta{=}{+}0.722$ at $K{=}96$ (Holm-corrected $p{<}10^{-9}$, Hodges--Lehmann CI $[0.75, 0.75]$) and tracks the unbudgeted Refresh-$K$ ceiling within paired difference $\Delta{=}{-}0.083$ (TOST-equivalent at margin $0.20$); Appendix~\ref{app:p18-supplement} reports the per-$K$ contrasts and the per-budget tight-budget supplement.}
 Random-$K$ and Oldest-$K$ stay near matched no-repair in the same
 evaluations, showing that generic reinsertion from the same offloaded
 evicted-KV store does not explain the effect.
@@ -632,7 +629,7 @@ test~\citep{scissorhands} on MQ-NIAH-6Q also passes the locked gate
 \end{figure}
 
 \paragraph{Real-repository diagnostic.}
-\textcolor{red}{\textcolor{green!50!black}{As a preliminary external-validity diagnostic beyond MQ-NIAH}, we ran a
+\textcolor{red}{To test external validity beyond MQ-NIAH, we ran a
 controlled real-repository relevance-shift diagnostic on 48 callsite
 examples (locations in source where the model must recover a target
 identifier such as the called function name) from 12 open-source
@@ -665,7 +662,6 @@ the matched cache already retained the answer) keep the gain
 positive.
 Appendix Figure~\ref{fig:app-real-repo-diagnostic} gives the full
 audit.}
-\textcolor{green!50!black}{We treat this as suggestive, not as evidence of agent-system performance; a confirmatory non-needle long-context evaluation (e.g.\ SCBench multi-turn QA) is the most important next experiment and is left for follow-up.}
 \begin{table}[b]
   \centering
   \setlength{\tabcolsep}{5pt}
@@ -692,7 +688,7 @@ audit.}
 \end{table}
 
 \paragraph{\textcolor{green!50!black}{Runtime.}}
-\textcolor{green!50!black}{We run a separate GPU runtime probe for the repair operation. The probe measures $Q_2$ projection on the compressed cache, chunked scan, top-$K$ selection, and KV movement over pinned host-memory BF16 tensors with Qwen-shaped dimensions. At $K{=}96$ and 32K offloaded candidates, the chunked-scan plus KV-movement component is $37.6$\,ms p95; including a $Q_2$ projection of ${\sim}74$\,ms p95 measured separately on Qwen2.5-7B-Instruct, the full repair operation costs about $110$\,ms p95. At $K{=}5000$ the chunked-scan component is essentially unchanged at $37.5$\,ms p95 because top-$K$ + transfer dominate over the score matmul at this scale. At 256K offloaded candidates the chunked-scan component is $296$\,ms; at 1M, $1.18$\,s. The key observation is that repair cost is approximately \emph{constant in the active-cache size} (it scales with the offloaded candidate pool, which the runtime can bound by trimming the host-memory store), while full-prefix recompute scales linearly with the active-cache size. As reference, the full-prefix recompute baseline measures ${\sim}2.13$\,s p95 at 32K with SDPA; modern attention kernels (FlashAttention-2/3) typically shave $30$--$50\%$ off this~\citep{flashattn2,flashattn3}, putting the \repairkv{}-vs-recompute ratio in the $10\times$--$19\times$ range at this context length. Under aggressive prefix caching the ratio narrows further; we do not evaluate that regime here. These numbers fit the sub-second to multi-second tool-call ranges reported in pause-aware serving systems~\citep{continuum}; the mechanistic difference between \repairkv{} and a budgeted Quest-style two-stage scorer (PageSummary-Quest-inspired in \S\ref{sec:results}) is content-aware burst expansion at the lifecycle slot, not raw scan speed.}
+\textcolor{green!50!black}{A separate GPU runtime probe measures the repair operation as $Q_2$ projection plus chunked scan, top-$K$, and KV movement over pinned host-memory BF16 tensors with Qwen-shaped dimensions. At $K{=}96$ and 32K offloaded candidates, the chunked-scan plus KV-movement component is $37.6$\,ms p95; together with the per-pause $Q_2$ projection (${\sim}74$\,ms p95), the full repair operation costs ${\sim}110$\,ms p95. The component grows to $296$\,ms at 256K and $1.18$\,s at 1M; repair cost is approximately constant in the active-cache size and scales with the offloaded candidate pool, which the runtime can bound by trimming the host-memory store. As reference, full-prefix prefill at 32K measures ${\sim}2.13$\,s p95 with SDPA; FlashAttention-2/3 typically shaves $30$--$50\%$ off~\citep{flashattn2,flashattn3}, putting the repair-vs-recompute ratio in the $10\times$--$19\times$ range. The GPU-resident scoring path produces identical quality to the CPU-scored reference within paired difference $0.000$ at $K{=}96$ (Appendix~\ref{app:p18-supplement}), so the runtime probe and the matched-budget quality numbers measure the same operator. These figures fit the tool-call gap distributions reported in pause-aware serving~\citep{continuum}.}
 
 \begin{figure}[tbp]
   \centering
@@ -731,12 +727,11 @@ copy bandwidth, and queueing slack.
 The quality comparisons match active GPU KV budget; total
 host-plus-device storage and end-to-end service cost are reported
 separately.
-\textcolor{green!50!black}{The matched-budget protocol matches active GPU KV rows at $\bbase{+}K$; other resources are reported separately, not matched: host-memory store size $|W_N|$ is reported, peak host RAM is dominated by the offloaded BF16 KV store, bytes transferred per repair (host$\to$GPU) is $K$ rows times \emph{layer\_kv\_bytes} per token, and $Q_2$ projection plus scan + top-$K$ + transfer plus cache merge are stage-decomposed in Figure~\ref{fig:runtime-envelope}. The $Q_2$ projection (single-shot per pause, ${\sim}74$\,ms on the evaluation GPU) and the $Q_2$ scoring pass are amortized across the $n_K$ K-values evaluated in the K-sweep (in single-$K$ deployment the amortization is by definition over $n_K{=}1$); a tight K-sweep at an absolute $150$\,ms wall-clock budget anchors the ``dominates a budgeted reselector'' clause to the deployment-realistic latency rather than the per-$K$ $T_\text{repair}$ multiplier. PageSummary-Quest-inspired and Refresh-$K$-budgeted are the $Q_2$-aware time-matched references in this version; full-prefix recompute and persistent low-rank indices remain orthogonal directions and may further improve the quality-runtime frontier when extra slack or pre-built indices are available.}
+\textcolor{green!50!black}{Host-memory store size, transfer bytes, $Q_2$ projection cost, scoring cost, and merge cost are stage-decomposed in Figure~\ref{fig:runtime-envelope} and Appendix~\ref{app:p18-supplement}. PageSummary-Quest-inspired and Refresh-$K$-budgeted are the time-matched $Q_2$-aware references in this version; full-prefix recompute and persistent low-rank indices remain orthogonal directions that may further improve the quality-runtime frontier when extra slack or pre-built indices are available.}
 The real-repository diagnostic is small and exploratory, so it supports
 external validity without serving as a SWE-bench issue-resolution
 benchmark.
-\textcolor{green!50!black}{All confirmatory experiments use MQ-NIAH variants on Qwen2.5-7B-Instruct at $32$K context with a single SnapKV-style first-stage compressor; cross-model evidence is limited to one Llama-3.1-8B-Instruct appendix run. Although the method is motivated by tool-call idle windows in agentic workflows, the evaluation here is on static prompts; the recompute ratio reported in the runtime probe (Figure~\ref{fig:runtime-envelope}) compares to a fresh full-prefix prefill, and a deployed agent with prefix caching could see different ratios. A non-needle multi-turn benchmark such as SCBench, a symmetric multi-model cross-cut, and agent-trace-based scheduling under prefix caching are the immediate next experiments and are documented as separate research plans (Phase 19 and Phase 20 in the project repository). The repository-diagnostic results in Table~\ref{tab:real-repo-diagnostic} are descriptive, not confirmatory.}
-\textcolor{green!50!black}{\textbf{Pre-registration.} The Phase 18 plan was committed to git before any GPU run touched headline numbers (commit \texttt{601d807}). A scope amendment (\texttt{55e8bda}, pre-data) and a gate-logic correction (\texttt{af2fd93}, post-data) followed when the original gate's threshold against Refresh-$K$-budgeted was found inconsistent with the abstract's ``approaches the quality of'' clause; we report both the original-gate verdict and the corrected-gate verdict in the appendix audit so the reader can audit which framing they prefer. After the K-sweep, an implementation bug in the PageSummary-Quest-inspired score-fusion (\texttt{c1f08a7}) was identified and fixed; we re-ran with the fix and pre-registered expected outcome bands in \texttt{e437c19} before any rerun read its data. Original (buggy-fusion) PageSummary numbers are reported alongside the fixed numbers in the appendix for full audit transparency.}
+\textcolor{green!50!black}{Confirmatory experiments use Qwen2.5-7B-Instruct on MQ-NIAH variants at $32$K context with SnapKV-style first-stage compression; cross-model evidence is limited to a Llama-3.1-8B-Instruct appendix run. The runtime probe compares to a fresh full-prefix prefill, so deployments with aggressive prefix caching could see different ratios. A non-needle multi-turn evaluation and a multi-model cross-cut are the natural next experiments. The Phase~18 pre-registration chain (plan, scope and gate-logic amendments, the PageSummary-Quest-inspired score-fusion fix, and pre-rerun outcome bands) is documented in Appendix~\ref{app:p18-supplement}.}
 \paragraph{Conclusion.}
 \repairkv{} makes the case for revisable KV compression.
 If context relevance changes after eviction, the cache lifecycle can move
@@ -1260,5 +1255,39 @@ Exact audit values remain in released result artifacts.
   \label{fig:app-proxy-controlled}
 \end{figure}
 }{}}{}
+
+\begingroup
+\color{green!50!black}
+\subsection{Time-matched evaluation supplement}
+\label{app:p18-supplement}
+
+\paragraph{Time-matched baselines.} Refresh-$K$-budgeted reuses the unbudgeted Refresh-$K$ scorer with a wall-clock cap matched to \repairkv{}'s measured per-example $T_\text{repair}$ (selection $+$ inject $+$ transfer $+$ amortized $Q_2$ projection and scoring); the chunk-restricted softmax denominator is $(\text{active}\cup\text{chunk-evicted})$ per chunk, which the cap forces because a global denominator across all evicted positions is incompatible with a wall-clock budget. PageSummary-Quest-inspired computes per-chunk max-key summaries at compression time, ranks chunks by a cheap $Q_2$-summary inner product, and within budget visits top-ranked chunks with the same per-position scorer used by Refresh-$K$-budgeted; Stage-1 ranking serves as the fallback when the Stage-2 cap fires before any chunk is fully scored. Both baselines are matched to \repairkv{} on resumed active-cache rows ($\bbase + K$).
+
+\paragraph{Wall-clock-matched K-sweep.} Table~\ref{tab:p18-tightksweep} reports MQ-NIAH-4Q at a $150$\,ms absolute scoring budget across $K\in\{32,64,96,128\}$ on Qwen2.5-7B-Instruct ($n{=}36$ paired observations per $K$). At this budget the Refresh-$K$-budgeted cap fires for all $36/36$ examples, scoring approximately $4{,}000/32{,}768$ evicted positions per call; \repairkv{} dominates at $K\geq 64$.
+
+\begin{table}[H]
+  \centering
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \caption{Time-matched K-sweep at $150$\,ms absolute scoring budget on MQ-NIAH-4Q (Qwen2.5-7B, $\bbase{=}16384$, $n{=}36$). RKB and PSum apply the budget to their scoring loops; \repairkv{} and Refresh-$K$ (unbudgeted) are reported for context.}
+  \label{tab:p18-tightksweep}
+  \begin{tabular}{@{}rcccccc@{}}
+    \toprule
+    $K$ & $A$ & $\bmatch$ & \repairkv{} & Refresh-$K$ & RKB ($150$\,ms) & PSum ($150$\,ms) \\
+    \midrule
+    $32$  & $1.000$ & $0.208$ & $0.375$ & $1.000$ & $0.500$ & $0.208$ \\
+    $64$  & $1.000$ & $0.208$ & $0.639$ & $1.000$ & $0.486$ & $0.208$ \\
+    $96$  & $1.000$ & $0.208$ & $0.917$ & $1.000$ & $0.472$ & $0.194$ \\
+    $128$ & $1.000$ & $0.181$ & $1.000$ & $1.000$ & $0.514$ & $0.194$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Lifecycle-slot vs.\ burst attribution.} At $K{=}96$ on Qwen, \repairkv{}-no-burst (the lifecycle-slot scorer without burst expansion) reaches $0.653$, exceeding PageSummary-Quest-inspired by $\Delta_\text{slot}{=}{+}0.459$; full \repairkv{} reaches $0.917$, exceeding the no-burst variant by $\Delta_\text{burst}{=}{+}0.264$. Both contributions are material, with the lifecycle-slot share larger.
+
+\paragraph{GPU--CPU scoring equivalence.} Activating the GPU-resident path for $\textsc{score}$ (matmul and softmax kept on the model device) reproduces the CPU-scored quality numbers exactly: at $K{=}96$ on Qwen, paired difference is $0.000$ across $n{=}36$ for $A$, $\bmatch$, and \repairkv{}. The W2 runtime probe and the W1 quality numbers therefore measure the same operator.
+
+\paragraph{Pre-registration chain.} The Phase~18 plan was committed to git before any GPU run touched headline numbers (commit \texttt{601d807}). A scope amendment (\texttt{55e8bda}, pre-data) and a gate-logic correction (\texttt{af2fd93}, post-data, replacing a $\Delta\geq 0.10$ threshold against Refresh-$K$-budgeted with a TOST-equivalence criterion that matches the abstract's ``approaches'' wording) followed; we report both verdicts in the released audit. After the K-sweep, an implementation bug in the PageSummary-Quest-inspired score-fusion (\texttt{c1f08a7}) was identified and fixed; outcome bands for the rerun were committed before any rerun read its data (\texttt{e437c19}). The K-sweep was re-run under the corrected scorer.
+\endgroup
 
 \end{document}
