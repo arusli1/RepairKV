@@ -162,3 +162,41 @@ advantage is K-dependent. At the K's where compression matters most
 selection (with full Refresh-K rescoring) is competitive.
 
 Outcome bands committed before tight K-sweep starts.
+
+---
+
+## Pre-registered nulls vs. pre-registered wins (round-8 attack #1)
+
+Family-wise Holm correction over the full ~30-test set will fail
+some pre-registered NULL hypotheses. This is by design; nulls don't
+need Holm survival, and treating the whole family uniformly would
+bias toward "nothing significant."
+
+**Pre-registered WINS (must survive Holm-corrected p<0.05):**
+- RepairKV vs PageSummary-Quest-inspired at K=96 (K-sweep redo).
+  Predicted Δ ≥ 0.50, predicted p ≪ 1e-4.
+- RepairKV vs Refresh-K-budgeted at tight multipliers (0.05 and 0.10
+  in tight-budget sweep). Predicted Δ ≥ 0.20 at mult 0.10.
+- RepairKV vs PageSummary-Quest-inspired across the K-sweep
+  frontier (>=4 of 5 K's predicted).
+
+**Pre-registered NULLS (Holm survival NOT required; band match
+satisfies):**
+- RepairKV vs Refresh-K-budgeted at loose multipliers (0.30 and
+  1.05). Predicted |Δ| ≤ 0.10 (RepairKV ≈ Refresh-K-budgeted).
+- RepairKV vs Condition A (TOST equivalence at margin 0.20). The
+  whole point of TOST is to support a null/equivalence claim.
+- Llama low-K cross-model: predicted Δ at small K may be smaller
+  than on Qwen; we report what we see, no Holm-survival required.
+
+**Holm correction protocol:** apply Holm-corrected α=0.05 only over
+the WINS family (~10-12 tests). Nulls report descriptively with
+HL CI and pre-reg band check. The paper §Method should make this
+distinction explicit.
+
+This bookkeeping makes the test family non-uniform but matches
+how the abstract makes claims: dominates over PageSummary, matches
+over Refresh-K-budgeted (under loose budget) and dominates Refresh-K-
+budgeted (under tight budget). The framing is "constant-time-per-K
+repair vs linear-in-context recompute," not "RepairKV beats every
+baseline at every budget."
