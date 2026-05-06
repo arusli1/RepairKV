@@ -467,3 +467,53 @@ chunk_size ∈ {32, 64, 128, 256} for the denominator-matched
 comparison. The paper W4.1 lifecycle paragraph names
 RepairKV-chunked vs PageSummary as the algorithm-only contrast.
 
+
+### Per-K contrasts (Holm-corrected over the WINS family of 10 tests)
+
+| K | RepairKV vs RKB Δ | HL CI | p_holm | reject? | RepairKV vs PSum Δ | HL CI | p_holm | reject? |
+|---|---|---|---|---|---|---|---|---|
+| 32 | -0.625 | [-0.75, -0.50] | 2.9e-10 | YES (in RKB's favor) | +0.167 | [0.00, 0.25] | 0.73 | NO |
+| 64 | -0.361 | [-0.50, -0.25] | 2.9e-10 | YES (in RKB's favor) | +0.431 | [0.25, 0.50] | 5.8e-7 | YES |
+| 80 | -0.222 | [-0.25, 0.00] | 2.9e-10 | YES (in RKB's favor) | +0.569 | [0.50, 0.75] | 5.8e-10 | YES |
+| 96 | -0.083 | [0.00, 0.00] | 2.9e-10 | YES (in RKB's favor by 0.083) | +0.722 | [0.75, 0.75] | 2.9e-10 | YES |
+| 128 | +0.014 | [0.00, 0.00] | 4.3e-7 | YES (in RepairKV's favor by 0.014, ~tie) | +0.806 | [0.75, 1.00] | 2.9e-10 | YES |
+
+**Honest read of these contrasts:**
+
+1. **RepairKV vs RKB at small K (K=32, 64) is REVERSED:** RKB
+   wins by 0.625/0.361. The RKB cap rarely fires at the
+   per-K-amortized budget, so RKB is essentially unbudgeted full
+   reselection — the unbudgeted ceiling. At small K, the
+   ceiling's choice of top-K positions is closer to oracle than
+   RepairKV's burst-expanded top-K. The "approaches" clause
+   from the abstract holds **only at K ≥ 80**, where Δ ≤ 0.25.
+   At K=96 specifically, Δ=-0.083 with HL CI [0, 0] -- this is
+   the pre-registered "approaches" anchor and the headline.
+2. **RepairKV vs PSum at K=32 fails to reject:** PSum at K=32
+   scores 0.208 (matched-no-repair floor) and RepairKV scores
+   0.375; the +0.167 Δ has p_holm=0.73, not significant after
+   Holm correction over the 10-test WINS family. The
+   "dominates PageSummary" clause holds at K ≥ 64. At K=32,
+   the lifecycle-slot advantage is weak (RepairKV-no-burst at
+   K=32 is 0.500 vs PSum's 0.208, but burst hurts: full
+   RepairKV is 0.375 < no-burst 0.500 at K=32 -- burst
+   trades single-position recall for span coverage which
+   doesn't help at small K).
+3. **K=128 RepairKV ties RKB:** Δ=+0.014, ~tie. RepairKV at
+   1.000 (gold ceiling); RKB at 0.986 (~ceiling). Both methods
+   saturate at large K.
+
+**Honest abstract framing:** "On Qwen2.5-7B-Instruct at 32K
+context, MQ-NIAH-4Q, RepairKV approaches the unbudgeted Q2-aware
+reselection ceiling at K ≥ 80 (Δ ≤ 0.25 to ceiling, exactly 0.083
+at K=96), and significantly outperforms PageSummary-Quest-
+inspired at K ≥ 64. At K=32, RepairKV does not match the
+unbudgeted ceiling and does not significantly outperform
+PageSummary; the lifecycle-slot advantage requires K ≥ 64."
+
+**Where the "dominates RKB" claim lives:** the tight K-sweep at
+150 ms absolute budget (queued, ETA later in pipeline). At
+that budget, RKB's cap fires aggressively (per the
+multiplier sweep at mult 0.10: RKB scored 0.667). The
+"dominates" claim is reserved for that experimental cell.
+
