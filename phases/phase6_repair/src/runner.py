@@ -1659,14 +1659,20 @@ def _run_one_split(
                 precomputed_active_layer_keys=precomputed_active_keys,
             )
             score_s = time.perf_counter() - score_start
-            # Build a fused score map: Stage 1 ranking serves as the base
-            # for every position, Stage 2 scores override where they exist.
-            # This avoids degenerating to no-info fallback when the cap
-            # fires before any chunk's expensive scoring completes -- a
-            # Quest-style scorer would still rely on its summary ranking
-            # in that case, not random selection.
-            page_scores_for_select = dict(page_info.get("stage1_only_scores", {}))
-            page_scores_for_select.update(page_partial_scores)
+            # Build score map for selection. Stage-1 outputs un-softmaxed
+            # pooled logits (O(1-10)); Stage-2 outputs post-softmax
+            # attention mass (O(1e-4)). They are NOT comparable in the
+            # same dict. Earlier code ``dict(stage1).update(stage2)``
+            # silently demoted Stage-2-scored chunks below Stage-1-only
+            # chunks, so the selector picked the chunks Stage 1 ranked
+            # second-best, third-best, ... -- actively avoiding the best
+            # chunk. Fix: use Stage-2 scores ONLY when any positions were
+            # Stage-2-scored; fall back to Stage-1 ranking only when
+            # Stage 2 scored nothing.
+            if page_partial_scores:
+                page_scores_for_select = dict(page_partial_scores)
+            else:
+                page_scores_for_select = dict(page_info.get("stage1_only_scores", {}))
             select_start = time.perf_counter()
             # Use the same burst-pack selection as IdleKV but over the
             # page-summary partial-scored set so direct apples-to-apples
