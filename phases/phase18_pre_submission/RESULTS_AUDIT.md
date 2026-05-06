@@ -358,3 +358,93 @@ reselector at deployment-realistic wall-clock" clause becomes
 Qwen-specific. Pre-registered fail mode: if Llama K=32
 RepairKV < Refresh-K-budgeted, the abstract softens to "matches
 on Qwen, mixed cross-model evidence."
+
+---
+
+## ADDENDUM (round-10 attacks 1-5 + RKB pre-expansion finding)
+
+**Round-10 critique panels surfaced 2 blockers + 3 majors. All
+addressed in this addendum and in `paper_edits_draft.md` round-10
+edits committed before K-sweep redo data lands.**
+
+### RKB pre-expansion finding (CRITICAL discovery during K-sweep redo)
+
+The K-sweep redo's interim numbers show Refresh-K-budgeted at
+K=96 dropping from the original 1.000 to ~0.21 — same level as
+B_match. Initial reaction: "bug." Investigation traced this to a
+methodological IMPROVEMENT, not a regression:
+
+- At commit `7d86eea` (when the original K-sweep ran),
+  `precompute_host_layer_keys` pre-expanded grouped-attention
+  KV-heads to query-heads on the host CPU. For Qwen2.5-7B's
+  4 KV / 28 Q heads at 32K context, this is a 7× pre-expansion
+  consuming ~13 GB host memory per cache, ~50 GB across the four
+  caches involved. This is NOT a deployment-realistic memory
+  profile.
+- At commit `03f4be9` (Phase 18 round-5), the precompute was
+  changed to defer head expansion to score-time, restoring a
+  realistic memory profile. The budgeted scorer now does inline
+  `repeat_interleave` per chunk.
+- Consequence: in the redo, RKB's per-chunk scoring cost is
+  higher (~7× expansion done inline). At the same wall-clock
+  budget (RepairKV's T_repair × 1.05), RKB scores fewer
+  positions before its cap fires. The score drop is from the
+  removal of an unrealistic pre-expansion advantage, not from
+  a code bug.
+
+**Implication for the paper:** the redo numbers are STRONGER
+than the original K-sweep. Under deployment-realistic memory
+conditions (no pre-expansion), Refresh-K-budgeted at the same
+wall-clock budget cannot complete its scan; it stays at the
+matched-no-repair floor, while RepairKV's burst-expanded top-K
+structure operates on a small selected subset and benefits less
+from pre-expansion. The "dominates Refresh-K-budgeted at
+deployment-realistic wall-clock" clause is now supported at
+ALL budgets we tested, not just the tight 150 ms anchor.
+
+### Round-10 attack defuses
+
+**Attack 1 (AdaptFM): abstract overclaims "matches" — actual
+Δ=-0.083 vs unbudgeted Refresh-K at every loose budget.**
+Defuse: abstract reframed to "approaches within Δ ≤ 0.10
+median paired difference, TOST-equivalent at margin 0.20."
+Numbers anchor to Δ vs Refresh-K (unbudgeted), not Δ vs RKB
+(budgeted, now ~0.21 in the redo).
+
+**Attack 2 (senior #1, BLOCKER): T_repair amortizes Q2 scoring
+across n_K, making the budget loose.** Defuse: tight K-sweep at
+**absolute** 150 ms wall-clock (independent of n_K) is the
+deployment-realistic anchor; cost-accounting paragraph (W4.2)
+explicitly discloses the amortization and points to the 150 ms
+result for the "dominates" clause.
+
+**Attack 3 (senior #5, BLOCKER): runtime probe (~110 ms GPU)
+and W1 quality budget (~1.5 s CPU) come from different code
+paths.** Defuse: GPU-verify experiment with
+`PHASE18_SCORE_ON_GPU=1` is in the queue (n=12 K=96). If quality
+within ±0.02 of CPU, the abstract's quality-runtime conjunction
+is internally consistent. Cost-accounting paragraph (W4.2)
+explicitly bridges the two.
+
+**Attack 4 (AdaptFM): gate-logic correction (af2fd93) post-data
+is a HARK pattern.** Defuse: amendment ledger now classifies
+the chain into three classes — (a) code-fix-with-bands-before-
+rerun, (b) pre-data scope, (c) post-data gate-logic. For class
+(c), report BOTH the original-gate verdict and the corrected-
+gate verdict so reviewers can audit.
+
+**Attack 5 (AdaptFM, senior #3): PageSummary uses one-sided
+amax envelope, not Quest's two-sided (min, max).** Defuse:
+disclosed in W4.1 lifecycle paragraph as a strictly weaker
+estimator than Quest's; PageSummary is framed as a lifecycle-
+slot baseline, not a Quest reproduction. The chunk-granularity
+Stage-2 binding argument shows a stronger envelope cannot
+escape the chunk-granularity floor at our budgets.
+
+**Attack 6 (senior #2, MAJOR): RepairKV-chunked is the right
+denominator-matched binding contrast vs PageSummary.** Defuse:
+chunk-size sensitivity sweep in queue runs RepairKV-chunked at
+chunk_size ∈ {32, 64, 128, 256} for the denominator-matched
+comparison. The paper W4.1 lifecycle paragraph names
+RepairKV-chunked vs PageSummary as the algorithm-only contrast.
+
