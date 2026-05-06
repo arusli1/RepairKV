@@ -985,22 +985,14 @@ def _run_one_split(
             n_layers_local = int(q2_query_rows.shape[0])
             heads_per_layer = [int(q2_query_rows[i].shape[0]) for i in range(n_layers_local)]
             if "PageSummary-Quest-inspired" in config.conditions:
-                precomputed_evicted_keys = precompute_host_layer_keys(
-                    base_partition.evicted, query_heads_per_layer=heads_per_layer,
-                )
-                precomputed_active_keys = list(precompute_host_layer_keys(
-                    base_partition.compressed, query_heads_per_layer=heads_per_layer,
-                ))
+                precomputed_evicted_keys = precompute_host_layer_keys(base_partition.evicted)
+                precomputed_active_keys = list(precompute_host_layer_keys(base_partition.compressed))
             if "Refresh-K-budgeted" in config.conditions:
                 context_cache_pre = _slice_by_original_positions(q1_turn.cache, range(int(context_len)))
                 tail_cache_pre = _slice_by_original_positions(q1_turn.cache, keep_plan.tail_positions)
-                precomputed_context_keys = precompute_host_layer_keys(
-                    context_cache_pre, query_heads_per_layer=heads_per_layer,
-                )
+                precomputed_context_keys = precompute_host_layer_keys(context_cache_pre)
                 if len(tail_cache_pre) > 0:
-                    precomputed_q1tail_keys = list(precompute_host_layer_keys(
-                        tail_cache_pre, query_heads_per_layer=heads_per_layer,
-                    ))
+                    precomputed_q1tail_keys = list(precompute_host_layer_keys(tail_cache_pre))
                 else:
                     precomputed_q1tail_keys = [None] * n_layers_local
 
@@ -1665,13 +1657,21 @@ def _run_one_split(
                 precomputed_active_layer_keys=precomputed_active_keys,
             )
             score_s = time.perf_counter() - score_start
+            # Build a fused score map: Stage 1 ranking serves as the base
+            # for every position, Stage 2 scores override where they exist.
+            # This avoids degenerating to no-info fallback when the cap
+            # fires before any chunk's expensive scoring completes -- a
+            # Quest-style scorer would still rely on its summary ranking
+            # in that case, not random selection.
+            page_scores_for_select = dict(page_info.get("stage1_only_scores", {}))
+            page_scores_for_select.update(page_partial_scores)
             select_start = time.perf_counter()
             # Use the same burst-pack selection as IdleKV but over the
             # page-summary partial-scored set so direct apples-to-apples
             # vs RepairKV.
             page_positions = select_idlekv_positions(
                 evicted_positions=evicted_positions,
-                q2_scores=page_partial_scores,
+                q2_scores=page_scores_for_select,
                 turn_n_scores=keep_plan.importance_scores,
                 k=k_int,
                 left=config.burst_left,

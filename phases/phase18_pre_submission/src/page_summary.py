@@ -195,27 +195,31 @@ def score_evicted_positions_page_summary(
     ranked_chunk_indices = chunk_scores.argsort(descending=True).tolist() if chunk_scores.numel() else []
     stage1_elapsed_s = time.perf_counter() - stage1_start
 
-    # Hoist per-layer host-side conversions. Reuse precomputed keys
-    # if the caller passed them (Phase 18 W1 K-loop optimization to
-    # avoid 9x redundant CPU<-GPU copies per example).
+    # Hoist per-layer host-side conversions. Precomputed keys stored at
+    # [n_kv_heads, T, head_dim]; head expansion deferred to chunk-time
+    # to keep host memory in check.
     from phases.phase6_repair.src.selectors import precompute_host_layer_keys
     n_layers = len(evicted_cache.kv)
     if precomputed_evicted_layer_keys is not None:
         layer_evicted_keys = list(precomputed_evicted_layer_keys)
     else:
-        layer_evicted_keys = precompute_host_layer_keys(
-            evicted_cache,
-            query_heads_per_layer=[int(query_rows[i].shape[0]) for i in range(n_layers)],
-        )
+        layer_evicted_keys = precompute_host_layer_keys(evicted_cache)
     if precomputed_active_layer_keys is not None:
         layer_active_keys = list(precomputed_active_layer_keys)
     elif active_cache is not None and len(active_cache) > 0:
-        layer_active_keys = list(precompute_host_layer_keys(
-            active_cache,
-            query_heads_per_layer=[int(query_rows[i].shape[0]) for i in range(n_layers)],
-        ))
+        layer_active_keys = list(precompute_host_layer_keys(active_cache))
     else:
         layer_active_keys = [None] * n_layers
+
+    def _expand_heads(rows: torch.Tensor, query_heads: int) -> torch.Tensor:
+        kv_heads = int(rows.shape[0])
+        if query_heads == kv_heads:
+            return rows
+        if query_heads % kv_heads != 0:
+            raise ValueError(
+                f"query head count {query_heads} not divisible by kv head count {kv_heads}"
+            )
+        return rows.repeat_interleave(query_heads // kv_heads, dim=0)
 
     # Stage 2: expensive per-position scoring of high-priority chunks, with wall-clock cap
     stage2_start = time.perf_counter()
@@ -235,9 +239,14 @@ def score_evicted_positions_page_summary(
         chunk_layer_scores: list[torch.Tensor] = []
         for layer_index in range(int(summaries.shape[0])):
             query_layer = query_rows[layer_index]
-            evicted_key_chunk = layer_evicted_keys[layer_index][:, start:stop, :]
-            active_key = layer_active_keys[layer_index]
-            if active_key is not None:
+            query_heads = int(query_layer.shape[0])
+            evicted_key_chunk = _expand_heads(
+                layer_evicted_keys[layer_index][:, start:stop, :],
+                query_heads,
+            )
+            active_key_raw = layer_active_keys[layer_index]
+            if active_key_raw is not None:
+                active_key = _expand_heads(active_key_raw, query_heads)
                 score_keys = torch.cat((active_key, evicted_key_chunk), dim=1)
                 active_len = int(active_key.shape[1])
             else:
@@ -263,6 +272,18 @@ def score_evicted_positions_page_summary(
 
     stage2_elapsed_s = time.perf_counter() - stage2_start
     elapsed_s = time.perf_counter() - overall_start
+    # For audit / disambiguation: also build a "stage-1-only" score map
+    # using ONLY the cheap chunk-summary scores broadcast to constituent
+    # positions. If the wall-clock cap fires before any expensive Stage 2
+    # work, runners can compare "Stage-1-only ranking" vs the empty
+    # `scores` dict to decide which fallback is actually being measured.
+    stage1_only_scores: dict[int, float] = {}
+    if chunk_scores.numel() > 0:
+        for chunk_idx_int, (start_pos, stop_pos) in enumerate(chunk_ranges):
+            chunk_score = float(chunk_scores[chunk_idx_int].item())
+            for pos in evicted_cache.positions[start_pos:stop_pos]:
+                stage1_only_scores[int(pos)] = chunk_score
+
     info: dict[str, int | bool | float] = {
         "positions_scored": int(positions_scored),
         "positions_total": int(len(evicted_cache.positions)),
@@ -273,5 +294,6 @@ def score_evicted_positions_page_summary(
         "stage2_elapsed_s": float(stage2_elapsed_s),
         "elapsed_s": float(elapsed_s),
         "ranked_chunk_indices": [int(i) for i in ranked_chunk_indices[:chunks_visited]],
+        "stage1_only_scores": stage1_only_scores,
     }
     return scores, info
