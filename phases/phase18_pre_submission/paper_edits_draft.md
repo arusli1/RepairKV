@@ -20,10 +20,14 @@ Pre-registration commit: **`601d807`** (`phases/phase18_pre_submission/phase18_p
 \paragraph{\textcolor{green!50!black}{Lifecycle position.}}
 \textcolor{green!50!black}{Query-aware KV retrieval methods such as
 Quest, FIER, ShadowKV, and ParisKV reselect rows during \emph{active}
-attention from a preserved or low-rank cache~\citep{quest,fier,
-shadowkv,pariskv}. Page-eviction-and-recall systems (ArkVale,
-InfiniGen, EM-LLM) recall query-relevant evicted pages at decode
-time. Preservation-and-resume systems (InferCept, Continuum,
+attention from a retained or indexed full cache, using
+page-criticality envelopes (Quest), low-rank reconstructions
+(ShadowKV), drift-robust ANN indices (ParisKV), or fine-grained
+retrieval (FIER)~\citep{quest,fier,shadowkv,pariskv}. Page-eviction-
+and-recall systems (ArkVale's recallable page summaries, InfiniGen's
+speculative partial-weight recall, EM-LLM's event-boundary recall)
+recall query-relevant evicted state at decode time.
+Preservation-and-resume systems (InferCept, Continuum,
 CachedAttention) keep KV across pause boundaries so future turns do
 not re-prefill~\citep{infercept,continuum,cachedattention}. \repairkv{}
 occupies a distinct slot: it applies query-aware scoring to the
@@ -60,9 +64,11 @@ GPU KV rows; other resources are reported separately, not matched.}
 \begin{itemize}[leftmargin=1.4em,noitemsep,topsep=2pt]
 \item \textcolor{green!50!black}{\textbf{Active-cache GPU rows:} matched at $\bbase + K$.}
 \item \textcolor{green!50!black}{\textbf{Host-memory store size:} not matched; $|W_N|$ is reported.}
-\item \textcolor{green!50!black}{\textbf{$Q_2$ projection compute, scan + top-$K$ + transfer compute, cache merge / re-layout compute:} stage-decomposed in Figure~\ref{fig:runtime-envelope} and Table 4.}
+\item \textcolor{green!50!black}{\textbf{Peak host RAM:} reported in Appendix; the offloaded BF16 KV store is the dominant term.}
+\item \textcolor{green!50!black}{\textbf{Bytes transferred per repair (host $\to$ GPU):} $K$ rows $\times$ \emph{layer\_kv\_bytes} per token; reported in Table~\ref{tab:runtime-stages}.}
+\item \textcolor{green!50!black}{\textbf{$Q_2$ projection compute, scan + top-$K$ + transfer compute, cache merge / re-layout compute:} stage-decomposed in Figure~\ref{fig:runtime-envelope} and Table~\ref{tab:runtime-stages}.}
 \item \textcolor{green!50!black}{\textbf{Total wall-clock:} matched in W1 against Refresh-$K$-budgeted and PageSummary-Quest-inspired, both run with the per-example $T_{\text{repair}}$ envelope including amortized $Q_2$ projection and scoring cost.}
-\item \textcolor{green!50!black}{\textbf{FLOPs:} not matched. We do not claim FLOP-matched advantage.}
+\item \textcolor{green!50!black}{\textbf{FLOPs:} not matched, but reported as a derived ratio. \repairkv{}'s repair operation costs about [fill F-ratio]$\times$ fewer FLOPs than full-prefix prefill at 32K context (analytic from $K$, $|W_N|$, $d_k$, $H$, $L$), since \repairkv{} only touches keys at score time and does no value-side computation until the small post-promotion attention.}
 \end{itemize}
 ```
 
@@ -101,38 +107,40 @@ the repair operation. The probe measures $Q_2$ projection on the
 compressed cache, chunked scan, top-$K$ selection, KV movement over
 pinned host-memory BF16 tensors, and the cache-merge step, plus
 FlashAttention reference timings for full-prefix and evicted-prefix
-prefill (Table 4). At $K=5000$ and 32K offloaded candidates, the full
-sequential p95 \repairkv{} cost including $Q_2$ projection and merge
-is about [fill X] ms (the prototype path); a deployment-realistic
-concurrent path overlapping H2D copy with chunked scan reaches
-about [fill X'] ms. At 1M offloaded candidates the figures are
-[fill Y] s sequential and [fill Y'] s concurrent. For reference,
-full-prefix prefill at 32K with FlashAttention takes about [fill V]
-ms; prefilling the evicted prefix takes about [fill W] ms. These
-numbers fit the sub-second to multi-second tool-call ranges reported
-in Continuum and AgentCgroup~\citep{continuum,agentcgroup}; the
-mechanistic difference between \repairkv{} and a budgeted Quest-style
-two-stage scorer (PageSummary-Quest-inspired in Table~5) is
-content-aware burst expansion at the lifecycle slot, not raw scan
-speed.}
+prefill (Table~\ref{tab:runtime-stages}). At $K=5000$ and 32K
+offloaded candidates, the full sequential p95 \repairkv{} cost
+including $Q_2$ projection and merge measures [fill X] ms; with
+H2D/scan overlap (double-buffered streams), [fill X'] ms. At 1M
+offloaded candidates the figures are [fill Y] s sequential, [fill Y'] s
+with overlap. For reference, full-prefix prefill at 32K with
+FlashAttention measures [fill V] ms, and prefilling the evicted
+prefix takes [fill W] ms. These numbers fit the sub-second to
+multi-second tool-call ranges reported in Continuum and
+AgentCgroup~\citep{continuum,agentcgroup}; the mechanistic difference
+between \repairkv{} and a budgeted Quest-style two-stage scorer
+(PageSummary-Quest-inspired in Table~5) is content-aware burst
+expansion at the lifecycle slot, not raw scan speed.}
 ```
 
 ---
 
 ## W4.5 — Pre-registered abstract branches (replace abstract clause)
 
-**Strong-pass abstract sentence:**
+**Strong-pass abstract sentence (split into two clauses to avoid juxtaposition-implied quality claim against recompute):**
 
 ```tex
-\textcolor{green!50!black}{\repairkv{} approaches $Q_2$-aware
-reselection quality without paying for a persistent low-rank index
-or a $Q_2$-time full reselection scan, and without paying the
-wall-clock cost of full-prefix recompute. On Qwen2.5-7B-Instruct at
-32K context, MQ-NIAH-4Q at $K=96$, \repairkv{} scores [fill A]
-versus [fill B] for matched no-repair, [fill C] for the strongest
-time-matched alternative (PageSummary-Quest-inspired), and a
-[fill X-ratio]$\times$ wall-clock advantage over full-prefix
-recompute on the evaluation GPU.}
+\textcolor{green!50!black}{At a matched active-cache budget,
+\repairkv{} approaches the quality of a budgeted $Q_2$-aware
+reselector that operates at the same lifecycle slot, without
+requiring a persistent low-rank index or a $Q_2$-time full
+reselection scan. Separately, \repairkv{}'s repair operation runs in
+a fraction of the wall-clock cost of full-prefix recompute on the
+evaluation GPU. On Qwen2.5-7B-Instruct at 32K context, MQ-NIAH-4Q at
+$K=96$, \repairkv{} scores [fill A] versus [fill B] for matched
+no-repair and [fill C] for the strongest time-matched alternative
+(PageSummary-Quest-inspired); the runtime probe (Table~\ref{tab:runtime-stages})
+measures [fill X-ratio]$\times$ wall-clock advantage over
+full-prefix recompute.}
 ```
 
 **Weak-pass abstract sentence:**
