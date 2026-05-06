@@ -63,7 +63,17 @@ across all evicted positions is incompatible with a wall-clock cap.
 For a denominator-matched comparison we additionally report
 \repairkv{}-chunked, which uses the same chunk-restricted softmax
 as Refresh-$K$-budgeted; \repairkv{}-chunked vs PageSummary
-isolates the algorithm contribution from the normalizer choice.}
+isolates the algorithm contribution from the normalizer choice.
+PageSummary-Quest-inspired uses a one-sided $\max$-only chunk-key
+envelope rather than Quest's two-sided $(\min,\max)$ per-channel
+envelope. The $\max$-only envelope is strictly weaker than Quest's
+two-sided envelope on rotary-embedded keys with mixed-sign
+features; we use it as the cheapest possible Stage-1 estimator and
+report PageSummary as a lifecycle-slot baseline, not a Quest
+reproduction. A two-sided envelope would only \emph{tighten}
+PageSummary's Stage-1 ranking, which by RepairKV's chunk-restricted
+softmax structural argument cannot escape Stage-2 chunk-granularity
+binding at the budget (Stage 1 alone is the best-it-can-be).}
 ```
 
 ---
