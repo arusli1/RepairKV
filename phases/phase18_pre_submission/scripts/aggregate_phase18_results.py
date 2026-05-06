@@ -172,8 +172,12 @@ def main() -> int:
     sections = ["# Phase 18 RESULTS FINAL\n"]
     sections.append("Aggregated from queued reruns. NO PAPER EDITS APPLIED.\n")
 
-    # K-sweep redo
-    ksw = sorted(glob.glob("phases/phase6_repair/results/full/clean_suite_b16384_*n12_k32-64-80-96-128*.json"))
+    # K-sweep redo (sort by mtime so newest artifact wins regardless of filename order)
+    import os as _os
+    ksw = sorted(
+        glob.glob("phases/phase6_repair/results/full/clean_suite_b16384_*n12_k32-64-80-96-128*.json"),
+        key=lambda p: _os.path.getmtime(p),
+    )
     if ksw:
         sections.append("\n---\n")
         sections.append(k_sweep_table(Path(ksw[-1])))
