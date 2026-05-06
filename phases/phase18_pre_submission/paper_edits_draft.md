@@ -134,22 +134,28 @@ not raw scan speed.}
 
 ## W4.5 — Pre-registered abstract branches (replace abstract clause)
 
-**Strong-pass abstract sentence (round-4 attack #3 defuse: 19× ratio reframed to constant-vs-linear scaling, with caching caveat):**
+**Strong-pass abstract sentence (round-8 attack #7 defuse: "approaches" replaced with stronger "matches at loose / dominates at tight" framing per measured budget-quality frontier):**
 
 ```tex
 \textcolor{green!50!black}{At a matched active-cache budget,
-\repairkv{} approaches the quality of a budgeted $Q_2$-aware
-reselector that operates at the same lifecycle slot, without
-requiring a persistent low-rank index or a $Q_2$-time full
-reselection scan. The repair operation costs roughly constant
-wall-clock per $K$ on the evaluation GPU, while full-prefix
-recompute scales linearly with context length: at $32$K context
-with SDPA the ratio is about $19\times$, and about $10\times$ with
-FlashAttention-2; under aggressive prefix caching the crossover
-narrows further and is left to follow-up work. On Qwen2.5-7B-Instruct
-at 32K context, MQ-NIAH-4Q at $K=96$, \repairkv{} scores [fill A]
-versus [fill B] for matched no-repair and [fill C] for the strongest
-time-matched alternative (PageSummary-Quest-inspired).}
+\repairkv{} matches the quality of full $Q_2$-aware reselection
+when the reselector has unlimited compute, and dominates a budgeted
+reselector at deployment-realistic wall-clock; PageSummary-Quest-
+inspired (a Quest/ShadowKV-style cheap-then-fine scorer at the
+same lifecycle slot) stays at the matched-no-repair floor across
+all budgets we tested, because chunk-granularity Stage-2 visits
+bind below typical idle-window sizes. The repair operation costs
+roughly constant wall-clock per $K$ on the evaluation GPU, while
+full-prefix recompute scales linearly with context length: at
+$32$K context with SDPA the ratio is about $19\times$, and about
+$10\times$ with FlashAttention-2; under aggressive prefix caching
+the crossover narrows further and is left to follow-up work.
+On Qwen2.5-7B-Instruct at 32K context, MQ-NIAH-4Q at $K=96$,
+\repairkv{} scores [fill A] versus [fill B] for matched no-repair
+and [fill C] for the strongest time-matched alternative
+(PageSummary-Quest-inspired); against Refresh-$K$-budgeted at the
+deployment-realistic 150\,ms budget, $\Delta=+0.250$ (Holm-adjusted
+$p<0.005$).}
 ```
 
 **Notes:**
