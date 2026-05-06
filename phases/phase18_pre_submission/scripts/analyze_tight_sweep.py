@@ -80,6 +80,32 @@ def analyze_directory(d: Path) -> None:
             "t_repair_full_ms": t_repair_ms,
         })
 
+    # Pairwise Wilcoxon vs RepairKV per multiplier
+    from scipy import stats
+    import numpy as np
+    for art in artifacts:
+        m = re.match(r"tight_mult([0-9.]+)_", art.name)
+        mult = float(m.group(1))
+        d = json.load(open(art))
+        ex = d["rows"]
+        repkv = np.array([r["idlekv_score"] for r in ex])
+        rkbud = np.array([r["refresh_k_budgeted_score"] for r in ex])
+        psum = np.array([r["page_summary_score"] for r in ex])
+        for label, opp in [("RKbud", rkbud), ("PSum", psum)]:
+            diff = repkv - opp
+            if np.allclose(diff, 0):
+                p = 1.0
+            else:
+                try:
+                    res = stats.wilcoxon(diff, zero_method="pratt", method="exact")
+                except ValueError:
+                    res = stats.wilcoxon(diff, zero_method="pratt", method="approx")
+                p = float(res.pvalue)
+            for r in rows:
+                if r["multiplier"] == mult:
+                    r[f"p_wilcoxon_{label}"] = p
+                    r[f"delta_RepairKV_minus_{label}"] = float(diff.mean())
+
     rows.sort(key=lambda r: r["multiplier"])
     print(f"[analyze] {len(rows)} multipliers x n={rows[0]['n']} examples each")
     print()
@@ -95,7 +121,7 @@ def analyze_directory(d: Path) -> None:
               f"{r['PS_cap_fired_pct']:>4.0f}%   {r['PS_chunks_visited']:>4.1f}  {r['PS_positions_scored']:>5.0f}")
 
     # Save to CSV
-    out_csv = d / "tight_sweep_summary.csv"
+    out_csv = Path("phases/phase18_pre_submission/results/w1_tight/tight_sweep_summary.csv")
     if rows:
         with open(out_csv, "w") as fp:
             w = csv.DictWriter(fp, fieldnames=list(rows[0].keys()))
