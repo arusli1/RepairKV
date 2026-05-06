@@ -202,6 +202,25 @@ def main() -> int:
         sections.append("\n---\n")
         sections.append(gpu_verify_table(Path(gpu_arts[-1])))
 
+    # Tight K-sweep at 150ms abs budget
+    tksw_arts = sorted(glob.glob("phases/phase18_pre_submission/results/w1_tight_ksweep/clean_suite_*n12_k32-64-96-128*.json"))
+    if tksw_arts:
+        sections.append("\n---\n")
+        sections.append("### Tight K-sweep at 150 ms absolute budget (Qwen, 4Q, n=36/K)\n")
+        d = json.load(open(tksw_arts[-1]))
+        rows = d["rows"]
+        by_k = {}
+        for r in rows:
+            k = int(r.get("k", 0))
+            by_k.setdefault(k, []).append(r)
+        ks = sorted(by_k.keys())
+        cols = ["A", "B_match", "RepairKV", "Refresh-K", "Refresh-K-budgeted", "PageSummary-Quest-inspired", "RepairKV-no-burst"]
+        sections.append("| K | " + " | ".join(cols) + " |")
+        sections.append("|" + "|".join(["---"] * (len(cols) + 1)) + "|")
+        for k in ks:
+            s = scores_for(by_k[k])
+            sections.append("| " + str(k) + " | " + " | ".join(f"{s.get(c, float('nan')):.3f}" for c in cols) + " |")
+
     args.out.write_text("\n".join(sections))
     print(f"[aggregate] wrote {args.out}")
     return 0
