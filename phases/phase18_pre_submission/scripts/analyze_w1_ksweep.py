@@ -72,6 +72,8 @@ CONDITION_FIELDS = {
     "Refresh-K-budgeted": "refresh_k_budgeted_score",
     "PageSummary-Quest-inspired": "page_summary_score",
     "RepairKV-no-burst": "repairkv_no_burst_score",
+    "RepairKV-chunked": "repairkv_chunked_score",
+    "Oracle-K": "oracle_k_score",
     "TM-Recompute-BM25": "tm_recompute_bm25_score",
     "Random-K": "random_k_score",
     "Oldest-K": "oldest_k_score",
@@ -81,6 +83,7 @@ BINDING_CONTRASTS = [
     ("RepairKV", "Refresh-K-budgeted"),
     ("RepairKV", "PageSummary-Quest-inspired"),
     ("RepairKV", "TM-Recompute-BM25"),  # may be absent if Step 5.6 skipped
+    ("RepairKV", "RepairKV-chunked"),  # round-3 attack 2 defuse
 ]
 
 
