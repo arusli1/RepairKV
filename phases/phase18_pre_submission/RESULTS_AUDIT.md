@@ -554,3 +554,28 @@ multiplier sweep together form the binding evidence for the
 abstract's "approaches at K≥80, dominates at sub-second budgets at
 K≥64" framing.
 
+
+---
+
+## ADDENDUM (2026-05-06 20:36 UTC): GPU verify lands
+
+n=36 (n=12 × 3 partitions), K=96, conditions {A, B, B_match, IdleKV}, with
+PHASE18_SCORE_ON_GPU=1 (matmul + softmax in score_evicted_positions
+stay on the model's GPU instead of round-tripping to CPU FP32).
+
+| Metric | GPU-scored (this run) | CPU K-sweep redo (reference) | Gap |
+|---|---|---|---|
+| RepairKV K=96 | 0.917 | 0.917 | 0.000 |
+| A | 1.000 | 1.000 | 0.000 |
+| B_match | 0.208 | 0.208 | 0.000 |
+
+**Reading:** GPU-scored RepairKV gives IDENTICAL quality to CPU-scored
+RepairKV at K=96 on Qwen2.5-7B. This bridges the W2 runtime probe
+(GPU scoring ~37 ms scan + 74 ms Q2 = ~110 ms) and the W1 quality
+numbers (CPU scoring in the runner): the deployment-realistic
+GPU code path is the same algorithm and gives the same answers.
+The "RepairKV at ~110 ms p95 on the evaluation GPU achieves
+0.917 quality" claim in the abstract is now a single
+operator's measurement, not a quality-runtime conjunction across
+two code paths.
+
