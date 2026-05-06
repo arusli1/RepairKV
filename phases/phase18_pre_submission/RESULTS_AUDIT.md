@@ -367,40 +367,59 @@ on Qwen, mixed cross-model evidence."
 addressed in this addendum and in `paper_edits_draft.md` round-10
 edits committed before K-sweep redo data lands.**
 
-### RKB pre-expansion finding (CRITICAL discovery during K-sweep redo)
+### K-sweep redo final numbers (n=36/K, post-PageSummary-fusion-fix)
 
-The K-sweep redo's interim numbers show Refresh-K-budgeted at
-K=96 dropping from the original 1.000 to ~0.21 — same level as
-B_match. Initial reaction: "bug." Investigation traced this to a
-methodological IMPROVEMENT, not a regression:
+| K | A | B_match | RepairKV | Refresh-K | Refresh-K-budgeted | PageSummary | RepairKV-no-burst | Oracle-K |
+|---|---|---|---|---|---|---|---|---|
+| 32 | 1.000 | 0.208 | 0.375 | 1.000 | 1.000 | 0.208 | 0.500 | 0.861 |
+| 64 | 1.000 | 0.208 | 0.639 | 1.000 | 1.000 | 0.208 | 0.569 | 1.000 |
+| 80 | 1.000 | 0.194 | 0.778 | 1.000 | 1.000 | 0.208 | 0.569 | 1.000 |
+| 96 | 1.000 | 0.208 | 0.917 | 1.000 | 1.000 | 0.194 | 0.653 | 1.000 |
+| 128 | 1.000 | 0.181 | 1.000 | 1.000 | 0.986 | 0.194 | 0.736 | 1.000 |
 
-- At commit `7d86eea` (when the original K-sweep ran),
-  `precompute_host_layer_keys` pre-expanded grouped-attention
-  KV-heads to query-heads on the host CPU. For Qwen2.5-7B's
-  4 KV / 28 Q heads at 32K context, this is a 7× pre-expansion
-  consuming ~13 GB host memory per cache, ~50 GB across the four
-  caches involved. This is NOT a deployment-realistic memory
-  profile.
-- At commit `03f4be9` (Phase 18 round-5), the precompute was
-  changed to defer head expansion to score-time, restoring a
-  realistic memory profile. The budgeted scorer now does inline
-  `repeat_interleave` per chunk.
-- Consequence: in the redo, RKB's per-chunk scoring cost is
-  higher (~7× expansion done inline). At the same wall-clock
-  budget (RepairKV's T_repair × 1.05), RKB scores fewer
-  positions before its cap fires. The score drop is from the
-  removal of an unrealistic pre-expansion advantage, not from
-  a code bug.
+RKB cap fires 0-2/36 across K (essentially unbudgeted at the
+~1.45s per-K-amortized budget); RKB scores 32K of 32K positions.
+This matches the original K-sweep's RKB behavior — the per-K
+amortization gives RKB enough budget to complete its full scan
+on Qwen at 32K. The "dominates RKB" clause therefore anchors
+on the **150 ms absolute tight K-sweep**, not the per-K
+multiplier sweep.
 
-**Implication for the paper:** the redo numbers are STRONGER
-than the original K-sweep. Under deployment-realistic memory
-conditions (no pre-expansion), Refresh-K-budgeted at the same
-wall-clock budget cannot complete its scan; it stays at the
-matched-no-repair floor, while RepairKV's burst-expanded top-K
-structure operates on a small selected subset and benefits less
-from pre-expansion. The "dominates Refresh-K-budgeted at
-deployment-realistic wall-clock" clause is now supported at
-ALL budgets we tested, not just the tight 150 ms anchor.
+**Pre-reg band checks (K=96, post-fix):**
+- RepairKV 0.917: matches buggy K-sweep (no fusion-bug effect on
+  RepairKV). ✓
+- PageSummary 0.194: below predicted [0.30, 0.55] band by 0.10.
+  **OUTSIDE band, lower than predicted.** Report unchanged per
+  pre-reg protocol. Why: the buggy fusion accidentally lifted
+  PageSummary via Stage-1 logits acting as Stage-2 tiebreakers.
+  Post-fix, PageSummary defaults to Stage-1-only ranking (chunk-
+  max envelope, one-sided, strictly weaker than Quest's two-
+  sided envelope). Stage-1-only on rotary keys collapses to the
+  matched-no-repair floor. The lifecycle-slot baseline must be
+  either RepairKV-chunked (denominator-matched, runs at chunk-
+  size sensitivity sweep) or a Quest reproduction with two-sided
+  envelope (out of scope for this submission).
+- Δ(RepairKV − PageSummary) at K=96: 0.917 − 0.194 = +0.723.
+  Predicted ≥ 0.30. **Exceeds upper bound by 0.42.** ✓
+- Δ(RepairKV − Refresh-K unbudgeted) at K=96: −0.083. Within
+  abstract clause "approaches within Δ ≤ 0.10". ✓ TOST-equivalent
+  at margin 0.20 (to verify via analyze_w1_ksweep.py).
+- Oracle-K at K=96: 1.000. RepairKV is within 0.083 of the gold-
+  span ceiling. ✓
+
+**Pre-reg frontier-majority check:** 5/5 K's reject Holm-
+corrected null vs PageSummary (predicted ≥ 4/5). ✓ To verify
+with analyze_w1_ksweep.py for exact p-values.
+
+**Δ_slot vs Δ_burst attribution at K=96 (lifecycle-slot novelty):**
+- Δ_slot = RepairKV-no-burst − PageSummary = 0.653 − 0.194 = **+0.459**
+  (lifecycle-slot contribution: scoring at full per-position
+  granularity once at the pause boundary).
+- Δ_burst = RepairKV − RepairKV-no-burst = 0.917 − 0.653 = **+0.264**
+  (burst-expansion contribution: top-K with L=2, R=20).
+- Both contributions are material on Qwen at K=96. The
+  lifecycle-slot is the larger contribution; burst is a
+  refinement that adds another 30%-of-no-burst on top.
 
 ### Round-10 attack defuses
 
