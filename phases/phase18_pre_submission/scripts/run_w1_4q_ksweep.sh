@@ -21,13 +21,18 @@ RESULTS_DIR="phases/phase18_pre_submission/results/w1"
 LOG_DIR="${RESULTS_DIR}/logs"
 mkdir -p "${RESULTS_DIR}" "${LOG_DIR}"
 
-NUM_SAMPLES="${PHASE18_W1_N:-24}"
+NUM_SAMPLES="${PHASE18_W1_N:-12}"
 TASK="${PHASE18_W1_TASK:-clean_suite}"
 BASE_BUDGET="${PHASE18_W1_BASE:-16384}"
 TM_MULT="${PHASE18_W1_TM_MULT:-1.05}"
 LOG_PATH="${LOG_DIR}/w1_${TASK}_b${BASE_BUDGET}_n${NUM_SAMPLES}_$(date -u +%Y%m%dT%H%M%SZ).log"
 
-K_VALUES=(8 16 24 32 48 64 80 96 128)
+# Reduced from 9 K's to 5 K's for the 2-day workshop deadline. 5 K's
+# still gives a clean frontier shape including the headline K=96 cell
+# and the saturating K=128 cell. Smaller K's drop because RepairKV's
+# smoke shows score < 0.6 at K<64 -- diminishing returns for the
+# binding-contrast question.
+K_VALUES=(32 64 80 96 128)
 
 echo "[w1-ksweep] $(date -u '+%Y-%m-%d %H:%M:%S UTC')" | tee "${LOG_PATH}"
 echo "[w1-ksweep] task=${TASK} base=${BASE_BUDGET} n=${NUM_SAMPLES} K=${K_VALUES[*]}" | tee -a "${LOG_PATH}"

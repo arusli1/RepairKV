@@ -1,5 +1,29 @@
 # Phase 18: Highest-Impact Fixes Before Submission (v5)
 
+## Changelog vs v5 (mid-execution amendment, 2026-05-06 14:39 UTC)
+
+Original v5 pre-registered `n=24` over 9 K's (`{8,16,24,32,48,64,80,96,128}`).
+Mid-execution finding: actual per-example wall-clock on Qwen2.5-7B at
+32K with the 8-condition contrast set is ~6.3 minutes (vs preflight
+estimate of 38s based on a smaller smoke). 9 K's at n=24 would take
+~7.2 hours of GPU time, far over the 130-min ceiling and the 2-day
+workshop deadline.
+
+Reduced scope (committed before re-launch):
+
+- `n=12` per partition × 3 partitions = 36 example-K cells per K.
+- `K ∈ {32, 64, 80, 96, 128}` (5 K's).
+- Same 8 binding/floor conditions as v5.
+- Same Wilcoxon + HL CI + signed-rank TOST, but Holm correction now
+  over a 15-test family (3 binding contrasts × 5 K's) instead of 27.
+- HL singleton-collapse risk acknowledged: secondary paired-bootstrap
+  CI reported alongside HL.
+
+Pre-registration commit for the original v5 plan: `601d807`.
+Pre-registration commit for this mid-execution amendment: forthcoming
+(this edit + git commit hash to be cited in the paper alongside the
+original).
+
 ## Changelog vs v4
 
 Final verification panel (code, devil's advocate, statistical) drove
