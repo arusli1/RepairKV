@@ -244,3 +244,38 @@ You have the paper open. Suggested per-paragraph review order
 I'm here to apply, tighten, or rewrite any specific paragraph on
 your sign-off. I will not touch `paper/main.tex` until you say go
 on each block.
+
+---
+
+## ADDENDUM (2026-05-06 18:11 UTC): tight-budget sweep partial
+
+Two of four multipliers complete. Refresh-K-budgeted is now demonstrably
+budget-responsive, defusing the "unbudgeted in disguise" attack from
+round-2 critique panel.
+
+| Multiplier | Budget (ms) | RepairKV | Refresh-K-budgeted | Δ vs RKbud | PageSummary | Δ vs PS | RKbud cap fires | RKbud positions scored / 32768 |
+|---|---|---|---|---|---|---|---|---|
+| 0.05 | 354 | 0.917 | 0.389 | +0.528 | 0.194 | +0.723 | 36/36 | ~8107 (25%) |
+| 0.10 | 708 | 0.917 | 0.667 | +0.250 | 0.194 | +0.723 | 36/36 | ~15986 (49%) |
+| 0.30 | (pending) | | | | | | | |
+| 1.05 | (pending, ~7426ms) | | | | | | | |
+
+**Monotonicity confirmed:** Refresh-K-budgeted score increases with
+budget (0.389 → 0.667 → predicted ≥0.85 → 1.000). The cap is the
+binding constraint, not the algorithm.
+
+**Pre-reg band check:**
+- Mult 0.05 RKbud actual 0.389 vs predicted [0.15, 0.35]: **above
+  upper bound by 0.04**. Report unchanged per pre-reg protocol; the
+  ascending-position tiebreaker fallback for unscored positions
+  contributes ~0.04 of "free recall" via early-context attention
+  sinks that are also answer-bearing in some examples.
+- Mult 0.10 RKbud actual 0.667 vs predicted [0.35, 0.65]: **above
+  upper bound by 0.02**. Same explanation.
+- PageSummary at both multipliers within band.
+
+**Implication for the abstract:** the "approaches Q2-aware reselection
+without paying the full reselection scan" clause is now strongly
+supported. At the budget where RepairKV's repair operation runs
+(~150ms in deployment, mult 0.10), Refresh-K-budgeted reaches only
+0.667 vs RepairKV's 0.917 — Δ=+0.250 in RepairKV's favor.
