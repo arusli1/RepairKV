@@ -469,7 +469,7 @@ Across MQ-NIAH-2Q/4Q/6Q/8Q, \repairkv{} separates from matched no-repair at mode
 
 \subsection{Next-turn signal specificity}
 Repair gains depend on using the correct newly revealed signal. At $K=48$, StaleQ-$K$ and WrongQ-$K$ stay near matched no-repair, with gains $0.028$ $[-0.021,0.083]$ and $0.028 [-0.014,0.069]$, while \repairkv{} reaches $0.326$ $[0.243,0.410]$. {\color{red}Thus, the improvement is not explained by scoring with any query-like text; the signal must match the upcoming turn. Refresh-buffered reaches $1.000$, showing that relevant rows remaining available for stronger selectors to exploit, motivating an open research direction.}
-\begin{table}[t]
+\begin{table}[!ht]
   \centering
   \setlength{\tabcolsep}{3.5pt}
   \caption{Next-turn signal specificity at $K=48$ on MQ-NIAH-4Q
@@ -520,7 +520,7 @@ To test external validity beyond MQ-NIAH, we ran a controlled relevance shift di
 Between turns, an \emph{event} arrives: a description of the callsite with the target identifier redacted. This event replaces the synthetic $Q_2$ signal used in MQ-NIAH, and all conditions decode the same event and question prompt. {\color{red}At $K=192$, event only \repairkv{} improves exact identifier accuracy from $18.8\%$ matched no-repair to $72.9\%$. Non-query controls and ToolFile-$K$ remain near matched (Table~\ref{tab:real-repo-diagnostic}). Thus, the gain comes from using the event as a relevance signal, not from generic reinsertion or simply knowing the file name.} 
 
 Label-assisted references show remaining headroom: File gated \repairkv{} reaches $83.3\%$, and AnchorWindow-$K$ reaches $89.6\%$. This is a small diagnostic rather than a full benchmark, but it shows some initial evidence that the repair approach improves quality beyond the synthetic MQ-NIAH setting. Appendix Figure~\ref{fig:app-real-repo-diagnostic} gives the full audit.
-\begin{table}[b]
+\begin{table}[!ht]
   \centering
   \setlength{\tabcolsep}{5pt}
   \caption{Preliminary real-repository diagnostic at $K=192$ over $48$
