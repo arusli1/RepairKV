@@ -547,7 +547,7 @@ Label-assisted references show remaining headroom: File gated \repairkv{} reache
 
 \subsection{Runtime}
 {\color{red}
-We run a separate GPU runtime probe for the repair operation, measuring chunked scan, top-$K$ selection, and KV movement over pinned host-memory BF16 tensors with Qwen-shaped dimensions. At $K=5000$, p95 repair latency is $50.0$\,ms at 32K offloaded candidates, $1.20$\,s at 1M, and $4.64$\,s at 4M (Figure~\ref{fig:runtime-envelope}). These numbers are hardware- and model-dependent: larger KV dimensions increase the constant factor, while newer deployment GPUs may reduce it. The key property is linearly scaling in the number of candidate KV rows, which keeps repair in the seconds range even at million-row candidate pools, unlike approaches that recompute or score over full context-query interactions with quadratic cost. 
+We run a separate GPU runtime probe for the repair operation, measuring chunked scan, top-$K$ selection, and KV movement over pinned host-memory BF16 tensors with Qwen-shaped dimensions. At $K=5000$, p95 repair latency is $50.0$\,ms at 32K offloaded candidates, $1.20$\,s at 1M, and $4.64$\,s at 4M (Figure~\ref{fig:runtime-envelope}). These numbers are hardware- and model-dependent: larger KV dimensions increase the constant factor, while newer deployment GPUs may reduce it. The key property is linearly scaling in the number of candidate KV rows, which keeps repair in the seconds range even at million-row candidate pools, unlike approaches that recompute or score over full context-query interactions with quadratic cost. {\color{green!50!black}At $K{=}96$ the full repair takes around $110$\,ms (p95) versus $2.13$\,s for full-prefix prefill on our system, even with FlashAttention-2/3 speedups~\citep{flashattn2,flashattn3}; see Appendix~\ref{app:p18-supplement} for selector ablations and time-budgeted query-aware baselines.}
 
 These costs are small relative to many agent and tool-use pauses: OS-level execution, including tool calls and setup, can account for 56--74\% of task latency~\citep{agentcgroup}, and tool calls range from sub-second file/shell operations to multi-second tests or code execution~\citep{continuum}. More broadly, the low repair cost suggests a runtime role beyond using otherwise idle GPU time: repair can be run opportunistically at turn boundaries, tool results, retrieval updates, or other state changes to trade a small amount of memory movement and time for substantially better resumed-cache quality.
 \begin{figure}[tbp]
@@ -792,11 +792,23 @@ Zhou, S., Xu, F. F., Zhu, H., Zhou, X., Lo, R., Sridhar, A.,
 \newblock In \emph{International Conference on Learning
   Representations (ICLR)}, 2024.
 
+\bibitem[Dao(2023)]{flashattn2}
+Dao, T.
+\newblock FlashAttention-2: Faster attention with better parallelism and
+  work partitioning.
+\newblock \emph{arXiv:2307.08691}, 2023.
+
+\bibitem[Shah et~al.(2024)]{flashattn3}
+Shah, J., Bikshandi, G., Zhang, Y., Thakkar, V., Ramani, P., and Dao, T.
+\newblock FlashAttention-3: Fast and accurate attention with asynchrony
+  and low-precision.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2024.
+
 \end{thebibliography}
 
 \newpage
 \appendix
-\onecolumn
 \raggedbottom
 
 \section{Additional Evaluation Details}
@@ -944,6 +956,17 @@ it remains synthetic.
 Broader task families should keep the same
 matched-budget controls while adding real tool traces and stronger
 selector families.
+
+\begingroup\color{green!50!black}
+\section{Time-matched evaluation supplement}
+\label{app:p18-supplement}
+
+\paragraph{Time-budgeted baselines.} Two additional baselines extend the protocol of Section~\ref{sec:setup}, both subject to a wall-clock budget matched to \repairkv{}'s measured per-pause repair time. \textbf{Refresh-$K$-budgeted} is the Refresh-buffered baseline of Section~\ref{sec:setup} with this wall-clock budget applied: when the budget runs out, it stops scoring further evicted positions. \textbf{PageSummary-Quest-inspired} pre-computes per-chunk summary keys (max over each chunk) at compression time, ranks chunks by a cheap inner product against $Q_2$, and within the same wall-clock budget visits top-ranked chunks using the same per-position scorer. Both methods choose from the same evicted store as \repairkv{} and are matched on resumed active-cache rows ($\bbase{+}K$); only their off-budget service costs (scoring time, transfer, projection) differ.
+
+\paragraph{Wall-clock-matched K-sweep.} On MQ-NIAH-4Q at a $150$\,ms absolute scoring budget across $K\in\{32,64,96,128\}$ (Qwen2.5-7B-Instruct, $\bbase{=}16{,}384$, $n{=}36$ paired observations per $K$), the budget runs out before Refresh-$K$-budgeted finishes scoring on all $36/36$ examples, scoring approximately $4{,}000$ of $32{,}768$ evicted positions per call. \repairkv{} dominates at $K\geq 64$, reaching $0.917$ at $K{=}96$ against $0.472$ for Refresh-$K$-budgeted and $0.194$ for PageSummary-Quest-inspired (matched no-repair $\bmatch{=}0.208$). At $K{=}128$ under the same budget, \repairkv{} saturates at $1.000$ while the two time-budgeted baselines remain near $0.5$ and $0.2$.
+
+\paragraph{Per-position scoring vs.\ burst-expansion contributions.} The gains decompose into two contributions at $K{=}96$ on Qwen. Promoting only the top-scoring evicted positions, without the burst-expansion step of Section~\ref{sec:method}, reaches $0.653$ and exceeds PageSummary-Quest-inspired by $\Delta_\text{score}{=}{+}0.459$ -- this isolates the lift from per-position scoring relative to the cheaper per-chunk-summary scorer. Adding burst expansion lifts \repairkv{} to $0.917$, an additional $\Delta_\text{burst}{=}{+}0.264$. Per-position scoring contributes the larger share.
+\endgroup
 
 \section{Supplementary Experimental Views}
 \label{app:supplementary-figures}
