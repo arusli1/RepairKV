@@ -43,6 +43,8 @@ PHASE8_STREAMING_DIR = (
 
 COLUMN_WIDTH_IN = 3.35
 SPAN_REF_LABEL = "SpanRef-K"
+REPAIR_METHOD_CONDITION = "IdleKV"
+REPAIR_METHOD_LABEL = "RepairKV"
 PALETTE = {
     "idlekv": "#0072B2",  # Okabe-Ito blue
     "gold": "#E69F00",  # Okabe-Ito orange
@@ -122,6 +124,10 @@ def load_numeric_csv(path: Path) -> pd.DataFrame:
     return df
 
 
+def _display_label(label: str) -> str:
+    return label.replace(REPAIR_METHOD_CONDITION, REPAIR_METHOD_LABEL)
+
+
 def _line_style(name: str) -> dict[str, object]:
     styles: dict[str, dict[str, object]] = {
         "IdleKV": {"color": PALETTE["idlekv"], "marker": "o", "linestyle": "-", "linewidth": 1.45},
@@ -176,7 +182,7 @@ def _plot_score_or_overlap(
         if column not in df:
             continue
         style = _line_style(label)
-        ax.plot(df["k"], df[column], label=label, **style)
+        ax.plot(df["k"], df[column], label=_display_label(label), **style)
 
     ax.set_ylim(-0.03, 1.04)
     ax.set_xlim(6, 131)
@@ -235,7 +241,7 @@ def render_selection_diagnostic() -> None:
         ax.set_xlabel("restore budget $K$", labelpad=1.0)
 
     handles = [Line2D([0], [0], **_line_style(label)) for label in ["IdleKV", SPAN_REF_LABEL, "Matched", "Random-K", "Oldest-K"]]
-    labels = ["IdleKV", SPAN_REF_LABEL, "Matched", "Random-K", "Oldest-K"]
+    labels = [_display_label(label) for label in ["IdleKV", SPAN_REF_LABEL, "Matched", "Random-K", "Oldest-K"]]
     fig.legend(
         handles,
         labels,
@@ -553,7 +559,7 @@ def render_frontier_raw_overlay() -> bool:
     ax.set_yticks([0.0, 0.5, 1.0])
     _format_axes(ax, x_label="restore budget $K$", y_label="exact $Q_2$ score")
     handles = [
-        Line2D([0], [0], color=PALETTE["text"], linewidth=1.55, linestyle="-", marker="o", markersize=2.95, label="IdleKV"),
+        Line2D([0], [0], color=PALETTE["text"], linewidth=1.55, linestyle="-", marker="o", markersize=2.95, label=REPAIR_METHOD_LABEL),
         Line2D([0], [0], color=PALETTE["text"], linewidth=0.9, linestyle=(0, (1.0, 1.3)), alpha=0.55, label="Matched"),
     ]
     fig.legend(
@@ -596,7 +602,7 @@ def render_specificity_panel() -> bool:
         "StaleQ-K": "Stale",
         "WrongQ-K": "Donor",
         "Refresh-K": "Refresh-buffered",
-        "IdleKV": "IdleKV",
+        "IdleKV": REPAIR_METHOD_LABEL,
     }
     colors = {
         "Matched": PALETTE["matched"],
@@ -728,15 +734,23 @@ def render_query_count_breadth() -> bool:
             query_count = task_to_count.get(str(row.task)) if hasattr(row, "task") else None
             if query_count is None and hasattr(row, "query_count"):
                 query_count = int(row.query_count)
+            if query_count is None and len(allowed_counts) == 1:
+                query_count = next(iter(allowed_counts))
             k = int(row.k)
             if query_count not in allowed_counts or k not in {48, 96}:
                 continue
             b_match = float(row.b_match)
+            gold = getattr(row, "gold_k", None)
+            if gold is None:
+                gold = getattr(row, "oracle_k")
+            repair_score = getattr(row, "idlekv", None)
+            if repair_score is None:
+                repair_score = getattr(row, "rekv")
             records_by_key[(query_count, k)] = {
                 "query_count": query_count,
                 "k": k,
-                "idlekv_gain": float(row.idlekv) - b_match,
-                "gold_gain": float(row.gold_k) - b_match,
+                "idlekv_gain": float(repair_score) - b_match,
+                "gold_gain": float(gold) - b_match,
             }
 
     _add_query_count_records(locked_csv, allowed_counts={2, 3, 8})
@@ -1076,7 +1090,7 @@ def render_proxy_controlled_frontier() -> bool:
         ("b_match", "Matched", _line_style("Matched")),
         ("random_k", "Random-K", _line_style("Random-K")),
         ("oldest_k", "Oldest-K", _line_style("Oldest-K")),
-        ("idlekv", "IdleKV", _line_style("IdleKV")),
+        ("idlekv", REPAIR_METHOD_LABEL, _line_style("IdleKV")),
         ("gold_k", SPAN_REF_LABEL, _line_style(SPAN_REF_LABEL)),
     ]
     handles: list[Line2D] = []
@@ -1091,7 +1105,7 @@ def render_proxy_controlled_frontier() -> bool:
                 linestyle=style["linestyle"],
                 linewidth=float(style["linewidth"]),
                 markersize=2.8,
-                zorder=4 if series_label == "IdleKV" else 3,
+                zorder=4 if series_label == REPAIR_METHOD_LABEL else 3,
             )
             if ax is axes[0]:
                 handles.append(
@@ -1754,7 +1768,7 @@ def render_partition_endpoint_dotplot() -> bool:
         ax.scatter(
             [float(record[key]) for record in ordered],
             y_positions,
-            label=label,
+            label=_display_label(label),
             color=color,
             marker=marker,
             s=size,
@@ -2035,7 +2049,7 @@ def render_multiturn_hard_trajectory() -> bool:
         Patch(facecolor="#B6B6B6", alpha=0.88, edgecolor="#7D7D7D", label="Rand/old"),
         Patch(facecolor=matched_fill, edgecolor="none", label="matched"),
         Patch(facecolor=PALETTE["refresh"], alpha=0.82, edgecolor="none", label="Stale-Q"),
-        Patch(facecolor=PALETTE["idlekv"], alpha=0.90, edgecolor="none", label="IdleKV"),
+        Patch(facecolor=PALETTE["idlekv"], alpha=0.90, edgecolor="none", label=REPAIR_METHOD_LABEL),
     ]
     fig.legend(
         handles=handles,
@@ -2196,7 +2210,7 @@ def _render_sparse_robustness_rows(
     handles = [
         Line2D([0], [0], marker="D", linestyle="None", color=PALETTE["matched"], label="Matched", markersize=3.6),
         Patch(facecolor="#BDBDBD", alpha=0.62, edgecolor="none", label="Random/oldest"),
-        Line2D([0], [0], marker="o", linestyle="None", color=PALETTE["idlekv"], label="IdleKV", markersize=4.0),
+        Line2D([0], [0], marker="o", linestyle="None", color=PALETTE["idlekv"], label=REPAIR_METHOD_LABEL, markersize=4.0),
         Line2D(
             [0],
             [0],
@@ -2245,7 +2259,7 @@ def _format_frontier_xaxis(ax: plt.Axes, rows: pd.DataFrame) -> None:
 
 def _robustness_handles() -> list[object]:
     return [
-        Line2D([0], [0], color=PALETTE["idlekv"], marker="o", linewidth=1.45, markersize=3.0, label="IdleKV"),
+        Line2D([0], [0], color=PALETTE["idlekv"], marker="o", linewidth=1.45, markersize=3.0, label=REPAIR_METHOD_LABEL),
         Line2D([0], [0], color=PALETTE["gold"], marker="s", linestyle="--", linewidth=1.10, markersize=2.8, label=SPAN_REF_LABEL),
         Line2D([0], [0], color=PALETTE["matched"], linestyle=(0, (1.0, 1.3)), linewidth=0.95, label="Matched"),
         Patch(facecolor="#C9C9C9", alpha=0.32, edgecolor="none", label="control band"),
@@ -2628,7 +2642,7 @@ def render_real_repo_main_diagnostic() -> bool:
             row_fill = "#EAF4FB"
         ax.add_patch(Rectangle((0.0, y - row_h * 0.43), 1.0, row_h * 0.86, facecolor=row_fill, edgecolor="none", zorder=0))
 
-        visual_label = row_labels.get(label, label)
+        visual_label = _display_label(row_labels.get(label, label))
         fontweight = "bold" if label == "IdleKV" else "normal"
         ax.text(columns["method"][0], y, visual_label, ha="left", va="center", fontsize=6.25, color=color, fontweight=fontweight)
 
@@ -2742,7 +2756,7 @@ def render_real_repo_repair_diagnostic() -> bool:
                 fontweight="bold",
             )
 
-    ax.set_yticks(y_positions, [label for label, _color in condition_rows])
+    ax.set_yticks(y_positions, [_display_label(label) for label, _color in condition_rows])
     ax.set_xlim(-0.02, 1.02)
     ax.set_xticks([0.0, 0.5, 1.0])
     ax.set_ylim(-0.55, len(condition_rows) - 0.45)
