@@ -37,3 +37,31 @@ paper/*.fls
 paper/*.log
 paper/*.out
 paper/*.synctex.gz
+paper/*.bbl
+paper/*.blg
+
+# OS / editor / packaging artifacts
+.DS_Store
+**/.DS_Store
+idlekv.egg-info/
+*.egg-info/
+
+# Internal scratch docs (Tier 1)
+/openreview-form.png
+/openreview-form-answers.txt
+/style_references.md
+/edit_plan.md
+/edit_plan_format.md
+/instructions.md
+/plan.md
+/CLAUDE_REPO_HANDOFF.txt
+/paper_guide.md
+/texput.log
+
+# Superseded paper drafts and figure iterations (Tier 2)
+paper/abstract_draft.txt
+paper/outline.md
+paper/main_inject.tex
+paper/main_inject.pdf
+paper/initial_draft/
+paper/figure_references/
