@@ -1,6 +1,6 @@
 # RepairKV
 
-**Cache Me if You Can: Post-Compression KV Repair for Long-Context Agentic
+**Cache You Later: Post-Compression KV Repair for Long-Context Agentic
 LLM Inference.**
 
 RepairKV is a research prototype for **post-compression KV cache repair** in
@@ -139,7 +139,6 @@ design, then move to a locked run only after the smoke passes a written gate.
 - `phases/phase18_pre_submission/`: pre-submission supplement (selector
   ablations and time-budgeted query-aware baselines).
 - `docs/`: project status and result-retention notes.
-- `saved_results/`: retained summaries from earlier runs.
 - `models/`: local model weights; ignored by git.
 - `ruler/`: vendored RULER checkout; treated as external benchmark code.
 
