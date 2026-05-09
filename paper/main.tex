@@ -27,12 +27,13 @@
 
 \usepackage{icml2026}
 
-\icmltitlerunning{Cache Me if You Can: Repairing the KV State after Compression}
+\icmltitlerunning{Cache Me if You Can: Post-Compression KV Repair}
 
 \begin{document}
 
 \twocolumn[
-  \icmltitle{Cache Me if You Can: Repairing the KV State after Compression}
+  \icmltitle{Cache Me if You Can: Post-Compression KV Repair for\\
+    Long-Context Agentic LLM Inference}
 
   \begin{icmlauthorlist}
     \icmlauthor{Andrew Rusli}{equal,harvard}
@@ -55,8 +56,7 @@
   As a result, tokens that matter in later turns may already have been evicted or compressed away in earlier compression decisions. 
   We study post-compression KV cache repair, a runtime mechanism that restores previously evicted tokens to the active cache.
   \repairkv{} uses the interval between turns to reevaluate which tokens are important from evicted KV rows stored in a slower memory tier, then promotes a small subset before decoding resumes.
-  {\color{red}
-    Controlled experiments show that \repairkv{}'s restoration of evicted tokens improves retrieval accuracy, persisting even across relevance changes and different initial eviction policies. A preliminary diagnostic on open-source repositories shows the same pattern: on Qwen2.5-7B-Instruct at 32K context, \repairkv{} achieves 91.0\% retrieval on a four-query needle-in-a-haystack task versus 24.5\% for the matched no-repair baseline at the same active-cache budget, with only 96 promoted tokens.
+  {    Controlled experiments show that \repairkv{}'s restoration of evicted tokens improves retrieval accuracy, with the effect persisting across relevance changes and different initial eviction policies. A preliminary diagnostic on open-source repositories shows the same pattern: on Qwen2.5-7B-Instruct at 32K context, \repairkv{} achieves 91.0\% retrieval on a four-query needle-in-a-haystack task versus 24.5\% for the matched no-repair baseline at the same active-cache budget, with only 96 promoted tokens.
   }
 \end{abstract}
  
@@ -67,14 +67,14 @@
 Modern language models support context lengths from tens of thousands to
 over a million tokens for retrieval-augmented and agentic
 workflows~\citep{ruler,longbench,inftybench}, but the KV cache holding
-past {\color{red}token} activations grows linearly with sequence length, making it a
-primary GPU memory bottleneck {\color{red}and an increasing runtime cost during decoding. KV-cache compression and offload~\citep{snapkv,streamingllm,h2o,vllm}  manage this cost by deciding which historical state remains active on GPU and which part is evicted or moved to a slower tier.} This decision is usually made with information available at the current turn, and compression is often treated as a one-way operation: evict now, decode later from the retained active set.
+past {token} activations grows linearly with sequence length, making it a
+primary GPU memory bottleneck {and an increasing runtime cost during decoding. KV-cache compression and offload~\citep{snapkv,streamingllm,h2o,vllm}  manage this cost by deciding which historical state remains active on GPU and which part is evicted or moved to a slower tier.} This decision is usually made with information available at the current turn, and compression is often treated as a one-way operation: evict now, decode later from the retained active set.
 
-This view misses a central feature of multi-turn inference: {\color{red} new turn signals from } retrieved documents, tool outputs, test failures, or file changes
-can make previously low-priority context newly important. {\color{red}These workflows also create} non-decoding intervals while the
-model waits for external results. Together, {\color{red}the new signal and the pause create an opportunity to repair} the active KV state before the next decode, but {\color{red}no existing work studies whether an already-compressed cache can be revised in runtime under a matched active-cache budget.}
+This view misses a central feature of multi-turn inference: { new turn signals from } retrieved documents, tool outputs, test failures, or file changes
+can make previously low-priority context newly important. {These workflows also create} non-decoding intervals while the
+model waits for external results. Together, {the new signal and the pause create an opportunity to repair} the active KV state before the next decode, but {no existing work studies whether an already-compressed cache can be revised in runtime under a matched active-cache budget.}
 
-{\color{red}This paper studies this gap. Our contributions are:} (1) a matched resumed active-cache-budget protocol for testing whether repair helps without simply keeping more active tokens; (2) \repairkv{}, {\color{red}an operator conditioned on the next turn's signal that scores evicted KV rows and promotes a small budgeted subset back into the active cache before decoding resumes}; (3) controlled evidence across synthetic relevance shifts, different initial eviction policies, preliminary real-repository diagnostics, and runtime feasibility probes. On Qwen2.5-7B-Instruct at 32K context, $91.0\%$ retrieval on a four-query needle-in-a-haystack task versus $24.5\%$ for the matched no-repair baseline at the same active-cache budget, with only $96$ promoted tokens.
+{This paper studies this gap. Our contributions are:} (1) a matched resumed active-cache-budget protocol for testing whether repair helps without simply keeping more active tokens; (2) \repairkv{}, {an operator conditioned on the next turn's signal that scores evicted KV rows and promotes a small budgeted subset back into the active cache before decoding resumes}; (3) controlled evidence across synthetic relevance shifts, different initial eviction policies, preliminary real-repository diagnostics, and runtime feasibility probes. On Qwen2.5-7B-Instruct at 32K context, \repairkv{} achieves $91.0\%$ retrieval on a four-query needle-in-a-haystack task versus $24.5\%$ for the matched no-repair baseline at the same active-cache budget, with only $96$ promoted tokens.
 
 % -----------------------------------------------------------------------
 \section{Related Work}
@@ -82,10 +82,10 @@ model waits for external results. Together, {\color{red}the new signal and the p
 % -----------------------------------------------------------------------
 
 \subsection{KV-cache compression and eviction}
-{\color{red}KV-cache compression and eviction methods reduce active KV state by retaining a fixed budget of tokens or blocks based on prefix-time, recency, or attention signals~\citep{snapkv,streamingllm,h2o,scissorhands,pyramidkv}}, but this retention decision is usually one-way: rows dropped from the active set cannot re-enter when later turns make them important. This failure mode is observed in recent analyses of instruction and fact degradation under KV compression~\citep{pitfalls}.
+{KV-cache compression and eviction methods reduce active KV state by retaining a fixed budget of tokens or blocks based on prefix-time, recency, or attention signals~\citep{snapkv,streamingllm,h2o,scissorhands,pyramidkv}}, but this retention decision is usually one-way: rows dropped from the active set cannot re-enter when later turns make them important. This failure mode is observed in recent analyses of instruction and fact degradation under KV compression~\citep{pitfalls}.
 
 \subsection{Query-aware retrieval and sparse attention}
-Query-aware methods such as QUEST {\color{red}emphasize the premise behind repair: token criticality depends on current information need, not only on the prefix that produced the compressed cache~\citep{quest}}. Fine-grained KV retrieval systems use this signal during active decoding to select or fetch query-relevant rows from a retained or indexed KV store~\citep{quest,fier,pariskv,shadowkv}. Attention analyses likewise show that token importance can be query-dependent or recurrent rather than fixed once compressed~\citep{retrieval_heads,lazy_eviction}. {\color{red}\repairkv{} builds on this query-dependence, but applies it at a different lifecycle point: after compression and before the next decode.}
+Query-aware methods such as QUEST {emphasize the premise behind repair: token criticality depends on current information need, not only on the prefix that produced the compressed cache~\citep{quest}}. Fine-grained KV retrieval systems use this signal during active decoding to select or fetch query-relevant rows from a retained or indexed KV store~\citep{quest,fier,pariskv,shadowkv}. Attention analyses likewise show that token importance can be query-dependent or recurrent rather than fixed once compressed~\citep{retrieval_heads,lazy_eviction}. {\repairkv{} builds on this query-dependence, but applies it at a different lifecycle point: after compression and before the next decode.}
 
 \begin{figure}[t]
 \centering
@@ -295,22 +295,22 @@ Query-aware methods such as QUEST {\color{red}emphasize the premise behind repai
      at (\spillX + 0.04, {(\hostY - \hostH/2 + \coldYtop)/2}) {demote or drop};
 \end{tikzpicture}%
 }
-\caption{{\color{green!50!black}\repairkv{} system overview. During agent decode pauses (tool calls, retrievals), a selected signal $s$ --- e.g., user input, tool output, retrieved content, recent generation --- is used to rank host KV rows; the top-$K$ are lifted back into GPU HBM at their original sequence positions.}}
+\caption{{\repairkv{} system overview. During agent decode pauses (tool calls, retrievals), a selected signal $s$ (such as a new user query, a tool result, retrieved content, or the model's recent generation) is used to rank host KV rows; the top-$K$ are lifted back into GPU HBM at their original sequence positions.}}
 \label{fig:pipeline}
 \end{figure}
 
 \subsection{Long-context benchmarks}
-Long-context benchmarks stress whether models can use information across long inputs, {\color{red}from ordinary long documents to 100k-token settings}, showing that application-visible context length
+Long-context benchmarks stress whether models can use information across long inputs, {from ordinary long documents to 100k-token settings}, showing that application-visible context length
 does not remove the need for memory-management
-mechanisms~\citep{longbench,inftybench,ruler}. {\color{red}SCBench directly evaluates tasks around the KV-cache lifecycle itself~\citep{scbench}. However, these benchmarks leave open what happens after a compression decision has already removed future-relevant tokens from the active cache.}
+mechanisms~\citep{longbench,inftybench,ruler}. {SCBench directly evaluates tasks around the KV-cache lifecycle itself~\citep{scbench}. However, these benchmarks leave open what happens after a compression decision has already removed future-relevant tokens from the active cache.}
 
 \subsection{KV serving and tiering}
 Serving systems address the systems side of long-context KV cache management.
 PagedAttention/vLLM improves GPU KV allocation and block management
-during serving~\citep{vllm}, while prefix-caching systems reduce repeated prefill when requests share or resume prefixes~\citep{lmcache,ttkv}. KV-tiering systems extend this idea across GPU, host memory, storage, and network tiers~\citep{lmcache,ttkv,agentserve}. {\color{red}Together, these systems determine where KV state lives and when it can be reused, but they do not address the complementary decision of which offloaded rows should re-enter the active cache for the next turn.}
+during serving~\citep{vllm}, while prefix-caching systems reduce repeated prefill when requests share or resume prefixes~\citep{lmcache,ttkv}. KV-tiering systems extend this idea across GPU, host memory, storage, and network tiers~\citep{lmcache,ttkv,agentserve}. {Together, these systems determine where KV state lives and when it can be reused, but they do not address the complementary decision of which offloaded rows should re-enter the active cache for the next turn.}
 
 \subsection{Multi-turn LLM serving}
-Multi-turn agent workloads pause decoding for external actions such as tool calls, web interaction, repository edits, and tests~\citep{toollm,webarena,swebench,agentbench}. Serving systems make these pauses operationally visible: Continuum schedules multi-turn agent requests around tool-call gaps and KV-cache lifetimes, while AgentServe targets local agent serving under tight GPU memory budgets~\citep{continuum,agentserve}. Pause-aware systems preserve paused-request KV to avoid repeated prefill~\citep{infercept,continuum,cachedattention}. {\color{red}These same pauses often contain new relevance signals, creating the setting for repair.}
+Multi-turn agent workloads pause decoding for external actions such as tool calls, web interaction, repository edits, and tests~\citep{toollm,webarena,swebench,agentbench}. Serving systems make these pauses operationally visible: Continuum schedules multi-turn agent requests around tool-call gaps and KV-cache lifetimes, while AgentServe targets local agent serving under tight GPU memory budgets~\citep{continuum,agentserve}. Pause-aware systems preserve paused-request KV to avoid repeated prefill~\citep{infercept,continuum,cachedattention}. {These same pauses often contain new relevance signals, creating the setting for repair.}
 
 % -----------------------------------------------------------------------
 \section{\repairkv{}}
@@ -319,7 +319,7 @@ Multi-turn agent workloads pause decoding for external actions such as tool call
 
 \subsection{Overview}
 Each compression step can only choose the active KV set with the information available at that point.
-{\color{red}\repairkv{} treats the resulting compressed state as revisable: when a new turn signal becomes available, the runtime can score offloaded evicted KV rows and promote a small subset before decoding resumes.}
+{\repairkv{} treats the resulting compressed state as revisable: when a new turn signal becomes available, the runtime can score offloaded evicted KV rows and promote a small subset before decoding resumes.}
 Figure~\ref{fig:pipeline} summarizes this system view.
 
 At the pause boundary, the abstraction has three objects:
@@ -327,26 +327,26 @@ At the pause boundary, the abstraction has three objects:
   \item $C_{\mathrm{base}}$: active evictable KV, with
   $|C_{\mathrm{base}}|=\bbase$ (base active-cache budget);
   \item $W_N$: offloaded evicted KV, hidden from decoding unless promoted; 
-  \item $s$: {\color{red}the pause boundary signal used to score evicted KV,} such as a new user
+  \item $s$: {the pause boundary signal used to score evicted KV,} such as a new user
   query, a tool result, the model's recent generation, or other tokens
-  that {\color{red}indicate upcoming significance.}
+  that {indicate upcoming significance.}
 \end{itemize}
-{\color{red}The repair map chooses $S_K(s)\subseteq W_N$ with
+{The repair map chooses $S_K(s)\subseteq W_N$ with
 $|S_K|\le K$, where $K$ is the restore budget}, and resumes from
 $C_{\mathrm{repair}}=C_{\mathrm{base}}\cup S_K$ at resumed
 active-cache budget $|C_{\mathrm{repair}}|\le \bbase+K$. 
 
 \subsection{Two-turn protocol}
-{\color{red}We isolate multi-turn repair with a protocol for the simplest controlled case: one relevance shift across two turns. A five-turn revisit diagnostic (Figure~\ref{fig:multiturn}) confirms that the effect persists across repeated shifts.}
+{We isolate multi-turn repair with a protocol for the simplest controlled case: one relevance shift across two turns. A five-turn revisit diagnostic (Figure~\ref{fig:multiturn}) confirms that the effect persists across repeated shifts.}
 
-At turn $N$, the model receives a long distractor document followed by prompt $Q_1$ and generates the response to $Q_1$ from the full uncompressed cache. The runtime then compresses the distractor document KV to a base budget $\bbase$ on GPU and offloads the evicted rows to host memory as $W_N$. The $Q_1$ prompt, the generated response, and later $Q_2$ are preserved exactly. During the subsequent idle window, the turn-$(N{+}1)$ prompt $Q_2$ becomes known.
+At turn $N$, the model receives a long distractor document followed by prompt $Q_1$ and generates the response to $Q_1$ from the full uncompressed cache. The runtime then compresses the distractor document KV to a base budget $\bbase$ on GPU and offloads the evicted rows to host memory as $W_N$. The $Q_1$ prompt and the generated response are preserved exactly. During the subsequent idle window, the turn-$(N{+}1)$ prompt $Q_2$ becomes known and is preserved verbatim.
 
 At turn $N{+}1$, the distractor document is not re-presented. \repairkv{} scores the evicted store $W_N$ against the active post-$Q_1$ cache and the $Q_2$ signal, promotes a $K$-budgeted subset $S_K$ back to GPU before $Q_2$ decoding, and the model answers $Q_2$ from $C_{\mathrm{repair}}$.
 
 The primary comparison excludes full-prefill recompute because it reprocesses the long context after $Q_2$ is known, while our comparison asks whether the already-compressed cache can be improved under the same resumed active-cache budget. The controlled prototype evaluates one paused request on one GPU with a single host-memory tier, a prematerialized evicted-KV store, and the full $Q_2$ signal known before resumed decoding.
 
 \subsection{Repair operation}
-Intuitively, \repairkv{} {\color{red}uses the next-turn signal to identify which evicted KV rows should be active before decoding resumes.} Algorithm~\ref{alg:repair} describes the general framework; the prototype is specified by two main choices: {\color{red}$\textsc{Score}$ and $\textsc{Select}$, with $\mathcal{C}=C_{\mathrm{base}}$ and $\mathcal{W}=W_N$.}
+Intuitively, \repairkv{} {uses the next-turn signal to identify which evicted KV rows should be active before decoding resumes.} Algorithm~\ref{alg:repair} describes the general framework; the prototype is specified by two main choices: {$\textsc{Score}$ and $\textsc{Select}$, with $\mathcal{C}=C_{\mathrm{base}}$ and $\mathcal{W}=W_N$.}
 \begin{algorithm}[t]
 \caption{General \repairkv{} Execution Framework}
 \label{alg:repair}
@@ -371,7 +371,7 @@ evicted store $\mathcal{W}\!\gets\!\emptyset$.
 \end{algorithm}
 
 For \textsc{Score}, post-RoPE $Q_2$ query tensors
-$\{q^{(\ell,h)}_{2,t}\}$ are {\color{red}scored} against keys in the active and
+$\{q^{(\ell,h)}_{2,t}\}$ are {scored} against keys in the active and
 offloaded sets via
 \begin{equation}
   A^{(\ell,h)} = \mathrm{softmax}\!\left(
@@ -391,17 +391,17 @@ by ascending position.
 For \textsc{Select}, each top-ranked anchor $i$ is
 expanded into a local burst $\{i{-}L,\dots,i{+}R\} \cap (W_N \setminus
 S_K)$ under a strict $|S_K| \le K$ budget. The right-biased
-$(L, R) = (2, 20)$ {\color{red}reflects the local structure: high-scoring anchors often occur near queried keys, and answer-bearing value tokens usually follow nearby.} If anchor bursts do not exhaust $K$,
+$(L, R) = (2, 20)$ {reflects the local structure: high-scoring anchors often occur near queried keys, and answer-bearing value tokens usually follow nearby.} If anchor bursts do not exhaust $K$,
 remaining slots backfill from single ranked rows.
 
-The current prototype scores token rows {\color{red}fixed burst widths}. A systems implementation would promote cached blocks or pages.
+The current prototype scores token rows with fixed burst widths. A systems implementation would promote cached blocks or pages.
 
 \subsection{Matched-budget evaluation}
 All main claims compare \repairkv{} to a no-repair baseline at the same
-resumed active-cache budget. {\color{red}In both conditions, $Q_2$ decoding sees the same number} of active evictable-context tokens in addition to the
+resumed active-cache budget. {In both conditions, $Q_2$ decoding sees the same number} of active evictable-context tokens in addition to the
 identical preserved $Q_1$ prompt and answer tail. The match is only on active GPU KV: extra offloaded rows, scorer time, and transfer time are not part of the matched budget; they are reported separately as service costs.
 
-{\color{red}Let $\bmatch$ denote the no-repair condition, which applies the base eviction policy with active evictable-context budget $\bbase+K$. \repairkv{} reaches the same active budget by starting from $\bbase$ retained rows and promoting up to $K$ rows from the host-memory store.
+{Let $\bmatch$ denote the no-repair condition, which applies the base eviction policy with active evictable-context budget $\bbase+K$. \repairkv{} reaches the same active budget by starting from $\bbase$ retained rows and promoting up to $K$ rows from the host-memory store.
 
 The main restore-budget frontier reports raw answer score. For effect size comparisons, we also report gain over matched no-repair,
 \begin{equation}
@@ -416,15 +416,14 @@ where $\mathrm{Score}$ is the mean fraction of held-out $Q_2$ targets recovered 
 % -----------------------------------------------------------------------
 
 \subsection{Benchmark family}
-{\color{red}
-The main benchmark is a split-query version of multi-query needle-in-a-haystack (MQ-NIAH) derived from RULER~\citep{ruler}. We use this family because it exposes the failure mode repair is meant to address: tokens that are unimportant for the first turn can become critical post-compression.
+{The main benchmark is a split-query version of multi-query needle-in-a-haystack (MQ-NIAH) derived from RULER~\citep{ruler}. We use this family because it exposes the failure mode repair is meant to address: tokens that are unimportant for the first turn can become critical post-compression.
 
 Each example contains key-value needles inside a long distractor context. The first turn queries one subset of keys, the cache is compressed, and the second turn queries a different subset. This gives a controlled relevance shift with annotated future-relevant spans and a shared turn-$N$ history across conditions.
 
 We evaluate 2Q, 4Q, 6Q, and 8Q variants, which use the same task template but increase the number of queried key-value pairs. For each variant, we pool balanced partitions that avoid a recency shortcut: the keys requested in $Q_2$ are not the needles nearest to the end of the context. Appendix Figure~\ref{fig:app-partition-endpoints} summarizes the exact splits.}
 
 \subsection{Evaluation configuration}
-{\color{red}All main experiments use Qwen2.5-7B-Instruct~\citep{qwen} at 32K rendered context on a single RTX PRO 6000 Blackwell GPU. The initial post-$Q_1$ compression is context-only SnapKV compression~\citep{snapkv}: it is applied only to the evictable document context, while the $Q_1$ prompt and generated $Q_1$ response are preserved exactly.}
+{All main experiments use Qwen2.5-7B-Instruct~\citep{qwen} at 32K rendered context on a single RTX PRO 6000 Blackwell GPU. The initial post-$Q_1$ compression is context-only SnapKV compression~\citep{snapkv}: it is applied only to the evictable document context, while the $Q_1$ prompt and generated $Q_1$ response are preserved exactly.}
 
 Per-task base budgets are calibrated so matched no-repair is neither already near full-cache accuracy nor near zero, leaving room to measure whether repair improves the resumed cache. Unless stated otherwise, the fixed sweep is 
 \begin{itemize}[leftmargin=1.4em,noitemsep,topsep=2pt]
@@ -438,17 +437,17 @@ Per-task base budgets are calibrated so matched no-repair is neither already nea
   response per setting and
     condition.
   \end{itemize}
-{\color{red}This replay removes turn-$N$ generation differences, so the frontier isolates resumed-cache selection quality at turn $N{+}1$. MQ-NIAH-2Q/4Q/6Q use fixed 100-example evaluation sets per partition, while MQ-NIAH-8Q uses 24 examples per partition over five partitions.} Prompt and decode settings are reported in the appendix.
+{This replay removes turn-$N$ generation differences, so the frontier isolates resumed-cache selection quality at turn $N{+}1$. MQ-NIAH-2Q/4Q/6Q use fixed 100-example evaluation sets per partition, while MQ-NIAH-8Q uses 24 examples per partition over five partitions.} Prompt and decode settings are reported in the appendix.
 
 \subsection{Scorers}
-For the initial turn-$N$ compression, we score context tokens using the generated $Q_1$ response rather than a generic last $32$ token suffix. This makes the post-$Q_1$ compressed cache reflect the actual first turn computation.
+For the initial turn-$N$ compression, we score context tokens using the generated $Q_1$ response rather than a generic last-32-token suffix. This makes the post-$Q_1$ compressed cache reflect the actual first turn computation.
 
 For repair, the main quality curves use an exact $Q_2$ scorer. We append $Q_2$ to the compressed active cache, extract the model's post-RoPE $Q_2$ query projections, and score active and offloaded key rows under those projections before selecting evicted rows for promotion. This isolates whether the newly revealed turn signal identifies rows worth restoring.
 
 \subsection{Baselines and references}
-We compare the full-cache reference $A$, the base compressed cache $B$ before repair, matched no-repair $\bmatch$, Random-$K$ and Oldest-$K$ restore controls, and \repairkv{}. Random-$K$ and Oldest-$K$ promote from the same evicted KV store as \repairkv{} without scoring with $Q_2$, testing whether gains come from query-aware repair or generic reinsertion. 
+We compare the full-cache reference, the base compressed cache before repair, matched no-repair $\bmatch$, Random-$K$ and Oldest-$K$ restore controls, and \repairkv{}. Random-$K$ and Oldest-$K$ promote from the same evicted KV store as \repairkv{} without scoring with $Q_2$, testing whether gains come from query-aware repair or generic reinsertion. 
 
-{\color{red}The specificity study adds StaleQ-$K$ (score with the previous turn query), WrongQ-$K$ (score with another example's $Q_2$) and Refresh-buffered, which reselects the whole $\bbase+K$ context budget from active and offloaded rows after $Q_2$ is known, without full-prefix recomputation. Refresh-buffered serves to expose selector headroom rather than serving as the main baseline.}
+{The specificity study adds StaleQ-$K$ (score with the previous turn query), WrongQ-$K$ (score with another example's $Q_2$) and Refresh-buffered, which reselects the whole $\bbase+K$ context budget from active and offloaded rows after $Q_2$ is known, without full-prefix recomputation. Refresh-buffered exposes selector headroom rather than acting as a main baseline.}
 
 % -----------------------------------------------------------------------
 \section{Results}
@@ -456,16 +455,16 @@ We compare the full-cache reference $A$, the base compressed cache $B$ before re
 % -----------------------------------------------------------------------
 
 \subsection{Matched-budget frontier}
-Across MQ-NIAH-2Q/4Q/6Q/8Q, \repairkv{} separates from matched no-repair at moderate to large restore budgets. At $K=96$, \repairkv{} scores $0.910$ on 4Q, $0.989$ on 6Q, and $0.960$ on 8Q, while matched no-repair scores $0.245$, $0.422$, and $0.546$, resp. Figure~\ref{fig:main-frontier} reports the full raw $Q_2$ score frontier. Random-$K$ and Oldest-$K$ stay near matched no-repair, showing that generic reinsertion from the same evicted KV store does not explain the gains. MQ-NIAH-2Q saturates by $K=80$, while matched no-repair remains near $0.06$. Across all twelve balanced partitions at $K=128$, \repairkv{} beats $\bmatch$ and both content-agnostic controls. {\color{red}Even the weakest partition-level} gains are $0.585$, $0.387$, and $0.292$ for 4Q, 6Q, and 8Q, resp. (Appendix Figure~\ref{fig:app-partition-endpoints}).
+Across MQ-NIAH-2Q/4Q/6Q/8Q, \repairkv{} separates from matched no-repair at moderate to large restore budgets. At $K=96$, \repairkv{} scores $0.910$ on 4Q, $0.989$ on 6Q, and $0.960$ on 8Q, while matched no-repair scores $0.245$, $0.422$, and $0.546$, respectively. Figure~\ref{fig:main-frontier} reports the full raw $Q_2$ score frontier. Random-$K$ and Oldest-$K$ stay near matched no-repair, showing that generic reinsertion from the same evicted KV store does not explain the gains. MQ-NIAH-2Q saturates by $K=80$, while matched no-repair remains near $0.06$. Across all twelve balanced partitions at $K=128$, \repairkv{} beats $\bmatch$ and both content-agnostic controls. {Even the weakest partition-level} gains are $0.585$, $0.387$, and $0.292$ for 4Q, 6Q, and 8Q, respectively. (Appendix Figure~\ref{fig:app-partition-endpoints}).
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/frontier_raw_overlay.pdf}
-  \caption{{\color{green!50!black}Raw $Q_2$ score under matched resumed-cache budgets. Solid: \repairkv{}; dotted: matched no-repair. Right labels: query count and $\Delta_{96}$ (gain at $K{=}96$).}}
+  \caption{{Raw $Q_2$ score under matched resumed-cache budgets. Solid: \repairkv{}; dotted: matched no-repair. Right labels: query count and $\Delta_{96}$ (gain at $K{=}96$).}}
   \label{fig:main-frontier}
 \end{figure}
 
 \subsection{Next-turn signal specificity}
-Repair gains depend on using the correct newly revealed signal. At $K=48$, StaleQ-$K$ and WrongQ-$K$ stay near matched no-repair, with gains $0.028$ $[-0.021,0.083]$ and $0.028 [-0.014,0.069]$, while \repairkv{} reaches $0.326$ $[0.243,0.410]$. {\color{red}Thus, the improvement is not explained by scoring with any query-like text; the signal must match the upcoming turn. Refresh-buffered reaches $1.000$, showing that relevant rows remaining available for stronger selectors to exploit, motivating an open research direction.}
+Repair gains depend on using the correct newly revealed signal. At $K=48$, StaleQ-$K$ and WrongQ-$K$ stay near matched no-repair, with gains $0.028$ $[-0.021, 0.083]$ and $0.028$ $[-0.014, 0.069]$, while \repairkv{} reaches $0.326$ $[0.243, 0.410]$. {Thus, the improvement is not explained by scoring with any query-like text; the signal must match the upcoming turn. Refresh-buffered reaches $1.000$, showing that relevant rows remain available for stronger selectors to exploit, motivating an open research direction.}
 \begin{table}[!ht]
   \centering
   \setlength{\tabcolsep}{3.5pt}
@@ -488,7 +487,7 @@ Repair gains depend on using the correct newly revealed signal. At $K=48$, Stale
 \end{table}
 
 \subsection{Repeated relevance shifts}
-The repair effect persists when relevance changes repeatedly. On a fixed five-turn MQ-NIAH-8Q revisit schedule $(K=80$, $n=24$), \repairkv{} gains $0.542$ over matched no-repair on non-initial turns (95\% CI $[0.458,0.620]$). Random-$K$ and Oldest-$K$ gain only $0.010$ and $0.021$, and \repairkv{} remains above StaleQ-$K$, supporting that repair can track the current turn signal across repeated controlled shifts.
+The repair effect persists when relevance changes repeatedly. On a fixed five-turn MQ-NIAH-8Q revisit schedule $(K=80$, $n=24$), \repairkv{} gains $0.542$ over matched no-repair on non-initial turns (95\% CI $[0.458,0.620]$). Random-$K$ and Oldest-$K$ gain only $0.010$ and $0.021$, and \repairkv{} remains above StaleQ-$K$, suggesting that repair can track the current turn signal across repeated controlled shifts.
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\columnwidth]{figures/multiturn_hard_trajectory.pdf}
@@ -500,25 +499,25 @@ The repair effect persists when relevance changes repeatedly. On a fixed five-tu
 \end{figure}
 
 \subsection{Eviction-policy sensitivity}
-\repairkv{}'s improvement improves caches produced by other first-stage eviction policies as well. On MQ-NIAH-4Q, we replace the primary SnapKV-style compressor with H$_2$O-style accumulated attention retention and a StreamingLLM-style sink-plus-recent rule. In both cases, \repairkv{} improves over each policy's matched no-repair baseline while Random-$K$ and Oldest-$K$ remain near baseline (Figure~\ref{fig:policy-breadth}). Under the StreamingLLM-style policy, for example, \repairkv{} gains $0.431$ at $K=128$. A separate Scissorhands-style persistence stress test also passes the locked gate (Appendix Table~\ref{tab:app-scissorhands-stress}).
+\repairkv{} also improves caches produced by other first-stage eviction policies. On MQ-NIAH-4Q, we replace the primary SnapKV-style compressor with H$_2$O-style accumulated attention retention and a StreamingLLM-style sink-plus-recent rule. In both cases, \repairkv{} improves over each policy's matched no-repair baseline while Random-$K$ and Oldest-$K$ remain near baseline (Figure~\ref{fig:policy-breadth}). Under the StreamingLLM-style policy, for example, \repairkv{} gains $0.431$ at $K=128$. A separate Scissorhands-style persistence stress test also clears the matched-budget protocol (Appendix Table~\ref{tab:app-scissorhands-stress}).
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/policy_breadth_delta.pdf}
-  \caption{{\color{green!50!black}Eviction-policy sensitivity on MQ-NIAH-4Q ($n{=}24$, $\bbase{=}16{,}384$). Curves show $Q_2$ gain over each policy's matched no-repair; gray band spans Random-$K$/Oldest-$K$.}}
+  \caption{{Eviction-policy sensitivity on MQ-NIAH-4Q ($n{=}24$, $\bbase{=}16{,}384$). Curves show $Q_2$ gain over each policy's matched no-repair; gray band spans Random-$K$/Oldest-$K$.}}
   \label{fig:policy-breadth}
 \end{figure}
 
 \subsection{Real-repository diagnostic}
 To test external validity beyond MQ-NIAH, we ran a controlled relevance shift diagnostic on 48 callsite examples from 12 open-source repositories drawn from the SWE-bench pool~\citep{swebench} at fixed commits. Each example loads 32K tokens of line-numbered repository context. The first turn asks about a file unrelated to the answer, encouraging compression to evict the later relevant code. The second turn asks for a target identifier at a callsite.
 
-Between turns, an \emph{event} arrives: a description of the callsite with the target identifier redacted. This event replaces the synthetic $Q_2$ signal used in MQ-NIAH, and all conditions decode the same event and question prompt. {\color{red}At $K=192$, event only \repairkv{} improves exact identifier accuracy from $18.8\%$ matched no-repair to $72.9\%$. Non-query controls and ToolFile-$K$ remain near matched (Table~\ref{tab:real-repo-diagnostic}). Thus, the gain comes from using the event as a relevance signal, not from generic reinsertion or simply knowing the file name.} 
+Between turns, an \emph{event} arrives: a description of the callsite with the target identifier redacted. This event replaces the synthetic $Q_2$ signal used in MQ-NIAH, and all conditions decode the same event and question prompt. {At $K=192$, event-only \repairkv{} improves exact identifier accuracy from $18.8\%$ matched no-repair to $72.9\%$. Non-query controls and ToolFile-$K$ remain near matched (Table~\ref{tab:real-repo-diagnostic}). Thus, the gain comes from using the event as a relevance signal, not from generic reinsertion or simply knowing the file name.} 
 
-Label-assisted references show remaining headroom: File gated \repairkv{} reaches $83.3\%$, and AnchorWindow-$K$ reaches $89.6\%$. This is a small diagnostic rather than a full benchmark, but it shows some initial evidence that the repair approach improves quality beyond the synthetic MQ-NIAH setting. Appendix Figure~\ref{fig:app-real-repo-diagnostic} gives the full audit.
+Label-assisted references show remaining headroom: File-gated \repairkv{} reaches $83.3\%$, and AnchorWindow-$K$ reaches $89.6\%$. This is a small diagnostic rather than a full benchmark, but it shows some initial evidence that the repair approach improves quality beyond the synthetic MQ-NIAH setting. Appendix Figure~\ref{fig:app-real-repo-diagnostic} gives the full audit.
 \begin{table}[!ht]
   \centering
   \setlength{\tabcolsep}{4pt}
   \renewcommand{\arraystretch}{0.95}
-  \caption{{\color{green!50!black}Real-repository diagnostic at $K{=}192$ on 48 callsite cases from 12 SWE-bench repositories. Accuracy = exact target-identifier recovery. Non-query = best of Random-$K$/Oldest-$K$/StaleQ-$K$/WrongQ-$K$. AnchorWindow and File-gated are label-assisted (others non-label).}}
+  \caption{{Real-repository diagnostic at $K{=}192$ on 48 callsite cases from 12 SWE-bench repositories. Accuracy = exact target-identifier recovery. Non-query = best of Random-$K$/Oldest-$K$/StaleQ-$K$/WrongQ-$K$. AnchorWindow and File-gated are label-assisted (others non-label).}}
   \label{tab:real-repo-diagnostic}
   \small
   \begin{tabular}{@{}lr@{}}
@@ -536,14 +535,13 @@ Label-assisted references show remaining headroom: File gated \repairkv{} reache
 \end{table}
 
 \subsection{Runtime}
-{\color{red}
-We run a separate GPU runtime probe for the repair operation, measuring chunked scan, top-$K$ selection, and KV movement over pinned host-memory BF16 tensors with Qwen-shaped dimensions. At $K=5000$, p95 repair latency is $50.0$\,ms at 32K offloaded candidates, $1.20$\,s at 1M, and $4.64$\,s at 4M (Figure~\ref{fig:runtime-envelope}). These numbers are hardware- and model-dependent: larger KV dimensions increase the constant factor, while newer deployment GPUs may reduce it. The key property is linearly scaling in the number of candidate KV rows, which keeps repair in the seconds range even at million-row candidate pools, unlike approaches that recompute or score over full context-query interactions with quadratic cost. {\color{green!50!black}At $K{=}96$ the full repair takes around $110$\,ms (p95) versus $2.13$\,s for full-prefix prefill on our system, even with FlashAttention-2/3 speedups~\citep{flashattn2,flashattn3}; see Appendix~\ref{app:p18-supplement} for selector ablations and time-budgeted query-aware baselines.}
+{We run a separate GPU runtime probe for the repair operation, measuring chunked scan, top-$K$ selection, and KV movement over pinned host-memory BF16 tensors with Qwen-shaped dimensions. At $K=5000$, p95 repair latency is $50.0$\,ms at 32K offloaded candidates, $1.20$\,s at 1M, and $4.64$\,s at 4M (Figure~\ref{fig:runtime-envelope}). These numbers are hardware- and model-dependent: larger KV dimensions increase the constant factor, while newer deployment GPUs may reduce it. The key property is that cost scales linearly with the number of candidate KV rows, which keeps repair in the seconds range even at million-row candidate pools, unlike approaches that recompute or score over full context-query interactions with quadratic cost. {At $K{=}96$ the full repair takes around $110$\,ms (p95) versus $2.13$\,s for full-prefix prefill on our system, even with FlashAttention-2/3 speedups~\citep{flashattn2,flashattn3}; see Appendix~\ref{app:p18-supplement} for selector ablations and time-budgeted query-aware baselines.}
 
 These costs are small relative to many agent and tool-use pauses: OS-level execution, including tool calls and setup, can account for 56--74\% of task latency~\citep{agentcgroup}, and tool calls range from sub-second file/shell operations to multi-second tests or code execution~\citep{continuum}. More broadly, the low repair cost suggests a runtime role beyond using otherwise idle GPU time: repair can be run opportunistically at turn boundaries, tool results, retrieval updates, or other state changes to trade a small amount of memory movement and time for substantially better resumed-cache quality.
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\columnwidth]{figures/runtime_repair_scaling.pdf}
-  \caption{{\color{green!50!black}Runtime-capacity probe. (a) p95 of chunked scan + top-$K$ select + KV move at query length 64, Qwen-shaped pinned host BF16 KV. (b) Stage-wise p95 at $K{=}5000$.}}
+  \caption{{Runtime-capacity probe. (a) p95 of chunked scan + top-$K$ select + KV move at query length 64, Qwen-shaped pinned host BF16 KV. (b) Stage-wise p95 at $K{=}5000$.}}
   \label{fig:runtime-envelope}
 \end{figure}
 
@@ -551,15 +549,16 @@ These costs are small relative to many agent and tool-use pauses: OS-level execu
 \section{Conclusion}
 \label{sec:conclusion}
 % -----------------------------------------------------------------------
+\enlargethispage{\baselineskip}
 \repairkv{} makes the case for revisable KV compression. Existing compression policies decide which past tokens remain active using the information available at compression time. Our results show that this decision can be usefully revised when a later turn reveals a new relevance signal. Across MQ-NIAH-2Q/4Q/6Q/8Q, repeated relevance shifts, alternative eviction policies, and a small real-repository diagnostic, promoting a small set of relevant evicted rows substantially improves resumed-cache quality under the same active-cache budget.
 
-The broader direction is mutable KV memory for resource adaptive long-context inference. Repair suggests that runtimes need not treat compression as a one way loss: they can maintain searchable evicted state, score it when new signals arrive, and use cheap promotion to trade a small amount of memory movement for better response quality. This opens several follow-up directions: stronger $Q_2$-aware selectors, page-level repair policies, scheduler-aware repair at arbitrary turn or tool events, and benchmarks with production-style multi-turn traces, hidden future relevance, and explicit accounting for active-cache, offloaded storage, transfer, and recompute cost.
+The broader direction is mutable KV memory for resource-adaptive long-context inference. Repair suggests that runtimes need not treat compression as a one-way loss: they can maintain searchable evicted state, score it when new signals arrive, and use cheap promotion to trade a small amount of memory movement for better response quality. This opens several follow-up directions: stronger $Q_2$-aware selectors, page-level repair policies, scheduler-aware repair at arbitrary turn or tool events, and benchmarks with production-style multi-turn traces, hidden future relevance, and explicit accounting for active-cache, offloaded storage, transfer, and recompute cost.
 
 \section*{Impact Statement}
 This paper studies inference-time KV-cache repair for long-context language models. Its intended impact is to reduce GPU memory pressure while improving response quality in long-context and agentic settings where relevance changes between turns. We do not foresee novel ethical risks beyond those already inherent to large language model use.}
 
 % -----------------------------------------------------------------------
-\begin{thebibliography}{34}
+\begin{thebibliography}{37}
 
 \bibitem[Abhyankar et~al.(2024)]{infercept}
 Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and Zhang, Y.
@@ -576,22 +575,21 @@ Bai, Y., Lv, X., Zhang, J., Lyu, H., Tang, J., Huang, Z., Du, Z.,
 \newblock In \emph{Proceedings of the 62nd Annual Meeting of the
   Association for Computational Linguistics (ACL)}, 2024.
 
-\bibitem[Bian et~al.(2025a)]{agent_efficiency}
-Bian, S., Yan, M., Jayarajan, A., Pekhimenko, G., and Venkataraman, S.
-\newblock What limits agentic systems efficiency.
-\newblock In \emph{NeurIPS 2025 Workshop on Scaling Environments for
-  Agents (SEA)}, 2025.
-
-\bibitem[Bian et~al.(2025b)]{tokencake}
-Bian, Z., Wu, F., Ma, T., and Zhuo, Y.
-\newblock Tokencake: A KV-cache-centric serving framework for
-  LLM-based multi-agent applications.
-\newblock \emph{arXiv:2510.18586}, 2025.
-
 \bibitem[Chen et~al.(2025)]{pitfalls}
 Chen, A., Geh, R., Grover, A., Van den Broeck, G., and Israel, D.
 \newblock The pitfalls of KV cache compression.
 \newblock \emph{arXiv:2510.00231}, 2025.
+
+\bibitem[Dao(2023)]{flashattn2}
+Dao, T.
+\newblock FlashAttention-2: Faster attention with better parallelism and
+  work partitioning.
+\newblock \emph{arXiv:2307.08691}, 2023.
+
+\bibitem[d-Matrix(2025)]{dmatrix2025}
+d-Matrix.
+\newblock Corsair: In-memory computing for AI inference.
+\newblock Hot Chips, 2025.
 
 \bibitem[Dzikanyanga et~al.(2026)]{ttkv}
 Dzikanyanga, G., Yang, W., Huang, H., Wu, D., Wang, S., Xia, W., and
@@ -621,6 +619,12 @@ Jimenez, C. E., Yang, J., Wettig, A., Yao, S., Pei, K., Press, O.,
 \newblock In \emph{International Conference on Learning
   Representations (ICLR)}, 2024.
 
+\bibitem[Kim et~al.(2025)]{cxlkv2025}
+Kim, D., Lee, M., Kim, J., Kwon, H., Jeong, H., Park, S.-S., Yoon, M.,
+  Roh, S.-D., Kwon, Y., So, J., and Choi, J.
+\newblock Scalable processing-near-memory for 1M-token LLM inference: CXL-enabled KV-cache management beyond GPU limits.
+\newblock \emph{arXiv:2511.00321}, 2025.
+
 \bibitem[Kwon et~al.(2023)]{vllm}
 Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C. H.,
   Gonzalez, J. E., Zhang, H., and Stoica, I.
@@ -629,17 +633,18 @@ Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C. H.,
 \newblock In \emph{Proceedings of the 29th ACM Symposium on Operating
   Systems Principles (SOSP)}, 2023.
 
+\bibitem[Li et~al.(2026)]{continuum}
+Li, H., Mang, Q., He, R., Zhang, Q., Mao, H., Chen, X., Zhou, H.,
+  Cheung, A., Gonzalez, J., and Stoica, I.
+\newblock Continuum: Efficient and robust multi-turn LLM agent
+  scheduling with KV cache time-to-live.
+\newblock \emph{arXiv:2511.02230}, 2026.
+
 \bibitem[Li et~al.(2024a)]{snapkv}
 Li, Y., Huang, Y., Yang, B., Venkitesh, B., Locatelli, A., Ye, H.,
   Cai, T., Lewis, P., and Chen, D.
 \newblock SnapKV: LLM knows what you are looking for before generation.
 \newblock \emph{arXiv:2404.14469}, 2024.
-
-\bibitem[Li et~al.(2024b)]{pyramidkv}
-Li, Z., Yang, Y., Zhang, Y., and Liu, Z.
-\newblock PyramidKV: Dynamic KV cache compression based on pyramidal
-  information funneling.
-\newblock \emph{arXiv:2406.02069}, 2024.
 
 \bibitem[Li et~al.(2025)]{scbench}
 Li, Y., Jiang, H., Wu, Q., Luo, X., Ahn, S., Zhang, C., Abdi, A. H.,
@@ -648,19 +653,16 @@ Li, Y., Jiang, H., Wu, Q., Luo, X., Ahn, S., Zhang, C., Abdi, A. H.,
 \newblock In \emph{International Conference on Learning Representations
   (ICLR)}, 2025.
 
-\bibitem[Li et~al.(2026)]{continuum}
-Li, H., Mang, Q., He, R., Zhang, Q., Mao, H., Chen, X., Zhou, H.,
-  Cheung, A., Gonzalez, J., and Stoica, I.
-\newblock Continuum: Efficient and robust multi-turn LLM agent
-  scheduling with KV cache time-to-live.
-\newblock \emph{arXiv:2511.02230}, 2026.
+\bibitem[Li et~al.(2024b)]{pyramidkv}
+Li, Z., Yang, Y., Zhang, Y., and Liu, Z.
+\newblock PyramidKV: Dynamic KV cache compression based on pyramidal
+  information funneling.
+\newblock \emph{arXiv:2406.02069}, 2024.
 
-\bibitem[Liu et~al.(2025)]{lmcache}
-Liu, Y., Cheng, Y., Yao, J., An, Y., Chen, X., Feng, S., Huang, Y.,
-  Shen, S., Zhang, R., Du, K., and Jiang, J.
-\newblock LMCache: An efficient KV cache layer for enterprise-scale LLM
-  inference.
-\newblock \emph{arXiv:2510.09665}, 2025.
+\bibitem[Liu and Yu(2025)]{cxlspeckv2025}
+Liu, D. and Yu, Y.
+\newblock CXL-SpecKV: A disaggregated FPGA speculative KV-cache for datacenter LLM serving.
+\newblock \emph{arXiv:2512.11920}, 2025.
 
 \bibitem[Liu et~al.(2024)]{agentbench}
 Liu, X., Yu, H., Zhang, H., Xu, Y., Lei, X., Lai, H., Gu, Y.,
@@ -669,6 +671,13 @@ Liu, X., Yu, H., Zhang, H., Xu, Y., Lei, X., Lai, H., Gu, Y.,
 \newblock In \emph{International Conference on Learning
   Representations (ICLR)}, 2024.
 
+\bibitem[Liu et~al.(2025)]{lmcache}
+Liu, Y., Cheng, Y., Yao, J., An, Y., Chen, X., Feng, S., Huang, Y.,
+  Shen, S., Zhang, R., Du, K., and Jiang, J.
+\newblock LMCache: An efficient KV cache layer for enterprise-scale LLM
+  inference.
+\newblock \emph{arXiv:2510.09665}, 2025.
+
 \bibitem[Liu et~al.(2023)]{scissorhands}
 Liu, Z., Desai, A., Liao, F., Wang, W., Xie, V., Xu, Z.,
   Kyrillidis, A., and Shrivastava, A.
@@ -676,6 +685,18 @@ Liu, Z., Desai, A., Liao, F., Wang, W., Xie, V., Xu, Z.,
   hypothesis for LLM KV cache compression at test time.
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2023.
+
+\bibitem[NVIDIA(2026)]{icmsp2026}
+NVIDIA.
+\newblock NVIDIA BlueField-4 powers new class of AI-native storage infrastructure for the next frontier of AI.
+\newblock NVIDIA Newsroom, January 2026.
+  Announces the Inference Context Memory Storage Platform (ICMSP) at CES 2026.
+
+\bibitem[Qi et~al.(2026)]{pariskv}
+Qi, Y., Chen, X., Jiang, H., Wang, Q., Peng, B., and Palpanas, T.
+\newblock ParisKV: Fast and drift-robust KV-cache retrieval for
+  long-context LLMs.
+\newblock \emph{arXiv:2602.07721}, 2026.
 
 \bibitem[Qin et~al.(2024)]{toollm}
 Qin, Y., Liang, S., Ye, Y., Zhu, K., Yan, L., Lu, Y., Lin, Y.,
@@ -690,22 +711,16 @@ Qwen Team.
 \newblock Qwen2.5 technical report.
 \newblock \emph{arXiv:2412.15115}, 2024.
 
-\bibitem[Pagonas et~al.(2025)]{cortex}
-Pagonas, N., Chung, Y., Kaffes, K., and Krishnamurthy, A.
-\newblock Cortex: Workflow-aware resource pooling and scheduling for
-  agentic serving.
-\newblock \emph{arXiv:2510.14126}, 2025.
+\bibitem[SambaNova(2024)]{sambanova2024}
+SambaNova Systems.
+\newblock SN40L reconfigurable dataflow unit, 2024.
 
-\bibitem[Qi et~al.(2026)]{pariskv}
-Qi, Y., Chen, X., Jiang, H., Wang, Q., Peng, B., and Palpanas, T.
-\newblock ParisKV: Fast and drift-robust KV-cache retrieval for
-  long-context LLMs.
-\newblock \emph{arXiv:2602.07721}, 2026.
-
-\bibitem[Wu et~al.(2024)]{retrieval_heads}
-Wu, W., Wang, Y., Xiao, G., Peng, H., and Fu, Y.
-\newblock Retrieval heads mechanistically explain long-context factuality.
-\newblock \emph{arXiv:2404.15574}, 2024.
+\bibitem[Shah et~al.(2024)]{flashattn3}
+Shah, J., Bikshandi, G., Zhang, Y., Thakkar, V., Ramani, P., and Dao, T.
+\newblock FlashAttention-3: Fast and accurate attention with asynchrony
+  and low-precision.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2024.
 
 \bibitem[Sun et~al.(2025)]{shadowkv}
 Sun, H., Chang, L.-W., Bao, W., Zheng, S., Zheng, N., Liu, X., Dong,
@@ -729,6 +744,11 @@ Wang, D., Liu, Z., Wang, S., Ren, Y., Deng, J., Hu, J., Chen, T., and
 \newblock In \emph{Proceedings of the Conference on Empirical Methods in
   Natural Language Processing (EMNLP)}, 2025.
 
+\bibitem[Wu et~al.(2024)]{retrieval_heads}
+Wu, W., Wang, Y., Xiao, G., Peng, H., and Fu, Y.
+\newblock Retrieval heads mechanistically explain long-context factuality.
+\newblock \emph{arXiv:2404.15574}, 2024.
+
 \bibitem[Xiao et~al.(2024)]{streamingllm}
 Xiao, G., Tang, Y., Zuo, J., Guo, J., Yang, S., Tang, H., Fu, Y.,
   and Han, S.
@@ -736,13 +756,16 @@ Xiao, G., Tang, Y., Zuo, J., Guo, J., Yang, S., Tang, H., Fu, Y.,
 \newblock In \emph{International Conference on Learning Representations
   (ICLR)}, 2024.
 
-\bibitem[Zhang et~al.(2023)]{h2o}
-Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song, Z.,
-  Tian, Y., R{\'e}, C., Barrett, C., Wang, Z., and Chen, B.
-\newblock H$_2$O: Heavy-hitter oracle for efficient generative inference
-  of large language models.
-\newblock In \emph{Advances in Neural Information Processing Systems
-  (NeurIPS)}, 2023.
+\bibitem[Yoon et~al.(2025)]{tract2025}
+Yoon, D., Min, Y., Kim, H., Noh, S.~H., and Kim, J.
+\newblock TraCT: Disaggregated LLM serving with CXL shared memory KV cache at rack-scale.
+\newblock \emph{arXiv:2512.18194}, 2025.
+
+\bibitem[Zhang et~al.(2025)]{lazy_eviction}
+Zhang, H., Zhang, H., Ma, X., Zhang, J., and Guo, S.
+\newblock LazyEviction: Lagged KV eviction with attention pattern
+  observation for efficient long reasoning.
+\newblock \emph{arXiv:2506.15969}, 2025.
 
 \bibitem[Zhang et~al.(2024)]{inftybench}
 Zhang, X., Chen, Y., Hu, S., Xu, Z., Chen, J., Hao, M. K., Han, X.,
@@ -752,17 +775,19 @@ Zhang, X., Chen, Y., Hu, S., Xu, Z., Chen, J., Hao, M. K., Han, X.,
 \newblock In \emph{Proceedings of the 62nd Annual Meeting of the
   Association for Computational Linguistics (ACL)}, 2024.
 
-\bibitem[Zhang et~al.(2025)]{lazy_eviction}
-Zhang, H., Zhang, H., Ma, X., Zhang, J., and Guo, S.
-\newblock LazyEviction: Lagged KV eviction with attention pattern
-  observation for efficient long reasoning.
-\newblock \emph{arXiv:2506.15969}, 2025.
-
 \bibitem[Zhang et~al.(2026)]{agentserve}
 Zhang, Y., Yan, Y., Yang, N., and Yuan, D.
 \newblock AgentServe: Algorithm-system co-design for efficient agentic
   AI serving on a consumer-grade GPU.
 \newblock \emph{arXiv:2603.10342}, 2026.
+
+\bibitem[Zhang et~al.(2023)]{h2o}
+Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song, Z.,
+  Tian, Y., R{\'e}, C., Barrett, C., Wang, Z., and Chen, B.
+\newblock H$_2$O: Heavy-hitter oracle for efficient generative inference
+  of large language models.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2023.
 
 \bibitem[Zheng et~al.(2026)]{agentcgroup}
 Zheng, Y., Fan, J., Fu, Q., Yang, Y., Zhang, W., and Quinn, A.
@@ -778,77 +803,32 @@ Zhou, S., Xu, F. F., Zhu, H., Zhou, X., Lo, R., Sridhar, A.,
 \newblock In \emph{International Conference on Learning
   Representations (ICLR)}, 2024.
 
-\bibitem[Dao(2023)]{flashattn2}
-Dao, T.
-\newblock FlashAttention-2: Faster attention with better parallelism and
-  work partitioning.
-\newblock \emph{arXiv:2307.08691}, 2023.
-
-\bibitem[Shah et~al.(2024)]{flashattn3}
-Shah, J., Bikshandi, G., Zhang, Y., Thakkar, V., Ramani, P., and Dao, T.
-\newblock FlashAttention-3: Fast and accurate attention with asynchrony
-  and low-precision.
-\newblock In \emph{Advances in Neural Information Processing Systems
-  (NeurIPS)}, 2024.
-
-\bibitem[NVIDIA(2026)]{icmsp2026}
-NVIDIA.
-\newblock NVIDIA BlueField-4 powers new class of AI-native storage infrastructure for the next frontier of AI.
-\newblock NVIDIA Newsroom, January 2026.
-  Announces the Inference Context Memory Storage Platform (ICMSP) at CES 2026.
-
-\bibitem[Kim et~al.(2025)]{cxlkv2025}
-Kim, D., Lee, M., Kim, J., Kwon, H., Jeong, H., Park, S.-S., Yoon, M.,
-  Roh, S.-D., Kwon, Y., So, J., and Choi, J.
-\newblock Scalable processing-near-memory for 1M-token LLM inference: CXL-enabled KV-cache management beyond GPU limits.
-\newblock \emph{arXiv:2511.00321}, 2025.
-
-\bibitem[Yoon et~al.(2025)]{tract2025}
-Yoon, D., Min, Y., Kim, H., Noh, S.~H., and Kim, J.
-\newblock TraCT: Disaggregated LLM serving with CXL shared memory KV cache at rack-scale.
-\newblock \emph{arXiv:2512.18194}, 2025.
-
-\bibitem[Liu and Yu(2025)]{cxlspeckv2025}
-Liu, D. and Yu, Y.
-\newblock CXL-SpecKV: A disaggregated FPGA speculative KV-cache for datacenter LLM serving.
-\newblock \emph{arXiv:2512.11920}, 2025.
-
-\bibitem[d-Matrix(2025)]{dmatrix2025}
-d-Matrix.
-\newblock Corsair: In-memory computing for AI inference.
-\newblock Hot Chips, 2025.
-
-\bibitem[SambaNova(2024)]{sambanova2024}
-SambaNova Systems.
-\newblock SN40L reconfigurable dataflow unit, 2024.
-
 \end{thebibliography}
 
 \clearpage
 \appendix
 \raggedbottom
 
-\section{\texorpdfstring{\textcolor{green!50!black}{Outlook and open directions}}{Outlook and open directions}}
+\section{\texorpdfstring{{Outlook and open directions}}{Outlook and open directions}}
 \label{app:outlook}
 
-{\color{green!50!black}
-We share this prototype as preliminary evidence that compressed KV state can be usefully revised at a turn boundary.
+{We share this prototype as preliminary evidence that compressed KV state can be usefully revised at a turn boundary.
 The patterns we observe across matched active-cache budgets, eviction-policy variations, repeated relevance shifts, and a small real-repository diagnostic suggest a mechanism worth deeper study.
-Several extensions are in flight or natural next steps.
+We propose several extensions as natural next steps.
 
 \paragraph{Scale and coverage.}
-We are running the matched-budget protocol on additional instruct-tuned families (Llama, Mistral), at larger model scale (70B-class), and at longer contexts (64K, 128K, 256K), where eviction errors compound and the room for repair grows.
+With more compute, we plan to run the matched-budget protocol on additional instruct-tuned families (Llama, Mistral), at larger model scale (70B-class), and at longer contexts (64K, 128K, 256K), where eviction errors compound and the room for repair grows.
 
 \paragraph{Stronger benchmarks.}
-SCBench and full SWE-bench resolution are immediate non-synthetic next steps.
-The ideal target is production multi-turn agent traces with real tool calls.
+SCBench and full SWE-bench resolution are potential short-term next steps.
+The ideal benchmark would be closer to production multi-turn agent traces with real tool calls.
 
 \paragraph{Stronger comparisons.}
-Running query-aware retrieval methods (e.g., QUEST, ShadowKV) as repair operators under the matched active-cache-budget protocol is a natural next step that would isolate selector quality from architectural commitments, alongside end-to-end serving evaluations under realistic deployment baselines.
+Running query-aware retrieval methods (e.g., QUEST, ShadowKV) as repair operators under the matched active-cache-budget protocol would isolate selector quality from architectural commitments, alongside end-to-end serving evaluations under realistic deployment baselines.
 
 The mechanism also fits naturally into the multi-tier KV systems that have become a frontier of LLM serving.
 NVIDIA's ICMSP makes NVMe-resident KV part of the context address space~\citep{icmsp2026}, CXL-based KV systems push the warm tier off-package with coherent host-side access~\citep{cxlkv2025,tract2025,cxlspeckv2025}, and inference accelerators are exposing tiered memory architectures~\citep{dmatrix2025,sambanova2024}.
-The open runtime question across these stacks, namely which slow-tier rows to promote back into the active tier under a budget and on what signal, is exactly the question the mechanism is designed to address.
+The open runtime question across these stacks, namely which slow-tier rows to promote back into the active tier under a budget and on what signal, is the question this mechanism is designed to address.
 We see revisable compressed KV as a research primitive worth broader investigation.
 }
 
@@ -909,12 +889,10 @@ second turn.
 Within-turn order is not treated as a separate condition because the
 prompt asks for comma-separated values only and scoring checks whether
 each requested value is recovered.
-Recency-favorable splits such as $12{\rightarrow}34$ are left to
-separate diagnostics outside the main future-query repair result.
 
 \paragraph{Scissorhands-style persistence stress test.}
-Table~\ref{tab:app-scissorhands-stress} repeats the MQ-NIAH-6Q locked
-protocol after replacing the initial SnapKV-style eviction policy with a
+Table~\ref{tab:app-scissorhands-stress} repeats the MQ-NIAH-6Q
+matched-budget protocol after replacing the initial SnapKV-style eviction policy with a
 one-shot persistence policy inspired by Scissorhands.
 The test asks whether repair still works when the compressed active cache
 is chosen by past attention persistence in place of the primary eviction
@@ -944,11 +922,11 @@ Canonical online per-head Scissorhands reproduction remains future work.
   \end{tabular}
 \end{table}
 
-\section{\texorpdfstring{\textcolor{green!50!black}{Additional Analysis and Discussion}}{Additional Analysis and Discussion}}
+\section{\texorpdfstring{{Additional Analysis and Discussion}}{Additional Analysis and Discussion}}
 \label{app:additional-discussion}
 
 \paragraph{Tiered-cache scaling.}
-Repair creates a two-level cache-budget problem because the main curves match
+Our current repair mechanism creates a two-level cache-budget problem because the main curves match
 the resumed active GPU KV budget while tracking total host-plus-device
 storage separately.
 A strict device-resident policy chooses the active-cache budget, while a
@@ -958,7 +936,7 @@ In the Qwen-shaped accounting
 above, 4M searchable rows already imply about 240\,GB before metadata.
 Thus \repairkv{} supports the middle operation in a tiered hierarchy:
 turn-conditioned promotion from host memory during an idle window.
-This is a hardware-facing implication; hardware measurement remains
+This is a hardware-facing implication and hardware measurement remains
 future work.
 
 \paragraph{Idle-window repair interface.}
@@ -966,14 +944,11 @@ A practical implementation would expose a host-memory index over evicted KV
 units, a time-budgeted selector conditioned on the next-turn signal,
 asynchronous promotion into the active cache, and fallbacks to no-repair or
 full recompute.
-This turns a pause into a schedulable resource: the system can spend only
-the slack that remains after queueing, transfer, and generation
-constraints, and can move the selector from token rows to pages or
-compressed metadata as hardware and serving constraints require.
 
 \paragraph{Preliminary nonlinear variable-tracking diagnostic.}
 \label{app:vt8hop-div2}
-As an exploratory stress test, we also tested a modified RULER
+
+As another direction we began to explore, we also tested a modified RULER
 variable-tracking task that makes the dependency structure less linear than the
 standard 4-hop chain. The diagnostic uses an 8-hop permuted chain with two
 distractor divergences: some assignments introduce branches that are not used by
@@ -1000,24 +975,22 @@ Broader task families should keep the same
 matched-budget controls while adding real tool traces and stronger
 selector families.
 
-\begingroup\color{green!50!black}
-\section{\texorpdfstring{\textcolor{green!50!black}{Time-Matched Selector Ablations}}{Time-Matched Selector Ablations}}
+\begingroup\section{\texorpdfstring{{Time-Matched Selector Ablations}}{Time-Matched Selector Ablations}}
 \label{app:p18-supplement}
 
 \paragraph{Time-budgeted baselines.} Two additional baselines extend the protocol of Section~\ref{sec:setup}, both subject to a wall-clock budget matched to \repairkv{}'s measured per-pause repair time. \textbf{Refresh-$K$-budgeted} is the Refresh-buffered baseline of Section~\ref{sec:setup} with this wall-clock budget applied: when the budget runs out, it stops scoring further evicted positions. \textbf{PageSummary-Quest-inspired} pre-computes per-chunk summary keys (max over each chunk) at compression time, ranks chunks by a cheap inner product against $Q_2$, and within the same wall-clock budget visits top-ranked chunks using the same per-position scorer. Both methods choose from the same evicted store as \repairkv{} and are matched on resumed active-cache rows ($\bbase{+}K$); only their off-budget service costs (scoring time, transfer, projection) differ. All numbers in this supplement come from a smaller paired $n{=}36$ MQ-NIAH-4Q slice, run separately to keep the wall-clock-budgeted baselines tractable; small differences from the $n{=}300$ headline numbers in Section~\ref{sec:results} (e.g., $\bmatch{=}0.208$ here vs.\ $0.245$ there) reflect this resampled slice rather than a protocol change.
 
 \paragraph{Wall-clock-matched K-sweep.} On MQ-NIAH-4Q at a $150$\,ms absolute scoring budget across $K\in\{32,64,96,128\}$ (Qwen2.5-7B-Instruct, $\bbase{=}16{,}384$, $n{=}36$ paired observations per $K$), the budget runs out before Refresh-$K$-budgeted finishes scoring on all $36/36$ examples, scoring approximately $4{,}000$ of $32{,}768$ evicted positions per call. \repairkv{} dominates at $K\geq 64$, reaching $0.917$ at $K{=}96$ against $0.472$ for Refresh-$K$-budgeted and $0.194$ for PageSummary-Quest-inspired (matched no-repair $\bmatch{=}0.208$). At $K{=}128$ under the same budget, \repairkv{} saturates at $1.000$ while the two time-budgeted baselines remain near $0.5$ and $0.2$.
 
-\paragraph{Per-position scoring vs.\ burst-expansion contributions.} The gains decompose into two contributions at $K{=}96$ on Qwen. Promoting only the top-scoring evicted positions, without the burst-expansion step of Section~\ref{sec:method}, reaches $0.653$ and exceeds PageSummary-Quest-inspired by $\Delta_\text{score}{=}{+}0.459$ -- this isolates the lift from per-position scoring relative to the cheaper per-chunk-summary scorer. Adding burst expansion lifts \repairkv{} to $0.917$, an additional $\Delta_\text{burst}{=}{+}0.264$. Per-position scoring contributes the larger share.
+\paragraph{Per-position scoring vs.\ burst-expansion contributions.} The gains decompose into two contributions at $K{=}96$ on Qwen. Promoting only the top-scoring evicted positions, without the burst-expansion step of Section~\ref{sec:method}, reaches $0.653$ and exceeds PageSummary-Quest-inspired by $\Delta_\text{score}{=}{+}0.459$. This isolates the lift from per-position scoring relative to the cheaper per-chunk-summary scorer. Adding burst expansion lifts \repairkv{} to $0.917$, an additional $\Delta_\text{burst}{=}{+}0.264$. Per-position scoring contributes the larger share.
 \endgroup
 
-\section{\texorpdfstring{\textcolor{green!50!black}{Additional Experiments}}{Additional Experiments}}
+\section{\texorpdfstring{{Additional Experiments}}{Additional Experiments}}
 \label{app:supplementary-figures}
 
 The supplementary figures probe external validity,
 query-count and operating-regime breadth, partition consistency, runtime
 capacity, and appendix selector diagnostics.
-Exact audit values remain in released result artifacts.
 \FloatBarrier
 
 \IfFileExists{figures/real_repo_repair_diagnostic.pdf}{%

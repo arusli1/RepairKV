@@ -1,0 +1,192 @@
+================================================================
+ICML 2026 Workshop AdaptFM — OpenReview Submission Form
+Proposed Answers (revised after expert review)
+================================================================
+
+----------------------------------------------------------------
+TITLE
+----------------------------------------------------------------
+Cache Me if You Can: Post-Compression KV Repair for Long-Context Agentic LLM Inference
+
+(Source: \icmltitle on lines 35-36 of paper/main.tex. Use the full
+title here, NOT the running title "Cache Me if You Can:
+Post-Compression KV Repair" from line 30.)
+
+
+----------------------------------------------------------------
+AUTHORS  (already added in form)
+----------------------------------------------------------------
+Andrew Rusli
+Shreyan Paliwal
+
+(Verify each OpenReview profile lists the correct affiliation
+before submit — Harvard College, Opt32 — so the rendered submission
+matches the PDF. The LaTeX lists Shreyan as corresponding author
+but the form's auto-filled Signatures shows Andrew Rusli; that's
+fine if Andrew is the submitter, but be aware of it.)
+
+
+----------------------------------------------------------------
+KEYWORDS  (short, common umbrella terms — discoverability-oriented,
+           not paper-specific descriptions)
+----------------------------------------------------------------
+RECOMMENDED:
+KV cache, KV cache compression, LLM inference, long-context language models, multi-turn LLM, efficient inference, agentic AI, attention
+
+Why each (terms used widely in adjacent papers):
+  1. KV cache              — universal in this literature
+  2. KV cache compression  — SnapKV, H2O, PyramidKV, etc.
+  3. LLM inference         — generic but high-traffic
+  4. long-context language models — InfiniteBench, RULER, LongBench area
+  5. multi-turn LLM        — agentic / dialogue literature
+  6. efficient inference   — broad systems audience
+  7. agentic AI            — workshop scope (AdaptFM cares about this)
+  8. attention             — bridges to attention-sparsity reviewers
+
+If form caps at 5: keep "KV cache, KV cache compression, LLM inference,
+long-context language models, multi-turn LLM".
+
+Reference — what comparable papers use as keywords:
+  - StreamingLLM:  language model, attention sink, infinite-length input
+  - SnapKV:        KV cache compression, LLM inference, key-value cache
+  - H2O:           KV cache, attention, LLM inference
+  - QUEST:         KV cache, LLM inference, query-aware
+  - ShadowKV:      KV cache, long-context inference
+
+Removed from earlier longer draft (with reasons):
+  - "KV cache repair" / "inference-time KV adaptation" / "test-time cache
+    adaptation" / "KV offloading and promotion" — all paper-specific
+    descriptive phrases. Useful in the abstract; not how reviewers search.
+  - "retrieval-augmented decoding" — misleading; this isn't RAG.
+  - "adaptive foundation models" — venue-name padding.
+  - "memory-efficient LLM serving" — overclaims.
+
+
+----------------------------------------------------------------
+TL;DR  (contributions-list style with result phrase folded in.
+        Term choice: "evicted" (field-standard; SnapKV, H2O,
+        StreamingLLM, QUEST all use it) over "offloaded".)
+----------------------------------------------------------------
+RECOMMENDED  (one sentence, ~165 chars — flexible trigger):
+We propose RepairKV, a runtime mechanism which restores previously evicted (offloaded) tokens to the active KV cache when recent context makes them relevant again.
+
+Why "recent context": broadest umbrella — covers external signals
+(new query, tool output, retrieval) AND internal ones (the model's
+own recently generated tokens). The paper's figure caption lists
+"user input, tool output, retrieved content, recent generation,
+etc." — "recent context" captures all of these in two words.
+
+Alternatives (all one sentence, all flexible):
+
+  (i) "the current context":
+  We propose RepairKV, a runtime mechanism which restores previously evicted (offloaded) tokens to the active KV cache when the current context makes them relevant again.
+
+  (ii) Dynamic framing:
+  We propose RepairKV, a runtime mechanism which pulls previously evicted (offloaded) tokens back into the active KV cache as recent context shifts which past tokens are relevant.
+
+  (iii) Even shorter (~145 chars):
+  We propose RepairKV, a runtime mechanism that restores evicted (offloaded) KV-cache tokens to the active cache when recent context makes them relevant.
+
+
+
+ALTERNATIVES (same structure, different emphasis):
+
+  (a) Result-anchored:
+  We propose post-compression KV-cache repair, build a controlled evaluation that holds active KV-cache size fixed across baselines, and introduce RepairKV, a lightweight operator that promotes evicted KV rows back into the active cache using the next-turn signal — lifting MQ-NIAH-4Q retrieval from 24.5% to 91.0% on Qwen2.5-7B-Instruct at 32K context with 96 promoted tokens.
+
+  (b) Tight (~250 chars):
+  We define post-compression KV-cache repair for multi-turn agentic LLMs, build a controlled evaluation at fixed active-cache size across query densities and eviction policies, and propose RepairKV, a lightweight operator that promotes evicted KV rows using the next-turn signal.
+
+  (c) AdaptFM-leaning:
+  We frame KV-cache state as a test-time-adaptable resource, define a controlled fixed-budget protocol for measuring post-compression repair, and propose RepairKV, a lightweight operator that promotes evicted KV rows back into the active cache using the next-turn signal between turns.
+
+  (d) Plainest (drops the protocol contribution, focuses on mechanism):
+  We propose RepairKV, a runtime mechanism for long-context agentic LLMs that scores evicted KV rows against the next-turn signal and promotes a small subset back into the active cache between turns, recovering retrieval accuracy without enlarging the active cache.
+
+
+----------------------------------------------------------------
+ABSTRACT  (plain-text version of paper abstract, macros expanded)
+----------------------------------------------------------------
+As large language models (LLMs) support longer contexts and more capable agentic sessions, what matters in the accumulated context can change with each new query, tool output, test result, or browser observation. At the same time, inference still depends on a limited active key-value (KV) cache, and many existing KV-cache compression methods decide which past tokens stay active from the current prefix. As a result, tokens that matter in later turns may already have been evicted or compressed away in earlier compression decisions. We study post-compression KV cache repair, a runtime mechanism that restores previously evicted tokens to the active cache. RepairKV uses the interval between turns to reevaluate which tokens are important from evicted KV rows stored in a slower memory tier, then promotes a small subset before decoding resumes. Controlled experiments show that RepairKV's restoration of evicted tokens improves retrieval accuracy, persisting even across relevance changes and different initial eviction policies. A preliminary diagnostic on open-source repositories shows the same pattern: on Qwen2.5-7B-Instruct at 32K context, RepairKV achieves 91.0% retrieval on a four-query needle-in-a-haystack task versus 24.5% for the matched no-repair baseline at the same active-cache budget, with only 96 promoted tokens.
+
+
+----------------------------------------------------------------
+PDF
+----------------------------------------------------------------
+Upload: paper/main.pdf  (rebuilt with colors stripped; 12 pages,
+body 6 pages — fits workshop page limit.)
+
+
+----------------------------------------------------------------
+EMAIL SHARING  (checkbox)
+----------------------------------------------------------------
+[X] We authorize the sharing of all author emails with Program Chairs.
+
+(Trade-off: emails go only to PCs for logistics; very low risk.
+Default yes.)
+
+
+----------------------------------------------------------------
+DATA RELEASE  (checkbox)
+----------------------------------------------------------------
+[X] We authorize the release of our submission and author names to the public in the event of acceptance.
+
+(Trade-off: this governs public listing of the accepted paper +
+authors. Saying no defeats the purpose of a workshop submission
+unless you have a specific reason to remain anonymous post-accept.
+Default yes.)
+
+
+----------------------------------------------------------------
+LICENSE  (dropdown)
+----------------------------------------------------------------
+CC BY 4.0   (standard ICML/NeurIPS workshop default; matches main
+             ICML expectations; allows attribution-only reuse)
+
+
+----------------------------------------------------------------
+READERS / SIGNATURES  (auto-filled — no action needed)
+----------------------------------------------------------------
+Readers:    ICML 2026 Workshop AdaptFM, authorids
+Signatures: Andrew Rusli
+
+
+================================================================
+LIKELY ADDITIONAL FIELDS (not visible in screenshot — verify on
+later form pages or sub-questions before submitting)
+================================================================
+
+These are commonly present on ICML workshop OpenReview forms.
+Have an answer ready before clicking Submit:
+
+  - Submission type / track          (e.g., "Original research" —
+                                      AdaptFM may also accept
+                                      extended abstracts or position
+                                      papers; pick "Original research")
+
+  - Previously published / dual submission disclosure
+                                     (Answer: "No, this work has
+                                      not been previously published
+                                      and is not concurrently under
+                                      review elsewhere." — verify
+                                      this is true.)
+
+  - Anonymous submission confirmation
+                                     (AdaptFM is typically
+                                      non-archival; check whether
+                                      double-blind. The PDF currently
+                                      renders "Anonymous Authors"
+                                      via icml2026.sty default.)
+
+  - Conflicts of interest / domain conflicts
+                                     (List institution domains:
+                                      harvard.edu, plus any
+                                      collaborators/advisors at
+                                      other institutions.)
+
+  - Code/data availability statement
+                                     (Increasingly common — have a
+                                      one-line statement ready.)
+
+  - Financial aid / travel grant flag
+                                     (Optional, only if applicable.)
