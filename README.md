@@ -3,6 +3,14 @@
 **Cache You Later: Post-Compression KV Repair for Long-Context Agentic
 LLM Inference.**
 
+![RepairKV system overview](paper/figures/figure1_pipeline.png)
+
+> *RepairKV system overview. During agent decode pauses (tool calls,
+> retrievals), a selected signal `s` (a new user query, a tool result,
+> retrieved content, or the model's recent generation) is used to rank
+> host KV rows; the top-`K` are lifted back into GPU HBM at their
+> original sequence positions.*
+
 RepairKV is a research prototype for **post-compression KV cache repair** in
 long-context, multi-turn LLM inference. Existing KV-cache compression methods
 decide which past tokens stay active using only the information available at
@@ -33,10 +41,39 @@ directly attend to.
 
 ## Headline Result
 
-On Qwen2.5-7B-Instruct at 32K context, RepairKV reaches **91.0%** retrieval on
-a four-query needle-in-a-haystack task versus **24.5%** for the matched
+On Qwen2.5-7B-Instruct at 32K context, RepairKV reaches **91.0%** retrieval
+on a four-query needle-in-a-haystack task versus **24.5%** for the matched
 no-repair baseline at the same active-cache budget, with only **96** promoted
 tokens.
+
+![Matched-budget frontier across MQ-NIAH-2Q/4Q/6Q/8Q](paper/figures/frontier_raw_overlay.png)
+
+> *Raw `Q_2` score under matched resumed-cache budgets. Solid:
+> RepairKV; dotted: matched no-repair. Right labels: query count and
+> `Δ_96` (gain at `K=96`).*
+
+## Method at a Glance
+
+At each pause boundary, the abstraction has three objects:
+
+- `C_base`: active evictable KV, with `|C_base| = B_base` (base
+  active-cache budget).
+- `W_N`: offloaded evicted KV, hidden from decoding unless promoted.
+- `s`: the pause-boundary signal used to score evicted KV (a new user
+  query, a tool result, the model's recent generation, or other tokens
+  indicating upcoming significance).
+
+The repair operator chooses `S_K(s) ⊆ W_N` with `|S_K| ≤ K`, and resumes
+from `C_repair = C_base ∪ S_K` at resumed active-cache budget
+`|C_repair| ≤ B_base + K`. The matched no-repair baseline `B_match` reaches
+the same active budget by applying the base eviction policy at
+`B_base + K`, so both conditions decode under the same number of active
+context KV rows.
+
+The current prototype scores rows with post-RoPE `Q_2` query tensors
+against active and offloaded keys, then expands each top-ranked anchor
+into a right-biased `(L, R) = (2, 20)` local burst under a strict `K`
+budget.
 
 ## Scope and Prerequisites
 
@@ -54,33 +91,43 @@ tokens.
 
 ## Evidence in This Repository
 
-- Controlled benchmark: split-query multi-query needle-in-a-haystack
+- **Controlled benchmark.** Split-query multi-query needle-in-a-haystack
   (MQ-NIAH) derived from RULER, providing explicit cross-turn relevance
   shifts and annotated future-relevant spans.
-- Primary model: Qwen2.5-7B-Instruct at 32K context on a single
-  RTX PRO 6000 Blackwell GPU.
-- Main experiments: MQ-NIAH-2Q/4Q/6Q/8Q matched-budget restore-budget
-  sweeps (`K=8,16,24,32,48,64,80,96,128`), next-turn signal specificity
-  controls (StaleQ-K, WrongQ-K, Refresh-buffered), a five-turn
-  relevance-shift diagnostic, eviction-policy sensitivity (SnapKV-style,
-  H2O-style, StreamingLLM-style, Scissorhands-style), and runtime-capacity
-  probes.
-- Breadth checks: same-protocol Llama-3.1-8B portability probes and
-  alternative selector/retention variants.
-- Preliminary external-validity check: a controlled real-repository
-  relevance-shift diagnostic over 48 callsite examples from 12 pinned
-  open-source repositories drawn from the SWE-bench repository pool. It is
-  not a SWE-bench issue-resolution benchmark. At `K=192`, event-only
-  RepairKV improves exact identifier accuracy from 18.8% (matched
-  no-repair) to 72.9%; label-assisted references (File-gated RepairKV at
-  83.3%, AnchorWindow-K at 89.6%) show remaining headroom.
+- **Primary model.** Qwen2.5-7B-Instruct at 32K rendered context on a
+  single RTX PRO 6000 Blackwell GPU.
+- **Matched-budget frontier.** MQ-NIAH-2Q/4Q/6Q/8Q sweeps over
+  `K = 8, 16, 24, 32, 48, 64, 80, 96, 128`. Random-K and Oldest-K stay
+  near matched no-repair; RepairKV beats both content-agnostic controls
+  on every balanced partition at `K = 128`.
+- **Next-turn signal specificity.** At `K = 48` on MQ-NIAH-4Q,
+  RepairKV gains `+0.326` over matched no-repair while StaleQ-K and
+  WrongQ-K stay within `+0.028`. Refresh-buffered reaches `1.000`,
+  showing that relevant rows remain available for stronger selectors.
+- **Repeated relevance shifts.** Five-turn MQ-NIAH-8Q revisit schedule
+  (`K = 80`, `n = 24`): RepairKV gains `+0.542` over matched no-repair on
+  non-initial turns (95% CI `[0.458, 0.620]`), while Random-K and
+  Oldest-K gain only `+0.010` and `+0.021`.
+- **Eviction-policy sensitivity.** RepairKV improves over each
+  policy's matched no-repair baseline under SnapKV-style, H2O-style,
+  StreamingLLM-style, and Scissorhands-style first-stage eviction.
+- **Real-repository diagnostic.** 48 callsite examples from 12 pinned
+  open-source repositories drawn from the SWE-bench pool. At `K = 192`,
+  event-only RepairKV improves exact identifier accuracy from
+  **18.8%** (matched no-repair) to **72.9%**; label-assisted references
+  (File-gated RepairKV at 83.3%, AnchorWindow-K at 89.6%) show remaining
+  headroom. Not a SWE-bench issue-resolution benchmark.
+- **Runtime envelope.** At `K = 5000`, p95 repair latency is
+  **50 ms** at 32K offloaded candidates, **1.20 s** at 1M, and
+  **4.64 s** at 4M. At `K = 96`, the full repair takes ~**110 ms**
+  (p95) versus ~2.13 s for full-prefix prefill on the same system.
 
 ## Paper
 
 - Source: `paper/main.tex`
 - Rebuilt PDF: `paper/main.pdf`
 - Figure renderer: `paper/scripts/render_paper_figures.py`
-- Writing and venue guide: `paper_guide.md`
+- Writing and venue guide: kept locally, not tracked.
 
 Rebuild the paper from the repo root:
 
@@ -127,8 +174,6 @@ design, then move to a locked run only after the smoke passes a written gate.
 ## Repository Map
 
 - `paper/`: ICML-style paper draft, figure assets, and rendering scripts.
-- `paper_guide.md`: terminology, venue constraints, figure rules, and
-  editing guardrails.
 - `phases/phase6_repair/`: core matched-budget repair protocol, selectors,
   reporting, and unit tests.
 - `phases/phase9_experiment_deepening/` through
@@ -138,6 +183,9 @@ design, then move to a locked run only after the smoke passes a written gate.
   diagnostic for real-repository relevance shifts.
 - `phases/phase18_pre_submission/`: pre-submission supplement (selector
   ablations and time-budgeted query-aware baselines).
+- `phases/<phase>/saved_results/`: small tracked summaries from earlier
+  runs, kept so the repo retains a lightweight memory of canonical
+  outputs even if local generated `results/` trees are pruned.
 - `docs/`: project status and result-retention notes.
 - `models/`: local model weights; ignored by git.
 - `ruler/`: vendored RULER checkout; treated as external benchmark code.
@@ -167,9 +215,9 @@ design, then move to a locked run only after the smoke passes a written gate.
 - `AnchorWindow-K`: label-assisted locality reference for the
   real-repository diagnostic.
 - `SpanRef-K`: appendix-only diagnostic over annotated future answer-span
-  groups. It enumerates feasible annotated span-group subsets with cost at
-  most `K`; it is not an implementable algorithm and is not a universal
-  upper bound over all possible K-token repairs.
+  groups. Enumerates feasible annotated span-group subsets with cost at
+  most `K`; not an implementable algorithm and not a universal upper
+  bound over all possible K-token repairs.
 
 ## Active Questions
 
