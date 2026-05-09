@@ -56,7 +56,7 @@
   As a result, tokens that matter in later turns may already have been evicted or compressed away in earlier compression decisions. 
   We study post-compression KV cache repair, a runtime mechanism that restores previously evicted tokens to the active cache.
   \repairkv{} uses the interval between turns to reevaluate which tokens are important from evicted KV rows stored in a slower memory tier, then promotes a small subset before decoding resumes.
-  {    Controlled experiments show that \repairkv{}'s restoration of evicted tokens improves retrieval accuracy, with the effect persisting across relevance changes and different initial eviction policies. A preliminary diagnostic on open-source repositories shows the same pattern: on Qwen2.5-7B-Instruct at 32K context, \repairkv{} achieves 91.0\% retrieval on a four-query needle-in-a-haystack task versus 24.5\% for the matched no-repair baseline at the same active-cache budget, with only 96 promoted tokens.
+  {    Controlled experiments show that \repairkv{}'s restoration of evicted tokens improves retrieval accuracy, with the effect persisting across relevance changes and different initial eviction policies, and a preliminary diagnostic on open-source repositories shows the same pattern; on Qwen2.5-7B-Instruct at 32K context, \repairkv{} achieves 91.0\% retrieval on a four-query needle-in-a-haystack task versus 24.5\% for the matched no-repair baseline at the same active-cache budget, with only 96 promoted tokens.
   }
 \end{abstract}
  
@@ -67,7 +67,7 @@
 Modern language models support context lengths from tens of thousands to
 over a million tokens for retrieval-augmented and agentic
 workflows~\citep{ruler,longbench,inftybench}, but the KV cache holding
-past {token} activations grows linearly with sequence length, making it a
+past {token} keys and values grows linearly with sequence length, making it a
 primary GPU memory bottleneck {and an increasing runtime cost during decoding. KV-cache compression and offload~\citep{snapkv,streamingllm,h2o,vllm}  manage this cost by deciding which historical state remains active on GPU and which part is evicted or moved to a slower tier.} This decision is usually made with information available at the current turn, and compression is often treated as a one-way operation: evict now, decode later from the retained active set.
 
 This view misses a central feature of multi-turn inference: { new turn signals from } retrieved documents, tool outputs, test failures, or file changes
