@@ -30,3 +30,15 @@ Aggregated from queued reruns. NO PAPER EDITS APPLIED.
 
 ---
 
+
+
+---
+
+### Tight K-sweep at 150 ms absolute budget (Qwen, 4Q, n=36/K)
+
+| K | A | B_match | RepairKV | Refresh-K | Refresh-K-budgeted | PageSummary-Quest-inspired | RepairKV-no-burst |
+|---|---|---|---|---|---|---|---|
+| 32 | 1.000 | 0.208 | 0.375 | 1.000 | 0.500 | 0.208 | 0.500 |
+| 64 | 1.000 | 0.208 | 0.639 | 1.000 | 0.486 | 0.208 | 0.569 |
+| 96 | 1.000 | 0.208 | 0.917 | 1.000 | 0.472 | 0.194 | 0.653 |
+| 128 | 1.000 | 0.181 | 1.000 | 1.000 | 0.514 | 0.194 | 0.736 |

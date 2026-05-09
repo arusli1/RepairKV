@@ -351,7 +351,7 @@ Intuitively, \repairkv{} {\color{red}uses the next-turn signal to identify which
 \caption{General \repairkv{} Execution Framework}
 \label{alg:repair}
 \begin{algorithmic}[1]
-\STATE \textbf{Input:} turn signals $\{s_N\}_{N=1}^T$, 
+\STATE \textbf{Input:} turn signals $\{s_N\}_{N=1}^T$,
 eviction policy $\mathcal{P}$, base budget $\bbase$, restore
 budget $K$.
 \STATE \textbf{Initialize:} active cache $\mathcal{C}$,
@@ -460,7 +460,10 @@ Across MQ-NIAH-2Q/4Q/6Q/8Q, \repairkv{} separates from matched no-repair at mode
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/frontier_raw_overlay.pdf}
-  \caption{{\color{green!50!black}Raw $Q_2$ score under matched resumed-cache budgets. Solid: \repairkv{}; dotted: matched no-repair. Right labels: query count and $\Delta_{96}$ (gain at $K{=}96$).}}
+  \caption{Raw exact $Q_2$ score under matched resumed-cache budgets.
+  Solid curves are \repairkv{}. Dotted curves are matched no-repair.
+  Right labels report query count and $\Delta_{96}$,
+  the score gain over matched no-repair at $K=96$.}
   \label{fig:main-frontier}
 \end{figure}
 
@@ -504,7 +507,10 @@ The repair effect persists when relevance changes repeatedly. On a fixed five-tu
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/policy_breadth_delta.pdf}
-  \caption{{\color{green!50!black}Eviction-policy sensitivity on MQ-NIAH-4Q ($n{=}24$, $\bbase{=}16{,}384$). Curves show $Q_2$ gain over each policy's matched no-repair; gray band spans Random-$K$/Oldest-$K$.}}
+  \caption{First-stage eviction-policy sensitivity on MQ-NIAH-4Q
+  ($n{=}24$, $\bbase{=}16{,}384$). Curves show exact $Q_2$ gain over each
+  policy's matched no-repair baseline. The gray band spans
+  Random-$K$/Oldest-$K$ gains.}
   \label{fig:policy-breadth}
 \end{figure}
 
@@ -516,11 +522,15 @@ Between turns, an \emph{event} arrives: a description of the callsite with the t
 Label-assisted references show remaining headroom: File gated \repairkv{} reaches $83.3\%$, and AnchorWindow-$K$ reaches $89.6\%$. This is a small diagnostic rather than a full benchmark, but it shows some initial evidence that the repair approach improves quality beyond the synthetic MQ-NIAH setting. Appendix Figure~\ref{fig:app-real-repo-diagnostic} gives the full audit.
 \begin{table}[!ht]
   \centering
-  \setlength{\tabcolsep}{4pt}
-  \renewcommand{\arraystretch}{0.95}
-  \caption{{\color{green!50!black}Real-repository diagnostic at $K{=}192$ on 48 callsite cases from 12 SWE-bench repositories. Accuracy = exact target-identifier recovery. Non-query = best of Random-$K$/Oldest-$K$/StaleQ-$K$/WrongQ-$K$. AnchorWindow and File-gated are label-assisted (others non-label).}}
+  \setlength{\tabcolsep}{5pt}
+  \caption{Preliminary real-repository diagnostic at $K=192$ over $48$
+  callsite cases from $12$ open-source repositories
+  (SWE-bench pool, fixed commits). Accuracy is
+  exact target-identifier recovery. Non-query summarizes the
+  best of Random-$K$, Oldest-$K$, StaleQ-$K$, and WrongQ-$K$ analogues. AnchorWindow
+  and File-gated are label-assisted; non-label methods are Matched,
+  RepairKV, and ToolFile-$K$.}
   \label{tab:real-repo-diagnostic}
-  \small
   \begin{tabular}{@{}lr@{}}
     \toprule
     Condition & Accuracy \\
@@ -543,7 +553,11 @@ These costs are small relative to many agent and tool-use pauses: OS-level execu
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\columnwidth]{figures/runtime_repair_scaling.pdf}
-  \caption{{\color{green!50!black}Runtime-capacity probe. (a) p95 of chunked scan + top-$K$ select + KV move at query length 64, Qwen-shaped pinned host BF16 KV. (b) Stage-wise p95 at $K{=}5000$.}}
+  \caption{Runtime-capacity probe on the evaluation GPU.
+  (a) Component-summed p95 service time for chunked scan, top-$K$
+  selection, and KV movement at query length 64 over pinned host-memory
+  BF16 KV-shaped tensors. (b) Stage-wise p95 component time for $K=5000$.
+  Generation and answer evaluation are excluded.}
   \label{fig:runtime-envelope}
 \end{figure}
 
@@ -791,66 +805,11 @@ Shah, J., Bikshandi, G., Zhang, Y., Thakkar, V., Ramani, P., and Dao, T.
 \newblock In \emph{Advances in Neural Information Processing Systems
   (NeurIPS)}, 2024.
 
-\bibitem[NVIDIA(2026)]{icmsp2026}
-NVIDIA.
-\newblock NVIDIA BlueField-4 powers new class of AI-native storage infrastructure for the next frontier of AI.
-\newblock NVIDIA Newsroom, January 2026.
-  Announces the Inference Context Memory Storage Platform (ICMSP) at CES 2026.
-
-\bibitem[Kim et~al.(2025)]{cxlkv2025}
-Kim, D., Lee, M., Kim, J., Kwon, H., Jeong, H., Park, S.-S., Yoon, M.,
-  Roh, S.-D., Kwon, Y., So, J., and Choi, J.
-\newblock Scalable processing-near-memory for 1M-token LLM inference: CXL-enabled KV-cache management beyond GPU limits.
-\newblock \emph{arXiv:2511.00321}, 2025.
-
-\bibitem[Yoon et~al.(2025)]{tract2025}
-Yoon, D., Min, Y., Kim, H., Noh, S.~H., and Kim, J.
-\newblock TraCT: Disaggregated LLM serving with CXL shared memory KV cache at rack-scale.
-\newblock \emph{arXiv:2512.18194}, 2025.
-
-\bibitem[Liu and Yu(2025)]{cxlspeckv2025}
-Liu, D. and Yu, Y.
-\newblock CXL-SpecKV: A disaggregated FPGA speculative KV-cache for datacenter LLM serving.
-\newblock \emph{arXiv:2512.11920}, 2025.
-
-\bibitem[d-Matrix(2025)]{dmatrix2025}
-d-Matrix.
-\newblock Corsair: In-memory computing for AI inference.
-\newblock Hot Chips, 2025.
-
-\bibitem[SambaNova(2024)]{sambanova2024}
-SambaNova Systems.
-\newblock SN40L reconfigurable dataflow unit, 2024.
-
 \end{thebibliography}
 
-\clearpage
+\newpage
 \appendix
 \raggedbottom
-
-\section{\texorpdfstring{\textcolor{green!50!black}{Outlook and open directions}}{Outlook and open directions}}
-\label{app:outlook}
-
-{\color{green!50!black}
-We share this prototype as preliminary evidence that compressed KV state can be usefully revised at a turn boundary.
-The patterns we observe across matched active-cache budgets, eviction-policy variations, repeated relevance shifts, and a small real-repository diagnostic suggest a mechanism worth deeper study.
-Several extensions are in flight or natural next steps.
-
-\paragraph{Scale and coverage.}
-We are running the matched-budget protocol on additional instruct-tuned families (Llama, Mistral), at larger model scale (70B-class), and at longer contexts (64K, 128K, 256K), where eviction errors compound and the room for repair grows.
-
-\paragraph{Stronger benchmarks.}
-SCBench and full SWE-bench resolution are immediate non-synthetic next steps.
-The ideal target is production multi-turn agent traces with real tool calls.
-
-\paragraph{Stronger comparisons.}
-Running query-aware retrieval methods (e.g., QUEST, ShadowKV) as repair operators under the matched active-cache-budget protocol is a natural next step that would isolate selector quality from architectural commitments, alongside end-to-end serving evaluations under realistic deployment baselines.
-
-The mechanism also fits naturally into the multi-tier KV systems that have become a frontier of LLM serving.
-NVIDIA's ICMSP makes NVMe-resident KV part of the context address space~\citep{icmsp2026}, CXL-based KV systems push the warm tier off-package with coherent host-side access~\citep{cxlkv2025,tract2025,cxlspeckv2025}, and inference accelerators are exposing tiered memory architectures~\citep{dmatrix2025,sambanova2024}.
-The open runtime question across these stacks, namely which slow-tier rows to promote back into the active tier under a budget and on what signal, is exactly the question the mechanism is designed to address.
-We see revisable compressed KV as a research primitive worth broader investigation.
-}
 
 \section{Additional Evaluation Details}
 \label{app:evaluation-details}
@@ -944,7 +903,7 @@ Canonical online per-head Scissorhands reproduction remains future work.
   \end{tabular}
 \end{table}
 
-\section{\texorpdfstring{\textcolor{green!50!black}{Additional Analysis and Discussion}}{Additional Analysis and Discussion}}
+\section{Additional Discussion}
 \label{app:additional-discussion}
 
 \paragraph{Tiered-cache scaling.}
@@ -1001,17 +960,17 @@ matched-budget controls while adding real tool traces and stronger
 selector families.
 
 \begingroup\color{green!50!black}
-\section{\texorpdfstring{\textcolor{green!50!black}{Time-Matched Selector Ablations}}{Time-Matched Selector Ablations}}
+\section{Time-matched evaluation supplement}
 \label{app:p18-supplement}
 
-\paragraph{Time-budgeted baselines.} Two additional baselines extend the protocol of Section~\ref{sec:setup}, both subject to a wall-clock budget matched to \repairkv{}'s measured per-pause repair time. \textbf{Refresh-$K$-budgeted} is the Refresh-buffered baseline of Section~\ref{sec:setup} with this wall-clock budget applied: when the budget runs out, it stops scoring further evicted positions. \textbf{PageSummary-Quest-inspired} pre-computes per-chunk summary keys (max over each chunk) at compression time, ranks chunks by a cheap inner product against $Q_2$, and within the same wall-clock budget visits top-ranked chunks using the same per-position scorer. Both methods choose from the same evicted store as \repairkv{} and are matched on resumed active-cache rows ($\bbase{+}K$); only their off-budget service costs (scoring time, transfer, projection) differ. All numbers in this supplement come from a smaller paired $n{=}36$ MQ-NIAH-4Q slice, run separately to keep the wall-clock-budgeted baselines tractable; small differences from the $n{=}300$ headline numbers in Section~\ref{sec:results} (e.g., $\bmatch{=}0.208$ here vs.\ $0.245$ there) reflect this resampled slice rather than a protocol change.
+\paragraph{Time-budgeted baselines.} Two additional baselines extend the protocol of Section~\ref{sec:setup}, both subject to a wall-clock budget matched to \repairkv{}'s measured per-pause repair time. \textbf{Refresh-$K$-budgeted} is the Refresh-buffered baseline of Section~\ref{sec:setup} with this wall-clock budget applied: when the budget runs out, it stops scoring further evicted positions. \textbf{PageSummary-Quest-inspired} pre-computes per-chunk summary keys (max over each chunk) at compression time, ranks chunks by a cheap inner product against $Q_2$, and within the same wall-clock budget visits top-ranked chunks using the same per-position scorer. Both methods choose from the same evicted store as \repairkv{} and are matched on resumed active-cache rows ($\bbase{+}K$); only their off-budget service costs (scoring time, transfer, projection) differ.
 
 \paragraph{Wall-clock-matched K-sweep.} On MQ-NIAH-4Q at a $150$\,ms absolute scoring budget across $K\in\{32,64,96,128\}$ (Qwen2.5-7B-Instruct, $\bbase{=}16{,}384$, $n{=}36$ paired observations per $K$), the budget runs out before Refresh-$K$-budgeted finishes scoring on all $36/36$ examples, scoring approximately $4{,}000$ of $32{,}768$ evicted positions per call. \repairkv{} dominates at $K\geq 64$, reaching $0.917$ at $K{=}96$ against $0.472$ for Refresh-$K$-budgeted and $0.194$ for PageSummary-Quest-inspired (matched no-repair $\bmatch{=}0.208$). At $K{=}128$ under the same budget, \repairkv{} saturates at $1.000$ while the two time-budgeted baselines remain near $0.5$ and $0.2$.
 
 \paragraph{Per-position scoring vs.\ burst-expansion contributions.} The gains decompose into two contributions at $K{=}96$ on Qwen. Promoting only the top-scoring evicted positions, without the burst-expansion step of Section~\ref{sec:method}, reaches $0.653$ and exceeds PageSummary-Quest-inspired by $\Delta_\text{score}{=}{+}0.459$ -- this isolates the lift from per-position scoring relative to the cheaper per-chunk-summary scorer. Adding burst expansion lifts \repairkv{} to $0.917$, an additional $\Delta_\text{burst}{=}{+}0.264$. Per-position scoring contributes the larger share.
 \endgroup
 
-\section{\texorpdfstring{\textcolor{green!50!black}{Additional Experiments}}{Additional Experiments}}
+\section{Supplementary Experimental Views}
 \label{app:supplementary-figures}
 
 The supplementary figures probe external validity,
