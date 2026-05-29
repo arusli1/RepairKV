@@ -27,12 +27,12 @@ the paper. Do not use this file to infer active GPU state.
    - Purpose: smoke-test the highest-priority Phase 10 novelty-boundary
      panel.
    - Conditions: Matched, StaleQ-K, WrongQ-K donor, Refresh-buffered,
-     IdleKV, Gold-K.
+     RepairKV, Gold-K.
    - Setting: MQ-NIAH-4Q balanced split-query suite, `B=16384`, `K=48,96`,
      `n=1`, exact Q2 scorer, gold-span hindsight reference.
    - Output expected:
      `phases/phase10_expansion/results/specificity_smoke_n1.csv`.
-   - Gate result: `K=48` separates IdleKV from stale and wrong-query
+   - Gate result: `K=48` separates RepairKV from stale and wrong-query
      controls but Refresh-buffered and Gold-K still have headroom; `K=96`
      is demoted because stale-query catches up.
 
@@ -45,10 +45,10 @@ the paper. Do not use this file to infer active GPU state.
    - Output:
      `phases/phase10_expansion/results/specificity_locked_n24_k48.csv`.
    - Gate result: promoted to main Results as a novelty-boundary figure.
-     IdleKV beats matched no-repair by `+0.326` score with gain CI lower
+     RepairKV beats matched no-repair by `+0.326` score with gain CI lower
      bound `+0.243`, beats stale and donor-query controls by `+0.299`,
      and has paired win rate `0.56`. Refresh-buffered and Gold-K both
-     reach `1.000`, so the paper frames IdleKV as an incremental
+     reach `1.000`, so the paper frames RepairKV as an incremental
      buffered-repair primitive rather than the best possible Q2-time
      full-budget reselection policy.
 
@@ -62,7 +62,7 @@ the paper. Do not use this file to infer active GPU state.
    - Output:
      `phases/phase10_expansion/results/model_transfer_qwen05b_smoke_n1.csv`.
    - Gate result: do not use as paper evidence. Full-cache score `A`,
-     matched no-repair, IdleKV, controls, and Gold-K are all `0.000` at
+     matched no-repair, RepairKV, controls, and Gold-K are all `0.000` at
      both tested budgets and both K values, so the repair comparison is
      uninterpretable for the cached Qwen2.5-0.5B-Instruct model.
 
@@ -81,14 +81,14 @@ the paper. Do not use this file to infer active GPU state.
 6. `phase10_sink_recent_smoke`
    - Status: completed.
    - Purpose: non-SnapKV structural-retention smoke.
-   - Conditions: A, B, matched no-repair, Random-K, Oldest-K, IdleKV, and
+   - Conditions: A, B, matched no-repair, Random-K, Oldest-K, RepairKV, and
      Gold-K under a sink-plus-recent first-stage retention rule inspired by
      StreamingLLM.
    - Output expected:
      `phases/phase10_expansion/results/streamingllm_smoke_n1.csv` plus a
      timestamped log in `phases/phase10_expansion/results/logs/`.
    - Gate result: do not promote. The smoke is interpretable but weak:
-     at `B=8192`, IdleKV does not improve over matched no-repair at
+     at `B=8192`, RepairKV does not improve over matched no-repair at
      `K=48` or `K=96`; at `B=12288` and `B=16384`, it improves only
      from `0.333` to `0.500` at `K=96`, while Gold-K reaches `1.000`.
      Random-K and Oldest-K remain at matched, so this is a small positive
@@ -104,7 +104,7 @@ the paper. Do not use this file to infer active GPU state.
    - Tasks/budgets: 2Q at `B=8192`, 3Q at `B=14336`, 8Q at `B=18432`.
    - Output expected:
      `phases/phase10_expansion/results/query_count_locked_n12.csv`.
-   - Gate: keep appendix-only unless 3Q and 8Q both show robust IdleKV
+   - Gate: keep appendix-only unless 3Q and 8Q both show robust RepairKV
      gain over matched no-repair and content-agnostic controls stay near
      matched.
    - Result: endpoint evidence alone is not main-paper material. 3Q and
@@ -125,7 +125,7 @@ the paper. Do not use this file to infer active GPU state.
    - Gate result: do not promote to the main paper. At 2-bit and 4-bit,
      low-bit storage degrades answer accuracy to zero and selective
      promotion does not recover until the all-row limit, where static,
-     random, oldest, IdleKV, and Gold all match. At 8-bit, low-bit storage
+     random, oldest, RepairKV, and Gold all match. At 8-bit, low-bit storage
      already preserves the answer, so there is no repair problem. This is
      a useful negative appendix/future-work note, not a main result.
 
@@ -153,7 +153,7 @@ the paper. Do not use this file to infer active GPU state.
    - Output:
      `phases/phase10_expansion/results/mq_niah_8q_frontier_n24.csv`.
    - Integration target: one-column raw-score overlay with separate
-     2Q/4Q/6Q/8Q IdleKV curves, faint matched no-repair traces, direct
+     2Q/4Q/6Q/8Q RepairKV curves, faint matched no-repair traces, direct
      query-count labels, and Gold-K / Random-K / Oldest-K moved to the
      appendix milestone table.
    - Integration helper:
@@ -162,7 +162,7 @@ the paper. Do not use this file to infer active GPU state.
      `paper/main.pdf`, and removed LaTeX byproducts.
    - Promotion helper:
      `phases/phase10_expansion/scripts/recommend_frontier_promotion.py`
-     is tested. It verifies enough K-grid points, meaningful IdleKV gain,
+     is tested. It verifies enough K-grid points, meaningful RepairKV gain,
      low Random-K/Oldest-K control lift, broad curve shape, and Gold-K
      consistency before a frontier enters the main paper.
    - Paper edits after clean 2Q/8Q results: abstract/contributions,
@@ -199,17 +199,17 @@ the paper. Do not use this file to infer active GPU state.
    - Status: completed.
    - Purpose: first GPU smoke for rolling multi-turn relevance shifts.
    - Setting: 8Q shift-revisit schedule, `T=4`, `n=1`, exact-Q scorer,
-     `K={96}` initially, conditions Full, Matched, IdleKV, Random-K,
+     `K={96}` initially, conditions Full, Matched, RepairKV, Random-K,
      Oldest-K, StaleQ-K, and Gold-K.
    - Output:
      `phases/phase10_expansion/results/multiturn_smoke_summary_n1.csv`.
-   - Gate result: useful but not final. IdleKV improves non-initial and
+   - Gate result: useful but not final. RepairKV improves non-initial and
      revisit turns over matched, Random-K, and Oldest-K, but StaleQ-K
      also ties on this easy schedule. This should not be promoted until
      a harder schedule separates stale-query reuse.
    - Follow-up: `run_multiturn_hard_smoke.sh` is implemented and tested.
    - Evaluator status: the multi-turn recommendation gate now explicitly
-     rejects runs where StaleQ-K closes the IdleKV non-initial gain gap.
+     rejects runs where StaleQ-K closes the RepairKV non-initial gain gap.
 
 13. `phase10_multiturn_hard_smoke`
    - Status: completed.
@@ -217,7 +217,7 @@ the paper. Do not use this file to infer active GPU state.
      current query from the previous stale query.
    - Schedule: `(6,7) -> (0,1) -> (4,5) -> (2,3) -> (0,1)`.
    - Setting: 8Q, `T=5`, `n=1`, exact-Q scorer, `K={48,96}`,
-     conditions Full, Matched, IdleKV, Random-K, Oldest-K, StaleQ-K, and
+     conditions Full, Matched, RepairKV, Random-K, Oldest-K, StaleQ-K, and
      Gold-K.
    - CPU tests: `test_multiturn.py` and `test_multiturn_runner.py` pass.
      The runner now logs target active context count, base active count,
@@ -225,9 +225,9 @@ the paper. Do not use this file to infer active GPU state.
      runs can be audited for matched resumed-cache budgets.
    - Gate result: K=48 is rejected because the final revisit gain is
      zero. K=96 passes the smoke recommendation as
-     `main_candidate_if_artifact_checks_pass`: IdleKV has non-initial
+     `main_candidate_if_artifact_checks_pass`: RepairKV has non-initial
      gain `0.625`, revisit gain `1.000`, and win rate `0.600`; StaleQ-K
-     remains close but below IdleKV on non-initial gain (`0.500`), so the
+     remains close but below RepairKV on non-initial gain (`0.500`), so the
      locked run is needed before any paper claim.
    - Artifact audit: all rows have matched target active-context count
      and zero active-budget gap.
@@ -240,11 +240,11 @@ the paper. Do not use this file to infer active GPU state.
    - Purpose: locked follow-up for the positive K=96 hard multi-turn
      smoke.
    - Setting: 8Q, `T=5`, `n=12`, exact-Q scorer, `K={48,96}`,
-     conditions Full, Matched, IdleKV, Random-K, Oldest-K, StaleQ-K, and
+     conditions Full, Matched, RepairKV, Random-K, Oldest-K, StaleQ-K, and
      Gold-K.
    - Output:
      `phases/phase10_expansion/results/multiturn_hard_locked_summary_n12.csv`.
-   - Result: positive but nuanced. At `K=96`, IdleKV scores 0.992 versus
+   - Result: positive but nuanced. At `K=96`, RepairKV scores 0.992 versus
      0.517 matched no-repair and 0.525/0.542 Random-K/Oldest-K, but
      StaleQ-K reaches 0.767. Treat as appendix-quality evidence for
      dynamic repair unless a follow-up cleanly separates stale-query reuse.
@@ -262,7 +262,7 @@ the paper. Do not use this file to infer active GPU state.
    - Smoke output:
      `phases/phase10_expansion/results/h2o_compressor_smoke_n2.csv`.
    - Smoke result: directionally strong but slightly noisy. Across
-     `B={14336,16384,18432}`, best IdleKV gains are 0.750, 0.833, and
+     `B={14336,16384,18432}`, best RepairKV gains are 0.750, 0.833, and
      0.583; controls are mostly near matched, but the automatic gate
      rejected because one control-lift value is 0.083 against a 0.080
      cutoff.
@@ -271,9 +271,9 @@ the paper. Do not use this file to infer active GPU state.
      ran `B=16384`, `n=12`, `K={48,96}`.
    - Locked output:
      `phases/phase10_expansion/results/h2o_compressor_locked_n12.csv`.
-   - Result: positive retention-rule breadth evidence. At `K=48`, IdleKV
+   - Result: positive retention-rule breadth evidence. At `K=48`, RepairKV
      scores `0.514` versus `0.208` matched no-repair, `0.222` Random-K,
-     and `0.208` Oldest-K. At `K=96`, IdleKV scores `0.917` versus
+     and `0.208` Oldest-K. At `K=96`, RepairKV scores `0.917` versus
      `0.208` for matched no-repair and both content-agnostic controls.
      Gold-K is `1.000` at both budgets.
    - Integration: use as a compact appendix robustness figure, not a
@@ -287,15 +287,15 @@ the paper. Do not use this file to infer active GPU state.
      short gap.
    - Purpose: test whether the current Q2-score burst selector leaves
      obvious recoverable headroom.
-   - Implemented variants: `IdleKV-Coverage` greedily selects burst
-     windows by marginal score coverage; `IdleKV-MMR` adds a diversity
+   - Implemented variants: `RepairKV-Coverage` greedily selects burst
+     windows by marginal score coverage; `RepairKV-MMR` adds a diversity
      bonus between restore anchors.
    - CPU tests: selector helpers, runner condition validation, reporting,
      and syntax checks pass.
    - Setting: 4Q `clean_suite`, `B=16384`, `n=1`, exact-Q scorer,
      Gold-K reference, `K={24,48,96}` via
      `phases/phase10_expansion/scripts/run_selector_variant_smoke.sh`.
-   - Gate: scale only if a variant beats current IdleKV by at least
+   - Gate: scale only if a variant beats current RepairKV by at least
      `0.05` at mid-K without hurting high-K by more than `0.02`.
 
 17. `phase10_download_qwen25_3b`
@@ -346,13 +346,13 @@ the paper. Do not use this file to infer active GPU state.
      `K={48,96}`, exact-Q scorer, Gold-K reference, Random-K/Oldest-K
      controls.
    - Gate: run a locked cross-model result only if full-cache stays high,
-     IdleKV beats matched no-repair by a meaningful margin, and
+     RepairKV beats matched no-repair by a meaningful margin, and
      content-agnostic controls do not explain the gain.
    - Result: gate passed. Full-cache score is `1.000` for both budgets.
-     At `B=8192`, matched no-repair is `0.333` and IdleKV reaches
+     At `B=8192`, matched no-repair is `0.333` and RepairKV reaches
      `0.750` at `K=48` and `1.000` at `K=96`, while Random-K/Oldest-K
      are `0.417/0.333`. At `B=16384`, matched no-repair is `0.583` and
-     IdleKV reaches `0.917` at `K=48` and `1.000` at `K=96`, while
+     RepairKV reaches `0.917` at `K=48` and `1.000` at `K=96`, while
      Random-K/Oldest-K remain `0.583`.
 
 20. `phase10_model_3b_locked_n12`
@@ -366,9 +366,9 @@ the paper. Do not use this file to infer active GPU state.
      controls.
    - Result: positive same-family size-transfer evidence, not true
      model-family diversity. Full-cache score is `1.000` at both
-     budgets. At `B=8192`, IdleKV reaches `1.000` at `K=96` versus
+     budgets. At `B=8192`, RepairKV reaches `1.000` at `K=96` versus
      `0.278` matched no-repair and `0.292/0.264` Random-K/Oldest-K. At
-     `B=16384`, IdleKV reaches `1.000` at `K=96` versus `0.611` matched
+     `B=16384`, RepairKV reaches `1.000` at `K=96` versus `0.611` matched
      no-repair and `0.625/0.611` Random-K/Oldest-K.
    - Integration: appendix-only, framed as cautious portability evidence
      within the Qwen family. Do not call this a model-diversity result.
@@ -429,14 +429,14 @@ the paper. Do not use this file to infer active GPU state.
    - Wrapper:
      `phases/phase10_expansion/scripts/run_model_transfer_smoke.sh`.
    - Setting: 4Q `clean_suite`, budgets `{8192,16384}`, `K={48,96}`,
-     `n=4`, conditions `A/B/B_match/Random-K/Oldest-K/IdleKV/Oracle-K`,
+     `n=4`, conditions `A/B/B_match/Random-K/Oldest-K/RepairKV/Oracle-K`,
      exact-Q scorer, gold-span hindsight reference.
    - Output:
      `phases/phase10_expansion/results/model_transfer_llama_3_1_8b_instruct__smoke_n4.csv`.
    - Result: passed appendix-candidate gate at both budgets. At `B=8192`,
-     Full and Gold-K are `1.000`, matched no-repair is `0.000`, IdleKV is
+     Full and Gold-K are `1.000`, matched no-repair is `0.000`, RepairKV is
      `1.000`, and Random-K/Oldest-K remain at or near zero. At `B=16384`,
-     Full and Gold-K are `1.000`, matched no-repair is `0.500`, IdleKV is
+     Full and Gold-K are `1.000`, matched no-repair is `0.500`, RepairKV is
      `1.000`, and Random-K/Oldest-K stay at `0.500/0.417`. The gate script
      reports `all_budgets_appendix_candidate=True`.
 
@@ -448,14 +448,14 @@ the paper. Do not use this file to infer active GPU state.
    - Wrapper:
      `phases/phase10_expansion/scripts/run_model_transfer_locked_n12.sh`.
    - Setting: 4Q `clean_suite`, budgets `{8192,16384}`, `K={48,96}`,
-     `n=12`, conditions `A/B/B_match/Random-K/Oldest-K/IdleKV/Oracle-K`,
+     `n=12`, conditions `A/B/B_match/Random-K/Oldest-K/RepairKV/Oracle-K`,
      exact-Q scorer, gold-span hindsight reference.
    - Output:
      `phases/phase10_expansion/results/model_transfer_llama_3_1_8b_instruct__locked_n12.csv`.
-   - Gate result: passed. At `B=8192`, IdleKV and Gold-K both reach
+   - Gate result: passed. At `B=8192`, RepairKV and Gold-K both reach
      `1.000` for `K=48` and `K=96`, while matched no-repair is `0.028`,
      Random-K is at most `0.042`, and Oldest-K is `0.014`. At `B=16384`,
-     IdleKV and Gold-K remain `1.000`, while matched no-repair,
+     RepairKV and Gold-K remain `1.000`, while matched no-repair,
      Random-K, and Oldest-K are `0.500`, `0.500`, and `0.472`. The
      recommendation gate reports `all_budgets_appendix_candidate=True`.
    - Paper integration: `paper/scripts/render_paper_figures.py` now uses
@@ -474,13 +474,13 @@ the paper. Do not use this file to infer active GPU state.
      via tmux session `phase13_multiturn_locked`.
    - Setting: MQ-NIAH-8Q hard revisit schedule, five turns, `K=80`,
      `B_base=18432`, `n=24`, exact-Q scoring, conditions
-     `Full/Matched/IdleKV/CurrentQOnly-K/Random-K/Oldest-K/StaleQ-K/
+     `Full/Matched/RepairKV/CurrentQOnly-K/Random-K/Oldest-K/StaleQ-K/
      StaleQOnly-K/Gold-K`.
    - Output:
      `phases/phase13_iteration_framework/results/multiturn_hard_locked_rows_n24_k80.csv`,
      `..._summary_n24_k80.csv`, `..._raw.json`, and
      `..._uncertainty_n24_k80.csv`.
-   - Result: passed the main gate. IdleKV non-initial gain is `0.542`
+   - Result: passed the main gate. RepairKV non-initial gain is `0.542`
      with paired interval `[0.458,0.620]`; revisit-turn gain is `0.938`
      with interval `[0.875,1.000]`. Random-K and Oldest-K non-initial
      gains are `0.010` and `0.021`. CurrentQOnly-K beats StaleQOnly-K on
@@ -545,7 +545,7 @@ repair run and matched restore controls.
 - Added and tested a multi-turn score-trajectory summarizer for paired
   gain, non-initial-turn gain, revisit-turn gain, and matched win rate.
   This will be the gate for any future rolling/revisit smoke figure.
-- Extended the specificity recommendation printout with the IdleKV gain
+- Extended the specificity recommendation printout with the RepairKV gain
   CI lower bound and paired win rate so the locked run can be judged
   immediately when its CSV lands.
 - Integrated the locked specificity result into the main paper and
@@ -565,7 +565,7 @@ repair run and matched restore controls.
 - Added `run_precision_promotion_smoke.py` for the quality/byte
   diagnostic. This is not a low-bit attention-kernel claim.
 - Added `recommend_precision_promotion.py` and gate tests. Promotion
-  requires low-bit degradation, IdleKV-Precision beating static/random/
+  requires low-bit degradation, RepairKV-Precision beating static/random/
   oldest precision controls, Gold-Precision consistency, and explicit
   byte accounting.
 - Installed `optimum-quanto==0.2.7`, `hqq==0.2.8.post1`, and the

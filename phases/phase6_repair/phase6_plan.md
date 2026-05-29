@@ -104,7 +104,7 @@ Locked main conditions:
   - compressed base cache
 - `B_match(K)`
   - no repair, but keep `B_base + K` context positions from the start
-- `IdleKV(K)`
+- `RepairKV(K)`
   - start from `B`, then restore `K` positions using the true `Q2`
 - `Random-K(K)`
   - restore `K` random evicted positions
@@ -116,12 +116,12 @@ Locked main conditions:
 Additional diagnostic only:
 
 - `WrongQ-K(K)`
-  - same as `IdleKV(K)`, but rank using a task-matched mismatched query
+  - same as `RepairKV(K)`, but rank using a task-matched mismatched query
   - this was kept only for preflight because it did not separate reliably on this benchmark family
 
 Primary metric:
 
-- `selection_lift(K) = IdleKV(K) - B_match(K)`
+- `selection_lift(K) = RepairKV(K) - B_match(K)`
 
 ## 4. What Is Already Known
 
@@ -133,7 +133,7 @@ Artifact:
 
 At `B_base = 512`, pooled clean-suite result:
 
-| K | `B` | `B_match` | `IdleKV` | `Oracle-K` |
+| K | `B` | `B_match` | `RepairKV` | `Oracle-K` |
 |---|---:|---:|---:|---:|
 | 8  | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
 | 12 | 0.0000 | 0.0000 | 0.3550 | 0.4783 |
@@ -154,7 +154,7 @@ Calibration artifact:
 
 Pooled clean-suite result:
 
-| K | `B` | `B_match` | `IdleKV` | `Oracle-K` |
+| K | `B` | `B_match` | `RepairKV` | `Oracle-K` |
 |---|---:|---:|---:|---:|
 | 8  | 0.1042 | 0.1250 | 0.3125 | 0.4167 |
 | 16 | 0.1042 | 0.1042 | 0.3958 | 0.5417 |
@@ -166,8 +166,8 @@ Interpretation:
 
 - the pooled baseline is now nonzero
 - the matched-footprint baseline is also nonzero
-- `IdleKV` is clearly above `B_match` at every `K`
-- `Oracle-K` stays above `IdleKV`, so the regime is not saturated
+- `RepairKV` is clearly above `B_match` at every `K`
+- `Oracle-K` stays above `RepairKV`, so the regime is not saturated
 - this meets the paper target and is the selected main regime
 
 ### 4.3 Full Main Run Completed
@@ -182,7 +182,7 @@ Runtime:
 
 Pooled clean-suite result:
 
-| K | `B` | `B_match` | `Random-K` | `Oldest-K` | `IdleKV` | `Oracle-K` |
+| K | `B` | `B_match` | `Random-K` | `Oldest-K` | `RepairKV` | `Oracle-K` |
 |---|---:|---:|---:|---:|---:|---:|
 | 8  | 0.0933 | 0.1017 | 0.0983 | 0.0883 | 0.3417 | 0.4067 |
 | 16 | 0.0933 | 0.0983 | 0.0983 | 0.0850 | 0.4167 | 0.5233 |
@@ -193,13 +193,13 @@ Pooled clean-suite result:
 Interpretation:
 
 - the main regime achieved the paper target: both `B` and `B_match` are nonzero
-- `IdleKV` is clearly above `B_match` at every `K`
+- `RepairKV` is clearly above `B_match` at every `K`
 - `Random-K` and `Oldest-K` stay near the matched baseline
-- `Oracle-K` remains above `IdleKV`, so the selector still leaves headroom
+- `Oracle-K` remains above `RepairKV`, so the selector still leaves headroom
 
 Per-split endpoint at `K=64`:
 
-| split | `B` | `B_match` | `IdleKV` | `Oracle-K` |
+| split | `B` | `B_match` | `RepairKV` | `Oracle-K` |
 |---|---:|---:|---:|---:|
 | `14 -> 23` | 0.1600 | 0.1750 | 1.0000 | 1.0000 |
 | `24 -> 13` | 0.1200 | 0.1250 | 0.5400 | 1.0000 |
@@ -264,9 +264,9 @@ This should produce:
 
 - nonzero `B`
 - nonzero `B_match`
-- `IdleKV > B_match`
-- `Random-K`, `Oldest-K` below `IdleKV`
-- `Oracle-K` above `IdleKV`
+- `RepairKV > B_match`
+- `Random-K`, `Oldest-K` below `RepairKV`
+- `Oracle-K` above `RepairKV`
 
 ## 8. Calibration Decision
 
@@ -288,7 +288,7 @@ Why this grid:
 
 Calibration conditions that were used:
 
-- `A B B_match IdleKV Oracle-K`
+- `A B B_match RepairKV Oracle-K`
 
 Calibration sample size:
 
@@ -300,14 +300,14 @@ Choose the **smallest** `B_base` such that:
 
 - `mean B_match(64) >= 0.10`
 - `mean B_match(64) <= 0.60`
-- `mean IdleKV(64) - mean B_match(64) >= 0.15`
-- `mean Oracle-K(64) - mean IdleKV(64) >= 0.10`
+- `mean RepairKV(64) - mean B_match(64) >= 0.15`
+- `mean Oracle-K(64) - mean RepairKV(64) >= 0.10`
 - the frontier is not dead on the left and not fully saturated on the right
 
 Outcome:
 
-- `K=8` is not dead: pooled `IdleKV = 0.3125`
-- `K=64` is not saturated: pooled `IdleKV = 0.7083`, `Oracle-K = 1.0000`
+- `K=8` is not dead: pooled `RepairKV = 0.3125`
+- `K=64` is not saturated: pooled `RepairKV = 0.7083`, `Oracle-K = 1.0000`
 - keep the full grid for the main run
 
 ## 9. Control Preflight
@@ -319,8 +319,8 @@ Artifacts:
 
 Observed:
 
-- `Random-K` and `Oldest-K` stay well below `IdleKV`
-- `WrongQ-K` does **not** separate reliably from `IdleKV` on this benchmark family
+- `Random-K` and `Oldest-K` stay well below `RepairKV`
+- `WrongQ-K` does **not** separate reliably from `RepairKV` on this benchmark family
 - the likely reason is the highly repetitive NIAH query template, which makes a mismatched query
   still recover generic key/value bursts
 
@@ -341,7 +341,7 @@ The main experiment is now complete with the selected regime:
   - `A`
   - `B`
   - `B_match`
-  - `IdleKV`
+  - `RepairKV`
   - `Random-K`
   - `Oldest-K`
   - `Oracle-K`
@@ -350,7 +350,7 @@ Main figure:
 
 - pooled clean-suite frontier:
   - `B_match`
-  - `IdleKV`
+  - `RepairKV`
   - `Random-K`
   - `Oldest-K`
   - `Oracle-K`
@@ -359,7 +359,7 @@ Main table:
 
 - selected `K` values
 - pooled clean-suite results
-- `% IdleKV > B_match`
+- `% RepairKV > B_match`
 
 Appendix:
 

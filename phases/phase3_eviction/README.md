@@ -1,6 +1,6 @@
 # Phase 3: Eviction Algorithm Validation
 
-This folder contains the Phase 3 implementation for the IdleKV plan: a shared
+This folder contains the Phase 3 implementation for the RepairKV plan: a shared
 eviction interface, SnapKV and query-aware SnapKV, a StreamingLLM baseline,
 logging utilities, and a test harness that stress-tests the selection logic
 without tying anything to the Phase 1 task variants.

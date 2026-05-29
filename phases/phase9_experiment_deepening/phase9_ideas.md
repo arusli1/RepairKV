@@ -41,7 +41,7 @@ The current paper has one strong experimental axis:
 That figure is necessary, but it is visually and scientifically close to 1D.
 It answers:
 
-- does IdleKV improve as more evicted context is restored?
+- does RepairKV improve as more evicted context is restored?
 
 It does not fully answer:
 
@@ -64,7 +64,7 @@ any question-like signal recovers generic key/value bursts?
 Candidate conditions:
 
 - matched no-repair retention
-- current IdleKV using the true `Q2`
+- current RepairKV using the true `Q2`
 - wrong-query repair using a task-matched decoy query
 - stale-query or turn-N repair using only the turn-N signal
 - `StaleDelta`: `z(Q2) - lambda * z(turnN)`
@@ -93,7 +93,7 @@ Failure modes:
 
 ### Figure B: Better Repair Policies
 
-**Question.** Is IdleKV an algorithmic design space, or only one heuristic?
+**Question.** Is RepairKV an algorithmic design space, or only one heuristic?
 
 The current selector ranks individual evicted tokens by `Q2` score and expands
 fixed local bursts. That is simple and legible, but it can waste budget around
@@ -101,10 +101,10 @@ false-positive anchors and redundant neighborhoods.
 
 Candidate variants:
 
-- current IdleKV
+- current RepairKV
 - `IntervalPack`: score candidate windows and choose non-overlapping windows
   under budget
-- `CoverageIdleKV`: encourage coverage across multiple queried values rather
+- `CoverageRepairKV`: encourage coverage across multiple queried values rather
   than letting one hot query token dominate
 - `StaleDelta` or `ContrastiveQ` combined with better packing
 - Gold-K reference
@@ -136,8 +136,8 @@ Candidate conditions:
 
 - matched no-repair retention
 - full-cache reference resume
-- exact IdleKV
-- proxy IdleKV
+- exact RepairKV
+- proxy RepairKV
 - two-stage rerank: cheap screen, exact rerank top `M`
 - possibly raw transfer/reinjection only as a lower-bound point
 
@@ -176,7 +176,7 @@ Candidate axes:
 
 - x-axis: restore budget `K`
 - y-axis: base context budget `B_base`
-- color: `IdleKV - matched no-repair`
+- color: `RepairKV - matched no-repair`
 
 Candidate settings:
 
@@ -206,7 +206,7 @@ This can likely be built from existing exported CSVs.
 
 Candidate panels:
 
-- `IdleKV - matched no-repair` with bootstrap intervals
+- `RepairKV - matched no-repair` with bootstrap intervals
 - final-active overlap with annotated `Q2` span groups vs `K`
 
 Why this is high value:
@@ -293,7 +293,7 @@ Main risk:
 
 - More complex selector may overfit to MQ-NIAH span geometry.
 
-### CoverageIdleKV
+### CoverageRepairKV
 
 Attempt to cover multiple future query intents rather than max-pooling all query
 tokens into one global score.
@@ -365,7 +365,7 @@ Rerun frozen 4Q and 6Q settings with one or two additional dataset seed offsets.
 
 Candidate figure:
 
-- forest plot of `IdleKV - matched no-repair` at `K = 48, 96, 128`
+- forest plot of `RepairKV - matched no-repair` at `K = 48, 96, 128`
 - or thin-line overlays of score frontier by seed
 
 Main value:
@@ -383,7 +383,7 @@ Run the recency-favorable 4Q partitions such as `12 -> 34`.
 Candidate figure:
 
 - clean partitions vs recency-favorable partitions
-- y-axis: `IdleKV - matched no-repair`
+- y-axis: `RepairKV - matched no-repair`
 
 Main value:
 
@@ -462,7 +462,7 @@ Small targeted harness or table:
 
 - matched no-repair resume
 - full-cache resume
-- IdleKV exact repair
+- RepairKV exact repair
 - re-prefill full prompt from scratch
 
 Metrics:
@@ -514,7 +514,7 @@ without disrupting the schedule. Otherwise keep it as future work.
 Highest-value Phase 9 package:
 
 1. **Future-query specificity:** Q2 vs wrong/stale/contrastive scoring.
-2. **Algorithmic repair:** current IdleKV vs IntervalPack/Coverage vs Gold-K.
+2. **Algorithmic repair:** current RepairKV vs IntervalPack/Coverage vs Gold-K.
 3. **Quality-latency Pareto:** exact vs proxy/two-stage rerank.
 4. **Mechanism/statistics figure:** lift with CI and final-active overlap.
 5. **Robustness appendix:** base-budget sweep, seed robustness, recency
@@ -549,7 +549,7 @@ Appendix:
    - one extra figure
    - two extra figures
    - one figure plus appendix only
-3. Should new algorithms be allowed to replace the current IdleKV line, or only
+3. Should new algorithms be allowed to replace the current RepairKV line, or only
    appear as ablations?
 4. What run budget is acceptable?
    - one overnight GPU job

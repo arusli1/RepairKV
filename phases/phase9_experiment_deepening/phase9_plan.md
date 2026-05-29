@@ -62,7 +62,7 @@ Donor-query `WrongQ-K` with exact scoring separates at `K=48` but still
 saturates at `K=96`, so it is a useful mid-budget specificity control and a
 high-budget limitation. `ContrastiveQ-K`, which subtracts standardized
 donor-query scores from true future-query scores, is promising in the `n=2` 6Q
-suite smoke: pooled score is `1.000` at `K=48` and `K=64` versus default IdleKV
+suite smoke: pooled score is `1.000` at `K=48` and `K=64` versus default RepairKV
 at `0.667` and `0.792`. It narrowly regresses at `K=96` (`0.958` versus
 `1.000`), so promote it only as a mid-budget repair-policy candidate unless a
 larger run removes that loss.
@@ -73,14 +73,14 @@ what could have been done at compression time, which is the clearest novelty
 boundary against standard query-aware selection.
 
 `StaleQ-K` smoke outcome: one-split smoke was clean, but the `n=2` 6Q suite
-does not pass the strict mid-budget gate. At `K=48`, IdleKV is `0.667` and
-`StaleQ-K` is `0.583`; at `K=96`, IdleKV is `1.000` and `StaleQ-K` is `0.625`.
+does not pass the strict mid-budget gate. At `K=48`, RepairKV is `0.667` and
+`StaleQ-K` is `0.583`; at `K=96`, RepairKV is `1.000` and `StaleQ-K` is `0.625`.
 Use this as appendix/control evidence unless a larger run improves separation.
 
 Proxy scoring is a strong systems-facing signal. The first 6Q `n=2`, `K=96`
 smoke preserved nearly all exact quality (`0.958` versus exact `1.000`) while
 dropping p50 total repair time from about `6.75s` to `0.78s`. A follow-up 6Q
-`n=8`, `K=96` run still clears the quality gate: proxy IdleKV is `0.906`,
+`n=8`, `K=96` run still clears the quality gate: proxy RepairKV is `0.906`,
 matched no-repair is `0.375`, and the proxy lift is `0.531`. Against the locked
 exact 6Q reference at `K=96`, this keeps about `94%` of the exact lift while
 cutting p50 total repair latency by about `8x` and p50 scoring latency by about
@@ -196,7 +196,7 @@ Appendix target:
   the best current core evidence.
 - Run the operating-regime heatmap at larger `n` after smoke passes:
   4Q `B_base={14336,16384,18432}`, 6Q `B_base={12288,18432,24576}`,
-  `K={16,48,96,128}`, conditions `A/B/B_match/IdleKV/Gold-K`.
+  `K={16,48,96,128}`, conditions `A/B/B_match/RepairKV/Gold-K`.
 - Do not run 2Q or 3Q for the main paper now; they are likely lower signal than
   strengthening the operating-regime evidence. Run 8Q only as an appendix or
   future-work stress test after the main visual package is stable.
@@ -211,9 +211,9 @@ Appendix target:
 
 2. **Matched resumed-cache frontier.**
    - Status: already available from locked 4Q/6Q exact artifacts.
-   - Claim: at the same resumed active-cache budget, IdleKV beats matched
+   - Claim: at the same resumed active-cache budget, RepairKV beats matched
      no-repair and content-agnostic restores.
-   - Required data: `B_match`, IdleKV, Random-K, Oldest-K, Gold-K, full-cache
+   - Required data: `B_match`, RepairKV, Random-K, Oldest-K, Gold-K, full-cache
      reference over the calibrated `K` grid.
    - Current data quality: strong; do not regenerate unless a Phase 9 control
      exposes a real flaw.
@@ -223,7 +223,7 @@ Appendix target:
    - Claim: repair works because the next-turn query is newly available, not
      because any query-like text recovers generic key/value bursts.
    - Ideal visualization: compact 6Q plot at `K={24,48,64,96}` or a full
-     score-vs-`K` panel with `B_match`, true-`Q2` IdleKV, donor-query
+     score-vs-`K` panel with `B_match`, true-`Q2` RepairKV, donor-query
      `WrongQ-K`, optional `ContrastiveQ-K`, and Gold-K.
    - Required experiment: exact 6Q donor-query smoke, then contrastive smoke if
      donor query exposes generic template recovery.
@@ -238,7 +238,7 @@ Appendix target:
      recency-saturated regimes.
    - Ideal visualization: two heatmaps, 4Q and 6Q, with base budget on the
      y-axis, `K` on the x-axis, and color equal to
-     `IdleKV - matched no-repair`. Mark cells where Gold-K headroom remains.
+     `RepairKV - matched no-repair`. Mark cells where Gold-K headroom remains.
    - Required experiment: sparse base-budget sweep.
    - Main-paper rule: promote if it cleanly explains the calibrated setting and
      replaces a table; otherwise appendix.
@@ -249,8 +249,8 @@ Appendix target:
    - Claim: exact scoring is mechanistic, but the systems primitive is a
      quality-latency tradeoff that can be improved by faster scoring.
    - Ideal visualization: score vs p50 repair/scoring latency at `K=96`, with
-     no-repair, transfer-only annotation, exact IdleKV,
-     proxy IdleKV, and two-stage rerank if it clears smoke.
+     no-repair, transfer-only annotation, exact RepairKV,
+     proxy RepairKV, and two-stage rerank if it clears smoke.
    - Required experiment: runtime microbenchmark first, proxy smoke only if the
      proxy path actually reduces scoring latency.
    - Main-paper rule: promote only if proxy/two-stage preserves meaningful lift
@@ -379,7 +379,7 @@ Status: already in the paper from the final 4Q and 6Q exact artifacts.
 Purpose: the core evidence. Keep it as the anchor figure:
 
 - MQ-NIAH-4Q and MQ-NIAH-6Q panels;
-- `B_match`, IdleKV, random, oldest, full-cache reference, Gold-K;
+- `B_match`, RepairKV, random, oldest, full-cache reference, Gold-K;
 - legend outside or below the plots so it does not cover data.
 
 This should remain the strongest main-text figure unless Phase 9 produces a
@@ -393,7 +393,7 @@ Conditions:
 
 - matched no-repair;
 - `StaleQ-K`, scored with the previous-turn query;
-- IdleKV scored with true `Q2`;
+- RepairKV scored with true `Q2`;
 - `WrongQ-K` scored with a donor future query from another example;
 - `ContrastiveQ-K`, scored by standardized true-`Q2` minus donor-`Q2` scores;
 - stale/turn-`N` query signal if implemented cleanly;
@@ -421,8 +421,8 @@ Question: can repair plausibly fit an idle-window budget?
 Conditions:
 
 - no repair;
-- exact IdleKV;
-- proxy IdleKV;
+- exact RepairKV;
+- proxy RepairKV;
 - two-stage rerank if implemented;
 - full recompute/re-prefill estimate or measured baseline if feasible.
 
@@ -451,7 +451,7 @@ Data already exists:
 Plot:
 
 - final-active gold-span overlap vs `K`;
-- compare matched no-repair, IdleKV, random, oldest, Gold-K.
+- compare matched no-repair, RepairKV, random, oldest, Gold-K.
 
 Use this as a mechanism diagnostic, not a surrogate score.
 
@@ -463,7 +463,7 @@ Plot:
 
 - rows: base budget;
 - columns: `K`;
-- color: `IdleKV - matched no-repair`;
+- color: `RepairKV - matched no-repair`;
 - separate 4Q and 6Q panels.
 
 Purpose:
@@ -533,7 +533,7 @@ python phases/phase6_repair/scripts/run_phase6.py \
   --wrong-query-mode donor_q2 \
   --wrong-query-donor-offset 100000 \
   --k 48 96 \
-  --conditions A B B_match IdleKV WrongQ-K Oracle-K
+  --conditions A B B_match RepairKV WrongQ-K Oracle-K
 ```
 
 Smoke B:
@@ -550,7 +550,7 @@ python phases/phase6_repair/scripts/run_phase6.py \
   --wrong-query-mode donor_q2 \
   --wrong-query-donor-offset 100000 \
   --k 48 96 \
-  --conditions A B B_match IdleKV WrongQ-K Oracle-K
+  --conditions A B B_match RepairKV WrongQ-K Oracle-K
 ```
 
 Smoke C:
@@ -567,7 +567,7 @@ python phases/phase6_repair/scripts/run_phase6.py \
   --wrong-query-mode donor_q2 \
   --wrong-query-donor-offset 100000 \
   --k 48 96 \
-  --conditions A B B_match IdleKV StaleQ-K WrongQ-K Oracle-K
+  --conditions A B B_match RepairKV StaleQ-K WrongQ-K Oracle-K
 ```
 
 Full-run gates:
@@ -603,7 +603,7 @@ Best version:
 
 - x-axis: restore budget `K`;
 - y-axis: base compressed budget `B_base`;
-- color: `IdleKV - matched no-repair`;
+- color: `RepairKV - matched no-repair`;
 - contour/marker: where Gold-K still has at least `0.05` headroom;
 - two panels: 4Q and 6Q.
 
@@ -616,7 +616,7 @@ single magic curve.
 Cheap fallback from existing data:
 
 - plot normalized recovery
-  `(IdleKV - B_match) / (Gold-K - B_match)` vs `K` for 4Q and 6Q;
+  `(RepairKV - B_match) / (Gold-K - B_match)` vs `K` for 4Q and 6Q;
 - add a light background band for "Gold-K headroom remains";
 - use this only if space allows, because it repackages the frontier rather than
   adding new evidence.
@@ -663,18 +663,18 @@ python phases/phase6_repair/scripts/run_phase6.py \
   --query-scoring-mode proxy \
   --oracle-mode gold_spans \
   --k 96 \
-  --conditions A B B_match IdleKV Oracle-K
+  --conditions A B B_match RepairKV Oracle-K
 ```
 
 Full-run gates:
 
 - run the exact counterpart on the same cell and compare the merged Phase 9
   quality/runtime CSV before launching any proxy curve;
-- promote proxy full curves only if proxy IdleKV beats matched no-repair by at
+- promote proxy full curves only if proxy RepairKV beats matched no-repair by at
   least `0.10` at `K=96` on 6Q or `0.20` at `K=96` on 4Q;
-- require proxy to preserve at least `70%` of exact IdleKV lift at `K=96`;
+- require proxy to preserve at least `70%` of exact RepairKV lift at `K=96`;
 - attempt two-stage rerank only after proxy shows nontrivial lift;
-- promote two-stage rerank only if it stays within `0.03` of exact IdleKV at
+- promote two-stage rerank only if it stays within `0.03` of exact RepairKV at
   `K=96` while cutting p50 total repair time by at least `3x`.
 
 Paper use:
@@ -689,7 +689,7 @@ Smoke outcome:
 - Proxy 6Q `n=8`, `B_base=18432`, `K=96` exists in
   `phases/phase9_experiment_deepening/results/phase9_proxy_suite_n8.csv`.
 - Compared with the locked exact 6Q reference, proxy preserves about `94%` of
-  the exact IdleKV lift while cutting p50 total repair latency by about `8x`.
+  the exact RepairKV lift while cutting p50 total repair latency by about `8x`.
 - Short `n=2` calibrated 4Q/6Q smokes at `K={48,96}` pass the proxy quality
   gate and are summarized in
   `phases/phase9_experiment_deepening/results/phase9_proxy_4q_smoke_n2.csv`
@@ -717,7 +717,7 @@ Purpose: test whether the gap to Gold-K is an algorithmic opportunity.
 Priority:
 
 1. `IntervalPack`: select non-overlapping high-scoring bursts under budget.
-2. `CoverageIdleKV`: only if smoke suggests multi-query under-coverage.
+2. `CoverageRepairKV`: only if smoke suggests multi-query under-coverage.
 3. Contrastive or stale-delta scoring only if future-query specificity is weak.
 
 Software tests:
@@ -738,12 +738,12 @@ python phases/phase6_repair/scripts/run_phase6.py \
   --query-scoring-mode exact_q \
   --oracle-mode gold_spans \
   --k 24 32 48 64 \
-  --conditions A B B_match IdleKV Oracle-K
+  --conditions A B B_match RepairKV Oracle-K
 ```
 
 Full-run gates:
 
-- new selector closes at least `20%` of the default IdleKV-to-Gold-K gap at
+- new selector closes at least `20%` of the default RepairKV-to-Gold-K gap at
   `K=48` on pooled 6Q;
 - no loss larger than `0.02` at `K=96` or `K=128`;
 - selector overhead below `250 ms` p50, excluding exact scoring.
@@ -765,7 +765,7 @@ Sparse base-budget sweep:
 - 6Q: `B={16384,18432,20480}`;
 - `K={16,48,96,128}`;
 - `n=8`;
-- conditions: `A B B_match IdleKV Oracle-K`.
+- conditions: `A B B_match RepairKV Oracle-K`.
 
 Seed offsets:
 
@@ -798,7 +798,7 @@ Paper use:
 
 - Exact scorer latency is seconds, not deployable. The exact path is evidence
   for the mechanism, not the final system.
-- Matched resumed active cache does not mean matched total memory. IdleKV keeps
+- Matched resumed active cache does not mean matched total memory. RepairKV keeps
   a CPU buffer of evicted KV.
 - MQ-NIAH is synthetic and favorable to local span restoration.
 - Current evidence measures conditional `Q2` quality under a fixed full-cache

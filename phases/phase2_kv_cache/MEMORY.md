@@ -7,8 +7,8 @@ Build the Phase 2 KV-cache access layer, run the acceptance checks from
 
 ## Verified Environment Facts
 
-- Repo: `/home/ubuntu/IdleKV`
-- Model path: `/home/ubuntu/IdleKV/models/Qwen2.5-7B-Instruct`
+- Repo: `/home/ubuntu/RepairKV`
+- Model path: `/home/ubuntu/RepairKV/models/Qwen2.5-7B-Instruct`
 - GPU: NVIDIA RTX PRO 6000 Blackwell Server Edition, ~101.97 GB VRAM
 - `torch == 2.10.0+cu128`
 - `transformers == 5.2.0`

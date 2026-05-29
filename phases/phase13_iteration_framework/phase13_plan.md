@@ -44,8 +44,8 @@ Every unfinished idea must move through the same loop:
   sink-plus-recent retention, `B=16384`, `K=8..128`, `n=24`, passed the
   policy-curve gate.
 - **Main gate:** full-grid pass, at least two adjacent restore budgets with
-  IdleKV gain at least `0.15`, Random-K/Oldest-K within `0.10` of matched
-  no-repair at those budgets, and Gold-K covering IdleKV.
+  RepairKV gain at least `0.15`, Random-K/Oldest-K within `0.10` of matched
+  no-repair at those budgets, and Gold-K covering RepairKV.
 - **Current figure:** one-column policy-breadth plot with SnapKV,
   accumulated-attention retention, and sink-plus-recent retention. The x-axis
   is score gain over each policy's matched no-repair baseline; gray marks
@@ -72,7 +72,7 @@ Every unfinished idea must move through the same loop:
 - **Question:** Can repair repeatedly adapt cache state across relevance shifts
   and revisits, closer to agent-style workflows than a single Q2 handoff?
 - **Current result:** locked `n=24`, `K=80` passed the main gate and is
-  integrated as a main diagnostic. Non-initial IdleKV gain is `0.542`
+  integrated as a main diagnostic. Non-initial RepairKV gain is `0.542`
   with paired bootstrap interval `[0.458,0.620]`; revisit-turn gain is
   `0.938` with interval `[0.875,1.000]`.
 - **Residual caveat:** stale-query-only repair still gains `0.234` on
@@ -83,12 +83,12 @@ Every unfinished idea must move through the same loop:
   query and is a genuine no-headroom turn, not an accounting bug: matched
   no-repair scores `1.0` on all 24 examples and retains mean active annotated
   span overlap `0.841`. The reported non-initial gain includes this saturated
-  turn; excluding it raises IdleKV gain from `0.542` to `0.722`, so the main
+  turn; excluding it raises RepairKV gain from `0.542` to `0.722`, so the main
   aggregate is conservative. The MQ-NIAH-8Q span geometry places the displayed
   turn-3 pair in a region that the `B=18432,K=80` no-repair cache already
   retains well; Random-K, Oldest-K, stale-query repair, and Gold-K all also
   score `1.0` on that turn, confirming that the saturation is task/budget
-  geometry rather than an IdleKV-specific effect.
+  geometry rather than an RepairKV-specific effect.
 - **Challenge-schedule pilot:** `mq_niah_8q_challenge_revisit` removes the easy
   `[4,5]` middle pair and alternates `[0,1]` and `[2,3]` after the full-context
   priming turn. The `n=2`, `K={64,80,96}` smoke completed on 2026-05-03 and
@@ -97,15 +97,15 @@ Every unfinished idea must move through the same loop:
   stale-query controls. Treat this as task-design evidence, not a failed
   implementation.
 - **Calibration smoke:** completed `n=2`, `K in {64,80,96}` on 2026-05-03.
-  The gate selected `K=80`: IdleKV non-initial gain `0.625`, revisit gain
+  The gate selected `K=80`: RepairKV non-initial gain `0.625`, revisit gain
   `1.0`, content-agnostic controls `0.0`, stale fraction `0.30`, and
   current-query-only minus stale-query-only margin `0.438`. `K=64` was too
   weak and `K=96` was too explainable by stale-query controls.
 - **Locked run:** completed in tmux session `phase13_multiturn_locked` on
   2026-05-03 and wrote rows, summary, raw JSON, and paired-uncertainty CSVs.
-- **Main gate:** IdleKV non-initial gain at least `0.35`, revisit gain at
+- **Main gate:** RepairKV non-initial gain at least `0.35`, revisit gain at
   least `0.75`, content-agnostic controls near zero, StaleQ-K no more than
-  `45%` of IdleKV non-initial gain, `CurrentQOnly-K` at least `0.10`
+  `45%` of RepairKV non-initial gain, `CurrentQOnly-K` at least `0.10`
   non-initial gain above `StaleQOnly-K` when those diagnostics are present,
   and paired rows auditable for matched active-cache budget.
 - **Paper integration:** promoted the multi-turn trajectory to main and moved
@@ -121,20 +121,20 @@ Every unfinished idea must move through the same loop:
   main model-family robustness claim.
 - **Completed smoke:** Llama-3.1-8B-Instruct, MQ-NIAH-6Q,
   `B=18432`, `n=2`, `K={32,64,96,128}`. Full-context score is `1.0`;
-  matched no-repair stays at `0.5`; IdleKV reaches `1.0` for
+  matched no-repair stays at `0.5`; RepairKV reaches `1.0` for
   `K>=64`; Random-K and Oldest-K stay at matched. Exclude `K=32` from
-  locked promotion because IdleKV exceeds the metadata \goldk-style
+  locked promotion because RepairKV exceeds the metadata \goldk-style
   reference at that low budget, so the reference is not a clean ceiling.
 - **Locked run:** `phase13_llama6q_locked` completed on 2026-05-03 with
   Llama-3.1-8B-Instruct, MQ-NIAH-6Q, `B=18432`, `n=12`, and
   `K={64,96,128}`. It passes the appendix portability gate: full-cache
-  score `1.0`, matched no-repair `0.472`, IdleKV `1.0` at all three
+  score `1.0`, matched no-repair `0.472`, RepairKV `1.0` at all three
   budgets, Random-K/Oldest-K at or below matched, and \goldk-style
-  metadata reference covering IdleKV. Promote as appendix cross-model
+  metadata reference covering RepairKV. Promote as appendix cross-model
   evidence, not as a broad multi-model main claim.
 - **Main gate:** full-cache reference at least `0.90`, matched no-repair gap at
-  least `0.20`, non-saturated IdleKV improvement over matched and controls at
-  two or more K values, and Gold-K covering IdleKV.
+  least `0.20`, non-saturated RepairKV improvement over matched and controls at
+  two or more K values, and Gold-K covering RepairKV.
 - **If pass:** lock `n=12` or `n=24` depending on runtime and variance; render
   as a compact cross-model row plot or move model-transfer from appendix to a
   short main robustness paragraph plus figure.
@@ -147,7 +147,7 @@ Every unfinished idea must move through the same loop:
 - **Current status:** coverage-aware and MMR-style variants are implemented
   with CPU tests, but not promoted.
 - **Next smoke:** run `K={24,48,96}`, `n=1` first. Scale only if a variant
-  beats current IdleKV by at least `0.05` at mid-K without hurting high-K by
+  beats current RepairKV by at least `0.05` at mid-K without hurting high-K by
   more than `0.02`.
 - **Paper gate:** only promote if it gives a clear algorithmic story and
   reduces the Gold-K gap. Otherwise avoid ablation clutter.
@@ -179,7 +179,7 @@ Every unfinished idea must move through the same loop:
   full StreamingLLM, and unlike PyramidKV it does not require layer-varying
   active-position sets. The smoke should first test a deterministic attention
   trace, then MQ-NIAH-4Q with `n=2`, `K={48,96}`, matched no-repair,
-  Random-K/Oldest-K, IdleKV, and Gold-K.
+  Random-K/Oldest-K, RepairKV, and Gold-K.
 - **Named algorithms that are possible but lower priority:** PyramidKV would
   add layer-varying budgets, which would complicate our matched resumed
   active-cache budget and distract from the repair claim. QUEST is
@@ -232,7 +232,7 @@ Every unfinished idea must move through the same loop:
   paper's dynamic workflow thesis; the heatmap is calibration context and can
   move to the appendix.
 - A promoted multi-turn figure should show only the reviewer-critical traces:
-  IdleKV, StaleQ-K, Gold-K, and a Random-K/Oldest-K control band. Keep
+  RepairKV, StaleQ-K, Gold-K, and a Random-K/Oldest-K control band. Keep
   CurrentQOnly-K and StaleQOnly-K in the audit/prose for specificity, not as
   extra plot lines unless the figure remains readable.
 - The multi-turn caption/prose must report the schedule, `K`, `n`, paired
@@ -258,20 +258,20 @@ Scissorhands branch design, if opened:
    ties are deterministic, and evicted rows enter the offloaded store.
 4. CPU smoke the selector on synthetic traces before any model run.
 5. GPU smoke only after tests pass: MQ-NIAH-4Q, `n=2`, `K={48,96}`, matched
-   no-repair, Random-K, Oldest-K, IdleKV, and Gold-K.
-6. Promote only after a locked grid shows adjacent positive IdleKV gains,
+   no-repair, Random-K, Oldest-K, RepairKV, and Gold-K.
+6. Promote only after a locked grid shows adjacent positive RepairKV gains,
    clean content-agnostic controls, and no budget-accounting ambiguity.
 
 Failure-response rule for `phase13_multiturn_locked`:
 
-- If IdleKV is strong but StaleQ-K exceeds the stale-fraction gate, do not
+- If RepairKV is strong but StaleQ-K exceeds the stale-fraction gate, do not
   promote the figure. Record the result as evidence that this schedule still
   contains reusable stale-query signal, then redesign the schedule with more
   disjoint revisits or stronger stale-query distractors before any rerun.
 - If Random-K/Oldest-K exceed the content-agnostic control gate, treat the
   operating point as too easy or too underconstrained. Recalibrate budget or
   task difficulty before rerunning.
-- If IdleKV itself falls below the non-initial/revisit gain gate, demote
+- If RepairKV itself falls below the non-initial/revisit gain gate, demote
   multi-turn to future benchmark design and keep the current main package.
 - Do not tune wording or graph styling to make a failed multi-turn run look
   main-ready. The gate decides promotion.
@@ -299,7 +299,7 @@ Failure-response rule for `phase13_multiturn_locked`:
   branch-level actions, result-rigor decisions, paper-artifact figure-quality
   decisions, and terminology caveats for non-canonical policy variants.
   Main multi-turn candidates now require positive paired bootstrap lower
-  bounds for IdleKV over matched no-repair, IdleKV over Random-K/Oldest-K, and
+  bounds for RepairKV over matched no-repair, RepairKV over Random-K/Oldest-K, and
   CurrentQOnly-K over StaleQOnly-K on non-initial turns.
 - `scripts/summarize_multiturn_uncertainty.py`: writes paired bootstrap
   intervals for multi-turn rows. Primary main-text multi-turn claims require

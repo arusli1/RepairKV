@@ -147,7 +147,7 @@ Main conditions:
   - likely not feasible as a full 320K active-cache run on the current stack
 - `B_stream`
   - repeated SnapKV streaming compression, no CPU spill used at repair
-- `IdleKV_stream(b)`
+- `RepairKV_stream(b)`
   - repeated SnapKV streaming compression
   - CPU spill keeps top `10%` of each evicted batch by query-norm
   - repair swaps in the top `b` CPU-spilled tokens by `Q2` score
@@ -199,14 +199,14 @@ Main metric:
 Report:
 
 - `B_stream`
-- `IdleKV_stream(b)`
+- `RepairKV_stream(b)`
 - `RandomRepair_stream(b)`
 - `OracleSpill_stream(b)`
 - `RandomSpill_stream(b)` if run
 
 Also report:
 
-- `% examples where IdleKV_stream(b) > B_stream`
+- `% examples where RepairKV_stream(b) > B_stream`
 - spill coverage:
   - fraction of gold relevant positions that ever enter `S_cpu`
 - repair coverage:
@@ -277,7 +277,7 @@ Run:
 - one `b` value: `2048`
 - conditions:
   - `B_stream`
-  - `IdleKV_stream`
+  - `RepairKV_stream`
   - `OracleSpill_stream`
 
 ### Stage 2: Calibration
@@ -293,16 +293,16 @@ Run:
 - `b in {512, 1024, 2048, 4096, 8192}`
 - conditions:
   - `B_stream`
-  - `IdleKV_stream`
+  - `RepairKV_stream`
   - `RandomRepair_stream`
   - `OracleSpill_stream`
   - optional `RandomSpill_stream`
 
 Success pattern:
 
-- `IdleKV_stream(b) > B_stream`
+- `RepairKV_stream(b) > B_stream`
 - `RandomRepair_stream(b)` near `B_stream`
-- `OracleSpill_stream(b) > IdleKV_stream(b)`
+- `OracleSpill_stream(b) > RepairKV_stream(b)`
 
 ### Stage 3: Full Run
 
@@ -313,7 +313,7 @@ After calibration:
 - chosen `b` grid
 - main conditions:
   - `B_stream`
-  - `IdleKV_stream`
+  - `RepairKV_stream`
   - `RandomRepair_stream`
   - `OracleSpill_stream`
   - optional `RandomSpill_stream`
@@ -351,7 +351,7 @@ Code added:
 - `src/runner.py`
   - Phase 8 CLI-backed experiment runner
   - exact Q2 repair scoring
-  - `B_stream`, `IdleKV_stream`, `RandomRepair_stream`, `OracleSpill_stream`,
+  - `B_stream`, `RepairKV_stream`, `RandomRepair_stream`, `OracleSpill_stream`,
     `RandomSpill_stream`
 - `scripts/run_phase8.py`
 - `tests/test_streaming.py`
@@ -375,7 +375,7 @@ Small live implementation smoke:
   - qnorm spill size: `5,622`
   - qnorm spill coverage of Q2 gold tokens: `0.0`
   - `B_stream = 0.0`
-  - `IdleKV_stream = 0.0`
+  - `RepairKV_stream = 0.0`
   - `OracleSpill_stream = 0.0`
 
 Stage 1 320K smoke:
@@ -392,7 +392,7 @@ Stage 1 320K smoke:
   - qnorm spill size: `31,433`
 - aggregate:
   - `B_stream = 0.0`
-  - `IdleKV_stream = 0.0`
+  - `RepairKV_stream = 0.0`
   - `OracleSpill_stream = 0.0`
   - qnorm spill coverage: `0.0`
   - random-spill coverage diagnostic: `0.119565`
@@ -406,7 +406,7 @@ Broader split smoke:
 - mean streaming prefill time: `63.29s`
 - aggregate:
   - `B_stream = 0.0`
-  - `IdleKV_stream = 0.0`
+  - `RepairKV_stream = 0.0`
   - `RandomRepair_stream = 0.0`
   - `OracleSpill_stream = 0.0`
   - `RandomSpill_stream = 0.0`
@@ -686,7 +686,7 @@ Use the same logic as Phase 6/7, adapted to swap repair:
   - two-tier streaming cache after Q1
   - no CPU repair
   - matched active-GPU footprint baseline
-- `IdleKV_stream(X, K)`
+- `RepairKV_stream(X, K)`
   - rank CPU-spilled tokens with exact Q2 query rows
   - swap top `K` CPU tokens into GPU
   - drop the bottom `K` active context tokens by the same Q2 score
@@ -704,7 +704,7 @@ Use the same logic as Phase 6/7, adapted to swap repair:
   - CPU tier contains every token that left GPU
   - measures whether failures come from spill triage or repair selection
 
-Do not include the old qnorm-spill `IdleKV_stream` in the main result.
+Do not include the old qnorm-spill `RepairKV_stream` in the main result.
 
 ### Calibration Stages
 
@@ -767,7 +767,7 @@ Run:
 - `K in {64, 128, 256, 512, 1024, 2048, 4096}`
 - conditions:
   - `B_stream`
-  - `IdleKV_stream`
+  - `RepairKV_stream`
   - `Random-K_stream`
   - `Oldest-K_stream`
   - `Oracle-K_stream`
@@ -775,9 +775,9 @@ Run:
 Gate:
 
 - pooled `B_stream` is nonzero but not saturated
-- `IdleKV_stream(K) > B_stream` for some middle `K`
+- `RepairKV_stream(K) > B_stream` for some middle `K`
 - `Random-K_stream` and `Oldest-K_stream` stay near `B_stream`
-- `Oracle-K_stream > IdleKV_stream` before the largest `K`
+- `Oracle-K_stream > RepairKV_stream` before the largest `K`
 - largest `K` does not simply destroy performance by swapping out too much active context
 
 #### Stage C: Full 4q Panel
@@ -794,7 +794,7 @@ Run:
 - `K`: downselected from Stage B, likely `K in {128, 256, 512, 1024, 2048}`
 - conditions:
   - `B_stream`
-  - `IdleKV_stream`
+  - `RepairKV_stream`
   - `Random-K_stream`
   - `Oldest-K_stream`
   - `Oracle-K_stream`
@@ -842,9 +842,9 @@ Reason:
 The full Phase 8 panel is paper-useful if all of the following hold:
 
 - pooled `B_stream` is above `0.05` and below `0.80`
-- pooled `IdleKV_stream - B_stream >= 0.10` at one middle `K`
-- pooled `IdleKV_stream` exceeds both random and oldest controls at the same `K`
-- pooled `Oracle-K_stream - IdleKV_stream >= 0.05` at one middle `K`
+- pooled `RepairKV_stream - B_stream >= 0.10` at one middle `K`
+- pooled `RepairKV_stream` exceeds both random and oldest controls at the same `K`
+- pooled `Oracle-K_stream - RepairKV_stream >= 0.05` at one middle `K`
 - every clean split has nonzero CPU coverage at the selected `X`
 - the selected `X < 1.0`, so the main condition includes permanent forgetting
 - the active GPU cache never exceeds `32,768`

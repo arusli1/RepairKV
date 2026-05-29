@@ -6,7 +6,7 @@ Last updated: 2026-05-03.
 
 Idle-window repair should be presented as a systems-capacity claim:
 
-> A plausible IdleKV-style repair primitive can score an offloaded evicted-KV
+> A plausible RepairKV-style repair primitive can score an offloaded evicted-KV
 > store and restore selected rows within sub-second to few-second idle windows
 > for the measured candidate-store sizes.
 

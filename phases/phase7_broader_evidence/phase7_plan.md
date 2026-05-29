@@ -29,7 +29,7 @@ Earlier low-footprint Phase 6 artifact:
 
 Locked pooled numbers:
 
-| K | B_match | IdleKV | Random-K | Oldest-K | Oracle-K |
+| K | B_match | RepairKV | Random-K | Oldest-K | Oracle-K |
 |---|---:|---:|---:|---:|---:|
 | 8  | 0.102 | 0.342 | 0.098 | 0.088 | 0.407 |
 | 16 | 0.098 | 0.417 | 0.098 | 0.085 | 0.523 |
@@ -65,7 +65,7 @@ Important wording:
 - `A` should be described as the **full-cache reference condition**, not a literal ceiling:
   on harder settings a repaired smaller cache can occasionally outperform the
   full cache by removing distracting context.
-  A small number of examples with `IdleKV > A` would therefore be a modeling
+  A small number of examples with `RepairKV > A` would therefore be a modeling
   effect to interpret, not an automatic runner bug.
 
 ## Why 3, 4, and 6
@@ -112,7 +112,7 @@ These are the important audit outcomes from the smokes:
      not as a single-axis difficulty knob or independent confirmatory test.
 5. Mixed `3q / 4q / 6q` runs cannot be executed in one runner
    invocation. They must be run as separate jobs and compared offline.
-6. The remaining `IdleKV < Oracle-K` gap on `4q` is **not** mainly a missing-attention-signal problem. Under the exact scorer, many gold Q2 tokens already rank near the top of the evicted list; the main bottleneck is the current burst restore policy wasting budget around false-positive anchors and fragmented neighborhoods.
+6. The remaining `RepairKV < Oracle-K` gap on `4q` is **not** mainly a missing-attention-signal problem. Under the exact scorer, many gold Q2 tokens already rank near the top of the evicted list; the main bottleneck is the current burst restore policy wasting budget around false-positive anchors and fragmented neighborhoods.
 7. The widened high-`K` `4q` run is a **diagnostic**, not the final bridge-panel artifact, because it omits the low-`K` exact points. The final `4q` exact panel must come from one unified rerun.
 8. A stronger `6q` design is now available than the original single split.
    - Define the clean suite as the complete family of balanced `3|3` partitions
@@ -145,7 +145,7 @@ These are the important audit outcomes from the smokes:
 13. The overlap exporter was patched to prefer **final active overlap** for
     repair conditions.
    - Earlier overlap CSVs could silently mix final-kept overlap for `B_match`
-     with restored-only overlap for `IdleKV`, `Random-K`, `Oldest-K`, and
+     with restored-only overlap for `RepairKV`, `Random-K`, `Oldest-K`, and
      `Oracle-K` when legacy `*_overlap_fraction` fields were present.
    - Re-exported Phase 7 artifacts now reconstruct final active overlap from
      `b_kept_context_positions ∪ selected_positions` when needed.
@@ -178,7 +178,7 @@ Config:
 
 Aggregate:
 
-| K | B_match | IdleKV | Oracle-K |
+| K | B_match | RepairKV | Oracle-K |
 |---|---:|---:|---:|
 | 8  | 0.250 | 0.250 | 0.375 |
 | 16 | 0.250 | 0.375 | 0.500 |
@@ -210,7 +210,7 @@ Config:
 
 Aggregate:
 
-| K | B_match | IdleKV | Oracle-K |
+| K | B_match | RepairKV | Oracle-K |
 |---|---:|---:|---:|
 | 8  | 0.125 | 0.125 | 0.417 |
 | 16 | 0.125 | 0.125 | 0.625 |
@@ -228,7 +228,7 @@ Interpretation:
 
 Tested budgets:
 
-| B_base | K=8 B_match / IdleKV | K=32 B_match / IdleKV | K=64 B_match / IdleKV | Verdict |
+| B_base | K=8 B_match / RepairKV | K=32 B_match / RepairKV | K=64 B_match / RepairKV | Verdict |
 |---|---:|---:|---:|---|
 | 14336 | 0.000 / 0.083 | 0.083 / 0.083 | 0.083 / 0.167 | too harsh |
 | 16384 | 0.167 / 0.167 | 0.167 / 0.167 | 0.167 / 0.500 | usable but weak |
@@ -247,7 +247,7 @@ Budget-probe config:
 
 Budget-probe aggregate:
 
-| K | B_match | IdleKV | Oracle-K |
+| K | B_match | RepairKV | Oracle-K |
 |---|---:|---:|---:|
 | 8  | 0.250 | 0.250 | 0.333 |
 | 16 | 0.250 | 0.250 | 0.500 |
@@ -267,7 +267,7 @@ Clean-suite smoke artifact:
 
 Clean-suite smoke aggregate:
 
-| K | A | B | B_match | IdleKV | Random-K | Oldest-K | Oracle-K |
+| K | A | B | B_match | RepairKV | Random-K | Oldest-K | Oracle-K |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 8   | 0.979 | 0.312 | 0.312 | 0.375 | 0.354 | 0.354 | 0.500 |
 | 16  | 0.979 | 0.312 | 0.333 | 0.333 | 0.312 | 0.292 | 0.562 |
@@ -286,7 +286,7 @@ Interpretation:
 - the matched baseline is nonzero overall and the control ordering still holds
 - one full-cache example out of 16 scored below `1.0`, so the hard panel should be described as a near-perfect full-cache-reference setting rather than a perfect one
 - under the rewritten oracle, the hard panel still has a clean nonzero matched baseline and a useful rise through `K=128`
-- the only notable warning is minor example-level non-monotonicity in `IdleKV`, which is expected under greedy generation and does not invalidate the aggregate trend
+- the only notable warning is minor example-level non-monotonicity in `RepairKV`, which is expected under greedy generation and does not invalidate the aggregate trend
 - the accepted clean-suite splits are the balanced `3 -> 3` partitions whose
   turn-2 side excludes the tail-favored sixth needle:
   - `156 -> 234`
@@ -332,7 +332,7 @@ Artifact:
 
 Aggregate:
 
-| K | B_match | IdleKV | Oracle-K |
+| K | B_match | RepairKV | Oracle-K |
 |---|---:|---:|---:|
 | 32  | 0.167 | 0.458 | 0.917 |
 | 48  | 0.167 | 0.500 | 1.000 |
@@ -345,7 +345,7 @@ Interpretation:
 
 - `K <= 64` understates what the exact scorer can do on `4q`
 - the widened `K` axis produces the nicer bridge-panel graph we actually want
-- `IdleKV` reaches the gold-span oracle by `K = 128` on this smoke
+- `RepairKV` reaches the gold-span oracle by `K = 128` on this smoke
 
 ### 2. The hardest split catches up with enough budget
 
@@ -355,7 +355,7 @@ Artifact:
 
 Aggregate:
 
-| K | B_match | IdleKV | Oracle-K |
+| K | B_match | RepairKV | Oracle-K |
 |---|---:|---:|---:|
 | 32  | 0.000 | 0.125 | 0.750 |
 | 48  | 0.000 | 0.250 | 1.000 |
@@ -392,7 +392,7 @@ Artifact:
 
 Aggregate:
 
-| K | B_match | IdleKV | Random-K | Oldest-K | Oracle-K |
+| K | B_match | RepairKV | Random-K | Oldest-K | Oracle-K |
 |---|---:|---:|---:|---:|---:|
 | 80  | 0.250 | 0.750 | 0.250 | 0.167 | 1.000 |
 | 96  | 0.250 | 0.833 | 0.417 | 0.167 | 1.000 |
@@ -401,7 +401,7 @@ Aggregate:
 Interpretation:
 
 - random restore can begin to recover some useful context at very large `K`
-- but it still stays below `IdleKV`
+- but it still stays below `RepairKV`
 - this means the final paper plot should still show `Random-K`, especially once the `K` axis extends past `64`
 
 ### 5. Full high-K exact `4q` diagnostic confirmed the bridge setting
@@ -412,7 +412,7 @@ Artifact:
 
 Overall aggregate:
 
-| K | B | B_match | IdleKV | Random-K | Oldest-K | Oracle-K | select+transfer+inject ms |
+| K | B | B_match | RepairKV | Random-K | Oldest-K | Oracle-K | select+transfer+inject ms |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 32  | 0.243 | 0.252 | 0.365 | 0.247 | 0.223 | 0.877 | 18.57 |
 | 48  | 0.243 | 0.243 | 0.535 | 0.240 | 0.225 | 1.000 | 16.28 |
@@ -425,11 +425,11 @@ Interpretation:
 
 - `B_base = 16384` is confirmed as the right exact-mode `4q` bridge setting
 - the widened `K` axis materially improves the graph
-- `IdleKV` nearly reaches `1.0` at `K = 128` on the full run, not just on smoke
+- `RepairKV` nearly reaches `1.0` at `K = 128` on the full run, not just on smoke
 - `Random-K` stays close to `B_match` even at large `K`
 - the exact bridge result is now locked as the main Phase 7 `4q` quality panel
 - the re-exported overlap diagnostic is now usable as a mechanism figure:
-  on the finalized exact `4q` bridge run, `IdleKV` reaches `0.998` while
+  on the finalized exact `4q` bridge run, `RepairKV` reaches `0.998` while
   final-active overlap rises only from about `0.363` to `0.794`, which is
   exactly the expected “good signal, imperfect packing” pattern
 - exact total runtime on this bridge run is almost flat across `K`
@@ -467,7 +467,7 @@ These are the remaining realistic ways Phase 7 can mislead us even if the code i
 6. Exact-Q ranking is not the same thing as an optimal restore policy.
    - The diagnostics already show that many relevant tokens rank highly.
    - The remaining gap is mostly a span construction / packing problem.
-   - So if `IdleKV < Oracle-K` persists at moderate `K`, that does not by itself falsify the attention-based hypothesis.
+   - So if `RepairKV < Oracle-K` persists at moderate `K`, that does not by itself falsify the attention-based hypothesis.
 
 7. The built-in runtime aggregate is easy to misuse.
    - `mean_idlekv_repair_ms` currently excludes query extraction and evicted scoring.
@@ -487,7 +487,7 @@ These are the remaining realistic ways Phase 7 can mislead us even if the code i
 9. Older overlap diagnostics are easy to misread.
    - Earlier exact artifacts mixed two different semantics:
      - full kept-context overlap for `B_match`
-     - restored-only overlap for `IdleKV` and the restore controls
+     - restored-only overlap for `RepairKV` and the restore controls
    - The runner now records explicit **final active overlap** fields for future runs.
    - The reporting layer can also reconstruct final active overlap from older artifacts when they still contain:
      - `b_kept_context_positions`
@@ -496,7 +496,7 @@ These are the remaining realistic ways Phase 7 can mislead us even if the code i
    - So the current unified exact `4q` rerun remains usable for a mechanism/overlap figure.
    - But do not compare older overlap CSVs across conditions unless they have been regenerated through the patched exporter.
    - Also, final active overlap is only a rough mechanism diagnostic, not a surrogate for task score.
-     On the finalized exact `4q` bridge run, `IdleKV` reaches nearly perfect
+     On the finalized exact `4q` bridge run, `RepairKV` reaches nearly perfect
      task score by `K=128` while final active overlap remains well below `1.0`,
      because answering the values-only NIAH query does not require recovering
      every annotated gold token in each needle span.
@@ -528,7 +528,7 @@ Shared settings:
   - `A`
   - `B`
   - `B_match`
-  - `IdleKV`
+  - `RepairKV`
   - `Random-K`
   - `Oldest-K`
   - `Oracle-K`
@@ -548,9 +548,9 @@ Only if we want a third panel:
 For each task panel, approve the full run only if:
 
 - `B_match` is nonzero somewhere in the sweep
-- `IdleKV > B_match` at moderate or high `K`
+- `RepairKV > B_match` at moderate or high `K`
 - `Random-K` and `Oldest-K` stay near `B_match`
-- `Oracle-K > IdleKV`
+- `Oracle-K > RepairKV`
 
 If a task fails those criteria at smoke scale, do not promote it to a full run.
 
@@ -568,7 +568,7 @@ as a redundant reference, not as a competing result line.
 
 Final pooled exact `4q` numbers:
 
-| K | B | B_match | IdleKV | Random-K | Oldest-K | Oracle-K |
+| K | B | B_match | RepairKV | Random-K | Oldest-K | Oracle-K |
 |---|---:|---:|---:|---:|---:|---:|
 | 8   | 0.243 | 0.240 | 0.240 | 0.240 | 0.223 | 0.442 |
 | 16  | 0.243 | 0.247 | 0.247 | 0.243 | 0.225 | 0.580 |
@@ -583,7 +583,7 @@ Final pooled exact `4q` numbers:
 Audit summary:
 
 - `A = 1.0` throughout
-- `IdleKV > B_match` on `94.3%` of examples at `K = 128`
+- `RepairKV > B_match` on `94.3%` of examples at `K = 128`
 - `Random-K` stays on the matched baseline
 - `Oldest-K` stays below baseline
 - example-level non-monotonicity exists but is low for `Oracle-K` (`4 / 300`) and
@@ -624,13 +624,13 @@ What it established:
    built-in `mean_idlekv_repair_ms` summary alone
 5. explicitly verify after the run that:
    - `B_match` stays nonzero overall
-   - `IdleKV > B_match` overall
+   - `RepairKV > B_match` overall
    - `Random-K` and `Oldest-K` stay near baseline
    - `idlekv_restored_count == K` across rows
    - `random_k_restored_count == K` across rows
    - `oldest_k_restored_count == K` across rows
    - `oracle_k_restored_count <= K` across rows in `gold_spans` mode
-   - there is no systematic `IdleKV > A` pattern
+   - there is no systematic `RepairKV > A` pattern
 
 ### Full `6q` panel
 
@@ -646,7 +646,7 @@ This should be treated as a harder same-family suite panel, not as a pooled
 family average across unrelated tasks or as a single-axis difficulty control.
 The right justification for `B_base = 18432` is not aesthetics; it is the
 smallest calibrated hard-task budget where the matched no-repair baseline is
-nonzero overall, `IdleKV` already lifts above it, and the gold-span oracle
+nonzero overall, `RepairKV` already lifts above it, and the gold-span oracle
 still leaves visible headroom.
 
 #### Acceptance rule for the finished `6q` panel
@@ -656,19 +656,19 @@ the following hold:
 
 - pooled full-cache reference `A` is at least `0.95`;
 - pooled `B_match` is at least `0.10` at the right edge of the sweep;
-- pooled lift `IdleKV - B_match` is at least `0.10` at `K=48` and at
+- pooled lift `RepairKV - B_match` is at least `0.10` at `K=48` and at
   least `0.20` at `K=96`;
 - pooled `Random-K` and `Oldest-K` are each at least `0.10` below
-  pooled `IdleKV` at `K=96`;
-- pooled `Oracle-K - IdleKV` is at least `0.05` at `K=48`;
-- the bootstrap lower bound for pooled `IdleKV` at `K=96` exceeds the
+  pooled `RepairKV` at `K=96`;
+- pooled `Oracle-K - RepairKV` is at least `0.05` at `K=48`;
+- the bootstrap lower bound for pooled `RepairKV` at `K=96` exceeds the
   bootstrap upper bound for pooled `B_match` at `K=96`; and
-- every individual `6q` split has pooled `IdleKV - B_match > 0` at
+- every individual `6q` split has pooled `RepairKV - B_match > 0` at
   `K=96`; and
-- every individual `6q` split has pooled `IdleKV - B_match >= 0.10` at
+- every individual `6q` split has pooled `RepairKV - B_match >= 0.10` at
   `K=128`; and
-- every individual `6q` split has pooled `IdleKV - Random-K > 0` and
-  `IdleKV - Oldest-K > 0` at `K=128`.
+- every individual `6q` split has pooled `RepairKV - Random-K > 0` and
+  `RepairKV - Oldest-K > 0` at `K=128`.
 
 If the finished `6q` run instead looks too harsh or too flat overall, the
 first fallback is **not** a task change. The first fallback is one calibrated
@@ -719,7 +719,7 @@ These should be part of the standard Phase 7 run loop, not an afterthought.
   --base-context-budget 16384 \
   --recency-window 128 \
   --k 8 16 24 32 48 64 80 96 128 \
-  --conditions A B B_match IdleKV Random-K Oldest-K Oracle-K \
+  --conditions A B B_match RepairKV Random-K Oldest-K Oracle-K \
   --query-scoring-mode exact_q \
   --oracle-mode gold_spans
 ```
@@ -734,7 +734,7 @@ These should be part of the standard Phase 7 run loop, not an afterthought.
   --base-context-budget 18432 \
   --recency-window 128 \
   --k 8 16 24 32 48 64 80 96 128 \
-  --conditions A B B_match IdleKV Random-K Oldest-K Oracle-K \
+  --conditions A B B_match RepairKV Random-K Oldest-K Oracle-K \
   --query-scoring-mode exact_q \
   --oracle-mode gold_spans
 ```
@@ -749,7 +749,7 @@ These should be part of the standard Phase 7 run loop, not an afterthought.
   --base-context-budget 14336 \
   --recency-window 128 \
   --k 8 16 32 48 64 \
-  --conditions A B B_match IdleKV Random-K Oldest-K Oracle-K \
+  --conditions A B B_match RepairKV Random-K Oldest-K Oracle-K \
   --query-scoring-mode exact_q \
   --oracle-mode gold_spans
 ```

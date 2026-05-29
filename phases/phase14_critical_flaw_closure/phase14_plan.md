@@ -77,7 +77,7 @@ that the cheaper scorer keeps quality under the same controls.
 **Current audit.**
 
 - Existing proxy artifacts are useful but not main-ready: they include
-  `A/B/B_match/IdleKV` only, not `Random-K`, `Oldest-K`, or `Gold-K`.
+  `A/B/B_match/RepairKV` only, not `Random-K`, `Oldest-K`, or `Gold-K`.
 - 4Q proxy at K=96 passes the speed/quality gate and even exceeds exact quality.
   That is a positive signal, but it also means proxy should be described as a
   heuristic scorer, not as a strict approximation to exact query projections.
@@ -85,21 +85,21 @@ that the cheaper scorer keeps quality under the same controls.
   exact-gain gate (`0.833` versus the current `0.850` threshold).
 
 **Target paper object.** One compact appendix or main-text quality-latency
-frontier with exact IdleKV, proxy IdleKV, matched no-repair, content-agnostic
+frontier with exact RepairKV, proxy RepairKV, matched no-repair, content-agnostic
 controls, and Gold-K headroom.
 
 **Smoke.** 4Q and 6Q, `K={48,96,128}`, `n=4`, proxy scoring,
-`A/B/B_match/Random-K/Oldest-K/IdleKV/Oracle-K`.
+`A/B/B_match/Random-K/Oldest-K/RepairKV/Oracle-K`.
 
 **Promotion gate.**
 
-- Proxy IdleKV gain at K=96 is at least `0.10`.
+- Proxy RepairKV gain at K=96 is at least `0.10`.
 - Proxy retains at least `0.80` of exact gain at K=96 for 6Q and at least
   `0.85` for 4Q.
 - Proxy p50 total repair time is at least `3x` faster than exact.
-- Random-K and Oldest-K do not close more than `0.10` of the IdleKV gain at
+- Random-K and Oldest-K do not close more than `0.10` of the RepairKV gain at
   the promoted operating point.
-- Gold-K covers IdleKV or the violation is explained as a gold-span reference
+- Gold-K covers RepairKV or the violation is explained as a gold-span reference
   limitation.
 
 **Locked run if smoke passes.** Repeat with `n=100` for 4Q/6Q at the smallest
@@ -110,8 +110,8 @@ otherwise `K={48,96,128}`.
 
 **Risk.** The specificity panel shows that full-budget Q2-time reselection
 (`Refresh-K`) reaches the Gold-K reference at the current K=48 point. If the
-paper frames IdleKV as the best repair algorithm, this is a serious weakness.
-If the paper frames IdleKV as an incremental, low-mutation repair primitive,
+paper frames RepairKV as the best repair algorithm, this is a serious weakness.
+If the paper frames RepairKV as an incremental, low-mutation repair primitive,
 Refresh-K becomes useful headroom evidence.
 
 **Target paper object.** Either:
@@ -121,11 +121,11 @@ Refresh-K becomes useful headroom evidence.
 - an appendix frontier showing how often Refresh-K dominates and what it costs.
 
 **Smoke.** 4Q, exact scoring, `K={24,48,80,96}`, `n=2`,
-`A/B/B_match/StaleQ-K/WrongQ-K/Refresh-K/IdleKV/Oracle-K`.
+`A/B/B_match/StaleQ-K/WrongQ-K/Refresh-K/RepairKV/Oracle-K`.
 
 **Promotion gate.**
 
-- If Refresh-K dominates IdleKV for most of the tested K values, do not hide it. Reframe the
+- If Refresh-K dominates RepairKV for most of the tested K values, do not hide it. Reframe the
   method section and results around incremental repair versus full reselection.
 - If Refresh-K is only dominant in the current specificity point, keep the
   single-point figure but explain the boundary clearly.
@@ -145,8 +145,8 @@ If opened, smoke a harder non-saturated Llama setting first rather than scaling
 the saturated 6Q branch.
 
 **Promotion gate for any future cross-model figure.** Full-cache score at least
-`0.90`, matched no-repair gap at least `0.20`, IdleKV improves over matched and
-content-agnostic controls at two K values, Gold-K covers IdleKV, and the curve
+`0.90`, matched no-repair gap at least `0.20`, RepairKV improves over matched and
+content-agnostic controls at two K values, Gold-K covers RepairKV, and the curve
 is not flat at saturation.
 
 **Locked run if a future smoke passes.** Repeat the calibrated non-saturated
@@ -170,7 +170,7 @@ Tests must cover the fixed-buffer update invariant before any GPU work.
    deterministic, and evicted rows are written to the offloaded store.
 2. GPU smoke only after the CPU invariant passes: 4Q, `B=16384`, `n=2`,
    `K={48,96}`, conditions
-   `A/B/B_match/Random-K/Oldest-K/IdleKV/Oracle-K`.
+   `A/B/B_match/Random-K/Oldest-K/RepairKV/Oracle-K`.
 
 **Promotion gate.** The branch can enter the main paper only if it is a faithful
 named algorithm implementation and not merely an inspired retention rule. If
@@ -235,14 +235,14 @@ trace.
 weak ablations would clutter the paper.
 
 **Smoke.** 4Q exact scoring, `n=1`, `K={24,48,96}`, conditions
-`A/B/B_match/IdleKV/IdleKV-Coverage/IdleKV-MMR/Oracle-K`.
+`A/B/B_match/RepairKV/RepairKV-Coverage/RepairKV-MMR/Oracle-K`.
 
-**Promotion gate.** Promote only if a variant improves current IdleKV by at
+**Promotion gate.** Promote only if a variant improves current RepairKV by at
 least `0.05` at mid-K without hurting high-K by more than `0.02`, and if the
 Gold-K gap narrows for a clear reason.
 
 **Current implementation gate.** The Phase 14 summarizer/evaluator must export
-`IdleKV-Coverage` and `IdleKV-MMR` columns before this smoke can be trusted.
+`RepairKV-Coverage` and `RepairKV-MMR` columns before this smoke can be trusted.
 Without those columns, the run is invalid even if the GPU artifact exists.
 
 **Locked run if smoke passes.** Repeat the same setting with `n=24` using

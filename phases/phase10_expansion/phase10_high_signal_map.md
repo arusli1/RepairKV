@@ -16,7 +16,7 @@ live until its smoke or locked run fails a clear gate.
      `n=100` K-grid run is included neutrally as the low-query-count
      edge case.
    - Figure: one-column raw-score overlay over restore budget. Solid
-     lines show IdleKV for 2Q/4Q/6Q/8Q; faint dotted lines show matched
+     lines show RepairKV for 2Q/4Q/6Q/8Q; faint dotted lines show matched
      no-repair. Direct right-side labels report query count and the
      `K=96` score difference. Gold-K and Random-K/Oldest-K stay out of
      the main overlay and are summarized in prose/appendix views.
@@ -29,9 +29,9 @@ live until its smoke or locked run fails a clear gate.
      or is any buffer reinsertion enough?
    - Current evidence: locked `n=24`, `K=48` specificity run is positive.
    - Figure: score gain over matched no-repair plus paired win/tie/loss
-     rates for StaleQ-K, donor-query repair, IdleKV, Refresh-buffered,
+     rates for StaleQ-K, donor-query repair, RepairKV, Refresh-buffered,
      and Gold-K.
-   - Promotion gate: IdleKV must beat stale/donor controls; Refresh-buffered
+   - Promotion gate: RepairKV must beat stale/donor controls; Refresh-buffered
      must be described as a bounded Q2-time buffered reselection comparator,
      not a systems-fair full recompute baseline.
 
@@ -40,11 +40,11 @@ live until its smoke or locked run fails a clear gate.
      and returns, closer to agent workflows than a single Q2 handoff?
    - Current evidence: the harder `T=5` locked run is positive versus
      matched, Random-K, and Oldest-K but not clean enough for the main
-     paper because StaleQ-K closes part of the gap. At `K=96`, IdleKV
+     paper because StaleQ-K closes part of the gap. At `K=96`, RepairKV
      scores `0.992` versus `0.517` matched no-repair and
      `0.525/0.542` Random-K/Oldest-K, while StaleQ-K reaches `0.767`.
    - Figure: one-column turn trajectory over turns `1..T`, with score gain
-     over matched no-repair on the y-axis. Plot IdleKV, StaleQ-K,
+     over matched no-repair on the y-axis. Plot RepairKV, StaleQ-K,
      Random-K/Oldest-K control band, and Gold-K at the selected K. If both
      `K=48` and `K=96` are useful, use two tiny panels rather than one
      overplotted axis. Put cache-state heatmaps in appendix unless they
@@ -59,7 +59,7 @@ live until its smoke or locked run fails a clear gate.
    - Current evidence: 6Q final operating-regime heatmap is useful but
      visually and semantically secondary to specificity and multi-turn.
    - Figure: one-column heatmap or small multiple showing fraction of
-     Gold-K headroom recovered by IdleKV over base budget and restore budget.
+     Gold-K headroom recovered by RepairKV over base budget and restore budget.
    - Placement gate: main only if there is room after frontier, specificity,
      and a positive multi-turn figure; otherwise appendix.
 
@@ -69,7 +69,7 @@ live until its smoke or locked run fails a clear gate.
    - Question: is repair a SnapKV artifact?
    - Current evidence: StreamingLLM smoke is weak but interpretable. The
      H2O-inspired accumulated-attention branch has passed a locked `n=12`
-     check at `B=16384`, with IdleKV scoring `0.514` at `K=48` and
+     check at `B=16384`, with RepairKV scoring `0.514` at `K=48` and
      `0.917` at `K=96` versus `0.208` matched no-repair.
    - Figure: compact appendix robustness plot only. The implementation
      is H2O-inspired, not a canonical H2O reproduction, so the paper should
@@ -81,19 +81,19 @@ live until its smoke or locked run fails a clear gate.
    - Current evidence: Qwen2.5-0.5B remains unusable because full-cache
      accuracy is zero. Qwen2.5-3B-Instruct passed the ability gate,
      repair smoke, and locked `n=12` follow-up.
-   - Locked result: at `B=8192`, IdleKV reaches `1.000` at `K=96` versus
+   - Locked result: at `B=8192`, RepairKV reaches `1.000` at `K=96` versus
      `0.278` matched no-repair and `0.292/0.264` Random-K/Oldest-K. At
-     `B=16384`, IdleKV reaches `1.000` at `K=96` versus `0.611` matched
+     `B=16384`, RepairKV reaches `1.000` at `K=96` versus `0.611` matched
      no-repair and `0.625/0.611` Random-K/Oldest-K. Full-cache score is
-     `1.000` and Gold-K covers IdleKV at both budgets.
+     `1.000` and Gold-K covers RepairKV at both budgets.
    - Decision: integrate as appendix portability evidence only. Keep the
      main claim at "one primary model"; this is a positive cross-model
      size-transfer check within the Qwen family, not a broad transfer
      study.
    - True diversity follow-up: `meta-llama/Llama-3.1-8B-Instruct` passed
      the ability gate, repair smoke, and locked `n=12` follow-up. At
-     `B=8192`, IdleKV reaches `1.000` versus `0.028` matched no-repair
-     and near-zero content-agnostic controls. At `B=16384`, IdleKV reaches
+     `B=8192`, RepairKV reaches `1.000` versus `0.028` matched no-repair
+     and near-zero content-agnostic controls. At `B=16384`, RepairKV reaches
      `1.000` versus `0.500` matched no-repair, with Random-K and Oldest-K
      tracking matched. Decision: include as an appendix cross-family
      portability check, not broad model-family robustness.
@@ -107,8 +107,8 @@ live until its smoke or locked run fails a clear gate.
      backfill, diverse anchors, and fixed-budget behavior.
    - Smoke: 4Q, `B=16384`, `K={24,48,96}`, `n=1` first via
      `run_selector_variant_smoke.sh`; scale to `n=4` only if one variant
-     beats current IdleKV without adding confusing clutter.
-   - Gate: a new selector beats current IdleKV by at least `0.05` at mid-K
+     beats current RepairKV without adding confusing clutter.
+   - Gate: a new selector beats current RepairKV by at least `0.05` at mid-K
      without hurting high-K by more than `0.02`; otherwise keep the method
      simple and do not add ablation clutter.
    - Current priority: not a final-phase blocker. Run only after the
@@ -131,7 +131,7 @@ live until its smoke or locked run fails a clear gate.
      against MiKV/MixKVQ-style static/query-aware mixed precision, with a
      real `QuantizedCache` baseline where possible.
    - Smoke gate: low-bit baseline must degrade, Gold-precision must show
-     selective recoverability, and IdleKV-Precision must beat static/random/
+     selective recoverability, and RepairKV-Precision must beat static/random/
      oldest precision controls at the same active byte budget.
    - Placement: future-work or appendix unless the redesigned smoke is very
      clean and claims are explicitly quality/byte, not latency.
@@ -162,7 +162,7 @@ live until its smoke or locked run fails a clear gate.
 
 1. Keep the 2Q/4Q/6Q/8Q full K-grid raw-score frontier as the default
    main plot. The current main-paper design uses one overlay axis:
-   solid IdleKV curves, faint matched no-repair traces, and direct
+   solid RepairKV curves, faint matched no-repair traces, and direct
    query-count labels with `K=96` repair differences.
 2. Keep Random-K, Oldest-K, and Gold-K out of the main overlay to avoid
    spaghetti; report them in the Results prose and appendix milestone
@@ -173,7 +173,7 @@ live until its smoke or locked run fails a clear gate.
 4. Keep the H2O-inspired compressor check in the appendix unless a reviewer
    explicitly asks for broader compressor coverage in the main text.
 5. Keep multi-turn as appendix-quality unless a cleaner follow-up
-   separates IdleKV from StaleQ-K.
+   separates RepairKV from StaleQ-K.
 6. Run selector variant smoke only if the higher-priority portability
    branch leaves GPU room.
 7. Revisit dynamic precision as Phase 10b with a redesigned page/channel

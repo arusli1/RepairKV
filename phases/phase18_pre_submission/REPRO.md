@@ -35,7 +35,7 @@ Total wall-clock: ~3-4 hours on a single 96GB Blackwell GPU.
 1. K-sweep redo K=96: RepairKV ≈ 0.917, B_match ≈ 0.21, PageSummary ≈ 0.19 (post-fix), Oracle-K ≈ 1.0.
 2. Tight sweep at multiplier 0.05: RepairKV 0.917 vs Refresh-K-budgeted 0.389 (Δ=+0.528, Holm p<1e-4).
 3. Tight sweep at multiplier 1.05: RepairKV 0.917 vs Refresh-K-budgeted 1.000 (Δ=-0.083, matches clause).
-4. GPU verify (PHASE18_SCORE_ON_GPU=1): IdleKV mean within ±0.02 of CPU K-sweep.
+4. GPU verify (PHASE18_SCORE_ON_GPU=1): RepairKV mean within ±0.02 of CPU K-sweep.
 5. Llama K=32: RepairKV > B_match by ≥0.1 (cross-model robustness).
 
 ## Outputs after full pipeline

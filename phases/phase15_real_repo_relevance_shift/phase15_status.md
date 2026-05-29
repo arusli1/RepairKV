@@ -7,7 +7,7 @@ Last updated: 2026-05-04 22:39 UTC.
 Phase 15 is complete for this paper pass. No Phase 15 tmux job is active.
 The bounded `phase15_filegated_full` follow-up finished on the frozen v13
 manifest with two locality-aware diagnostic selectors,
-`FileGatedIdleKV-K` and `LexicalAnchor-K`, at `K={96,192}`. It did not build a
+`FileGatedRepairKV-K` and `LexicalAnchor-K`, at `K={96,192}`. It did not build a
 new manifest or change the task distribution.
 
 The first strict RepoDelta-Edge ability smoke,
@@ -36,9 +36,9 @@ The v13 whole-manifest repair artifact is strong against deployable and
 content-agnostic controls but fails the strict main-promotion gate because the
 label-assisted locality reference is stronger:
 
-- `K=96`: IdleKV `0.5625`, matched `0.1875`, random `0.2083`, oldest/stale/
+- `K=96`: RepairKV `0.5625`, matched `0.1875`, random `0.2083`, oldest/stale/
   wrong-event `0.1667`, ToolFile `0.2083`, AnchorWindow `0.8958`.
-- `K=192`: IdleKV `0.7292`, matched `0.1875`, random/oldest/stale/wrong-event
+- `K=192`: RepairKV `0.7292`, matched `0.1875`, random/oldest/stale/wrong-event
   `0.1667`, ToolFile `0.1875`, AnchorWindow `0.8958`.
 - 2000-draw paired repo-bootstrap lower bounds are positive against matched,
   random, oldest, stale, wrong-event, and ToolFile at `K=192`.
@@ -50,11 +50,11 @@ label-assisted locality reference is stronger:
 The bounded locality-aware follow-up passed the explicit paper-integration
 gate:
 
-- `K=96`: FileGatedIdleKV `0.7292`, IdleKV `0.5625`, ToolFile `0.2083`,
+- `K=96`: FileGatedRepairKV `0.7292`, RepairKV `0.5625`, ToolFile `0.2083`,
   AnchorWindow `0.8958`; LexicalAnchor `0.2708`.
-- `K=192`: FileGatedIdleKV `0.8333`, IdleKV `0.7292`, ToolFile `0.1875`,
+- `K=192`: FileGatedRepairKV `0.8333`, RepairKV `0.7292`, ToolFile `0.1875`,
   AnchorWindow `0.8958`; LexicalAnchor `0.3958`.
-- FileGated improves over IdleKV by `+0.1042` at `K=192`, beats ToolFile by
+- FileGated improves over RepairKV by `+0.1042` at `K=192`, beats ToolFile by
   `+0.6458`, and remains below the label-assisted AnchorWindow reference by
   `-0.0625`.
 - The event cue contains the target file path for all FileGated rows, all
@@ -106,7 +106,7 @@ Critical flaws found and resolved into the plan:
 - Positive but not promoted: Coverage selector. It shows algorithmic selection
   headroom but lacks a dedicated full K-grid paper figure.
 - Boundary evidence: Refresh-buffered shows stronger full-budget reselection can
-  outperform incremental IdleKV. It is a method-boundary comparator, not a
+  outperform incremental RepairKV. It is a method-boundary comparator, not a
   deployable baseline or theoretical optimum.
 - Negative/deferred: quantized row-store promotion, Qwen2.5-0.5B transfer,
   exact named eviction reproductions, trace-scheduled idle-window benchmark,
@@ -191,8 +191,8 @@ Critical flaws found and resolved into the plan:
   `phase15_repair_v11_selected_gap_q1clean_n6_k48_96`, with all required
   controls. This is a design diagnostic, not final evidence.
 - Q1-clean repair smoke finished with a small positive signal:
-  - `K=48`: IdleKV `1/6`, all controls `0/6`.
-  - `K=96`: IdleKV `2/6`, all controls `0/6`.
+  - `K=48`: RepairKV `1/6`, all controls `0/6`.
+  - `K=96`: RepairKV `2/6`, all controls `0/6`.
   ToolFile-K recovered `0/6`, so the positive cases are not explained by a
   simple file-local restore heuristic. The run is still not paper evidence
   because it is outcome-selected and has only four repos.
@@ -207,13 +207,13 @@ Critical flaws found and resolved into the plan:
   without requiring `Q1=1`: `phase15_repair_v11_selected_gap_n11_k48_96`.
   This tests whether the mechanism signal persists across more examples/repos.
 - The 11-row discovery repair smoke finished:
-  - `K=48`: IdleKV `1/11`, Random `1/11`, all other controls `0/11`.
-  - `K=96`: IdleKV `2/11`, all controls `0/11`.
+  - `K=48`: RepairKV `1/11`, Random `1/11`, all other controls `0/11`.
+  - `K=96`: RepairKV `2/11`, all controls `0/11`.
   The result is directionally useful but weak; it supports more diagnostic
   exploration, not a locked main-paper claim.
 - High-K diagnostic on the same 11 discovery rows finished:
-  - `K=128`: IdleKV `3/11`, all controls `0/11`.
-  - `K=192`: IdleKV `5/11`, Random `1/11`, all other controls including
+  - `K=128`: RepairKV `3/11`, all controls `0/11`.
+  - `K=192`: RepairKV `5/11`, Random `1/11`, all other controls including
     ToolFile `0/11`.
   This suggests the Edge signal is budget-limited and justifies one fresh
   preregistered pilot with `K=192`; it still does not justify promoting
@@ -295,7 +295,7 @@ Critical flaws found and resolved into the plan:
   `exclude_cue_and_answer_retention`, and `strict_repair_eligible`.
 - Updated the repair audit so `AnchorWindow-K` is interpreted as a
   label-assisted locality reference rather than a deployable runtime baseline.
-  The strict main-paper gate records whether IdleKV is competitive with this
+  The strict main-paper gate records whether RepairKV is competitive with this
   reference; if AnchorWindow dominates, Phase 15 should stay appendix/future
   work even if deployable/content-agnostic controls are positive.
 - Added repo-level repair-audit summaries for each comparison: positive and
@@ -306,7 +306,7 @@ Critical flaws found and resolved into the plan:
   replaced with SpanRef-K.
 - Ran the one allowed whole-manifest diagnostic repair run:
   `phase15_repair_v13_whole_k96_192_anchor.json`, conditions
-  `A/B/B_match/IdleKV-EventOnly-K/Random-K/Oldest-K/StaleCue-K/WrongEvent-K/
+  `A/B/B_match/RepairKV-EventOnly-K/Random-K/Oldest-K/StaleCue-K/WrongEvent-K/
   ToolFile-K/AnchorWindow-K`, `K={96,192}`.
 - Tightened the repair audit after static review:
   - static manifest audit must pass for every used result row;
@@ -397,7 +397,7 @@ Only if both checks are clean, run ability in tmux:
 
 ```bash
 tmux new-session -d -s phase15_ability_v13 \
-  "cd /home/ubuntu/IdleKV && PYTHONUNBUFFERED=1 .venv/bin/python -m phases.phase15_real_repo_relevance_shift.scripts.run_phase15_manifest \
+  "cd /home/ubuntu/RepairKV && PYTHONUNBUFFERED=1 .venv/bin/python -m phases.phase15_real_repo_relevance_shift.scripts.run_phase15_manifest \
     --manifest phases/phase15_real_repo_relevance_shift/results/swebench_dev/repodelta_edge_swebench_manifest_probe_v13_callsite_q1redacted.jsonl \
     --protocol phases/phase15_real_repo_relevance_shift/results/swebench_dev/phase15_protocol_v13_callsite_q1redacted.json \
     --output phases/phase15_real_repo_relevance_shift/results/swebench_dev/phase15_ability_v13_callsite_q1redacted_n48_k192.json \
@@ -418,12 +418,12 @@ Completed diagnostic repair run command:
 
 ```bash
 tmux new-session -d -s phase15_repair_v13_full \
-  "cd /home/ubuntu/IdleKV && stdbuf -oL -eL .venv/bin/python -m phases.phase15_real_repo_relevance_shift.scripts.run_phase15_manifest \
+  "cd /home/ubuntu/RepairKV && stdbuf -oL -eL .venv/bin/python -m phases.phase15_real_repo_relevance_shift.scripts.run_phase15_manifest \
     --manifest phases/phase15_real_repo_relevance_shift/results/swebench_dev/repodelta_edge_swebench_manifest_probe_v13_callsite_q1redacted.jsonl \
     --protocol phases/phase15_real_repo_relevance_shift/results/swebench_dev/phase15_protocol_v13_callsite_q1redacted_repair_anchor.json \
     --output phases/phase15_real_repo_relevance_shift/results/swebench_dev/phase15_repair_v13_whole_k96_192_anchor.json \
     --stage repair_v13_whole_anchor --k 96 192 \
-    --conditions A B B_match IdleKV-EventOnly-K Random-K Oldest-K StaleCue-K WrongEvent-K ToolFile-K AnchorWindow-K \
+    --conditions A B B_match RepairKV-EventOnly-K Random-K Oldest-K StaleCue-K WrongEvent-K ToolFile-K AnchorWindow-K \
     2>&1 | tee phases/phase15_real_repo_relevance_shift/results/swebench_dev/phase15_repair_v13_whole_k96_192_anchor.log"
 ```
 

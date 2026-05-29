@@ -1,6 +1,6 @@
 # Phase 2: KV Cache Load Verification
 
-This folder contains the Phase 2 implementation for the IdleKV plan: a clean
+This folder contains the Phase 2 implementation for the RepairKV plan: a clean
 KV-cache access layer, a repeatable test/measurement harness, and the
 artifacts requested by `instructions.md`.
 

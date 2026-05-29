@@ -7,7 +7,7 @@ Last updated: 2026-05-04 20:26 UTC.
 Phase 15 targets the paper's highest-value remaining evidence gap: the main
 quality results are controlled and rigorous, but they are synthetic MQ-NIAH.
 The goal is one controlled real-repository diagnostic that keeps the core
-IdleKV causal structure: a full context has already been prefetched, the active
+RepairKV causal structure: a full context has already been prefetched, the active
 cache is compressed after turn 1, a new pre-turn-2 cue shifts relevance, and
 repair restores a small number of evicted rows under a matched resumed active
 budget.
@@ -27,7 +27,7 @@ exception identifier. The answer is a short identifier that appears in the
 already-seen repository context, not in the tool event and not in the Q2 wording.
 Q1 asks about an unrelated file, biasing the compressed post-Q1 cache away from
 Q2. A tool-event-like cue then names the new file/region or anchor and includes
-an answer-redacted source statement. IdleKV may use that cue to score evicted
+an answer-redacted source statement. RepairKV may use that cue to score evicted
 rows and restore K rows before Q2 decoding.
 
 Primary implementation target:
@@ -111,12 +111,12 @@ not tool-event-conditioned repair.
 
 Primary estimand:
 
-`Delta_K = E[Y(IdleKV_event,K) - Y(B_match,K)]`, where Y is strict exact Q2
+`Delta_K = E[Y(RepairKV_event,K) - Y(B_match,K)]`, where Y is strict exact Q2
 identifier accuracy and `B_match` has the same resumed active budget.
 
 Specificity estimand:
 
-`Gamma_K = E[Y(IdleKV_event,K) - Y(WrongEvent_or_StaleEvent,K)]`.
+`Gamma_K = E[Y(RepairKV_event,K) - Y(WrongEvent_or_StaleEvent,K)]`.
 
 ## Relation To Prior Work
 
@@ -217,7 +217,7 @@ No paper-facing GPU run should start until these exist and pass CPU tests:
    persistence, and runner dry-run plumbing.
 
 Current gate status: the redacted-unique v11 manifest improved the recoverable
-gap, and selected-row diagnostics showed an IdleKV signal at higher K, but v11
+gap, and selected-row diagnostics showed an RepairKV signal at higher K, but v11
 and v12 did not satisfy the paper-facing gate. The fresh v12 pilot over 36 rows
 created headroom (`A-B_match=0.528`) but failed full-cache ability
 (`A=0.722`), had three cue-only hits, and had answer-token retention in some
@@ -235,14 +235,14 @@ Required for any paper-facing run:
 - `B_match`: no repair, same resumed active footprint as K-row repair.
 - `Random-K`: random K rows from the same evicted warm store.
 - `Oldest-K`: oldest K eligible rows from the same evicted warm store.
-- `IdleKV-EventOnly-K`: main method, scores evicted rows using the tool cue only.
+- `RepairKV-EventOnly-K`: main method, scores evicted rows using the tool cue only.
 - `StaleCue-K`: restore using Q1/stale cue.
 - `WrongEvent-K`: restore using a donor/wrong event cue.
 
 Strongly recommended if runtime permits:
 
 - `ToolFile-K`: restore rows only from file(s) named in the tool cue. This tests
-  whether IdleKV is better than a simple file-pointer heuristic.
+  whether RepairKV is better than a simple file-pointer heuristic.
 - `AnchorWindow-K`: restore evicted rows nearest to the annotated source/event
   line, then backfill to the same K. This is a label-assisted locality
   reference, not a deployable runtime baseline. It is mandatory for diagnosing
@@ -337,17 +337,17 @@ Main-paper promotion requires a locked run satisfying all of:
   per-row gate `A=1`, `B_match=0`, `CueOnly=0`, `Q1=1`, real eviction, and zero
   B/B_match answer-token retention. The selector must write all rejection
   reasons, and the resulting manifest is not confirmatory evidence.
-- Mean `IdleKV-EventOnly - B_match >= 0.10` at `K*=192` and nonnegative at
+- Mean `RepairKV-EventOnly - B_match >= 0.10` at `K*=192` and nonnegative at
   adjacent `K=96`.
-- Bootstrap 95% CI lower bound is positive for `IdleKV-EventOnly - B_match`,
-  `IdleKV-EventOnly - Random-K`, and `IdleKV-EventOnly - Oldest-K` at
+- Bootstrap 95% CI lower bound is positive for `RepairKV-EventOnly - B_match`,
+  `RepairKV-EventOnly - Random-K`, and `RepairKV-EventOnly - Oldest-K` at
   `K*=192`.
-- `IdleKV-EventOnly` beats `StaleCue-K` and `WrongEvent-K` by a positive paired
+- `RepairKV-EventOnly` beats `StaleCue-K` and `WrongEvent-K` by a positive paired
   CI or at least a predeclared practical margin.
-- `IdleKV-EventOnly` beats `ToolFile-K` by a predeclared practical margin.
+- `RepairKV-EventOnly` beats `ToolFile-K` by a predeclared practical margin.
   `AnchorWindow-K` is reported separately as a label-assisted locality
-  reference, not as a deployable baseline. If IdleKV matches or beats it,
-  the result supports a stronger main-paper selection claim; if IdleKV beats
+  reference, not as a deployable baseline. If RepairKV matches or beats it,
+  the result supports a stronger main-paper selection claim; if RepairKV beats
   deployable controls but loses to AnchorWindow, allow only a cautious
   preliminary main paragraph plus appendix details, and frame the remaining gap
   as headroom relative to a label-assisted locality reference.
@@ -369,7 +369,7 @@ Preferred integration:
 - Add one one-column main figure or compact table only if the result is clean
   and visually strong. Preferred table columns: condition, score at `K*=192`,
   gain over matched no-repair, paired repo-clustered interval, and positive-repo
-  count. Group `A/B/B_match`, deployable controls, `IdleKV-EventOnly`, and the
+  count. Group `A/B/B_match`, deployable controls, `RepairKV-EventOnly`, and the
   label-assisted `AnchorWindow-K` reference separately rather than mixing all
   rows as equivalent baselines.
 - Replace the lower-priority retention-rule sensitivity figure if necessary.

@@ -120,7 +120,7 @@ Run the robust paper sweep in tmux with:
 ```bash
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 tmux new-session -d -s runtime_latency_envelope \
-  "cd /home/ubuntu/IdleKV && IDLEKV_RUNTIME_STAMP=${STAMP} TRIALS=80 WARMUP_TRIALS=5 \
+  "cd /home/ubuntu/RepairKV && IDLEKV_RUNTIME_STAMP=${STAMP} TRIALS=80 WARMUP_TRIALS=5 \
    phases/phase4_eviction_buffer/scripts/run_runtime_latency_envelope.sh \
    2>&1 | tee phases/phase4_eviction_buffer/results/runtime_capacity/logs/runtime_latency_envelope_${STAMP}.log"
 ```

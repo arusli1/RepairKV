@@ -22,7 +22,7 @@ Main claim supported:
 
 Final pooled exact `4q` numbers:
 
-| K | B | B_match | IdleKV | Random-K | Oldest-K | Oracle-K |
+| K | B | B_match | RepairKV | Random-K | Oldest-K | Oracle-K |
 |---|---:|---:|---:|---:|---:|---:|
 | 8   | 0.243 | 0.240 | 0.240 | 0.240 | 0.223 | 0.442 |
 | 16  | 0.243 | 0.247 | 0.247 | 0.243 | 0.225 | 0.580 |
@@ -93,7 +93,7 @@ Shared settings:
   - `A`
   - `B`
   - `B_match`
-  - `IdleKV`
+  - `RepairKV`
   - `Random-K`
   - `Oldest-K`
   - `Oracle-K`
@@ -109,7 +109,7 @@ Shared settings:
 - `3q` remains optional appendix-only sanity evidence.
 - `6q` is the right harder extension, but it needs a larger `B_base` than `4q`.
 - `B_base = 18432` for `6q` should be justified as the smallest calibrated
-  hard-task budget with a nonzero matched baseline, visible `IdleKV` lift, and
+  hard-task budget with a nonzero matched baseline, visible `RepairKV` lift, and
   preserved oracle headroom, not as an aesthetic choice.
 - `6q` should be described as a harder same-family extension, not as a perfectly matched single-axis difficulty control, because it also changes turn lengths and answer budget.
 - if `6q` is promoted into the main text, it should be framed as a
@@ -130,7 +130,7 @@ Shared settings:
 - that miss is not a decode-budget artifact; the gold answer is well under the
   split turn's `48`-token cap.
 - the post-rewrite `6q` smoke remains usable at the widened `K` axis through
-  `128`: pooled `B_match` rises from `0.312` to `0.354`, while `IdleKV` rises
+  `128`: pooled `B_match` rises from `0.312` to `0.354`, while `RepairKV` rises
   from `0.375` to `0.979` and `Oracle-K` reaches `1.0`.
 - `mq_niah_3q @ 14336` works, but is coarse and should be optional.
 - the stronger harder-task design is a small `6q` clean suite, not just one split:
@@ -152,7 +152,7 @@ Shared settings:
 - the frontier export now includes deterministic bootstrap confidence bounds in
   the `*_overall.csv` and `*_by_split.csv` files via `*_lo` / `*_hi` columns.
 - final-active overlap should be treated as a mechanism diagnostic, not a
-  surrogate for score: on the exact `4q` bridge run, `IdleKV` reaches nearly
+  surrogate for score: on the exact `4q` bridge run, `RepairKV` reaches nearly
   perfect quality before final-active overlap reaches `1.0`, because answering
   the values-only NIAH question does not require recovering every annotated
   token in each gold span.
@@ -173,20 +173,20 @@ following hold:
 
 - pooled full-cache reference `A` is at least `0.95`;
 - pooled `B_match` is at least `0.10` at the right edge of the sweep;
-- pooled lift `IdleKV - B_match` is at least `0.10` at `K=48` and at
+- pooled lift `RepairKV - B_match` is at least `0.10` at `K=48` and at
   least `0.20` at `K=96`;
 - pooled `Random-K` and `Oldest-K` are each at least `0.10` below
-  pooled `IdleKV` at `K=96`;
-- pooled `Oracle-K - IdleKV` is at least `0.05` at `K=48`, so useful
+  pooled `RepairKV` at `K=96`;
+- pooled `Oracle-K - RepairKV` is at least `0.05` at `K=48`, so useful
   headroom still exists before the right edge; and
-- the bootstrap lower bound for pooled `IdleKV` at `K=96` exceeds the
+- the bootstrap lower bound for pooled `RepairKV` at `K=96` exceeds the
   bootstrap upper bound for pooled `B_match` at `K=96`; and
-- every individual `6q` split has pooled `IdleKV - B_match > 0` at
+- every individual `6q` split has pooled `RepairKV - B_match > 0` at
   `K=96`; and
-- every individual `6q` split has pooled `IdleKV - B_match >= 0.10` at
+- every individual `6q` split has pooled `RepairKV - B_match >= 0.10` at
   `K=128`; and
-- every individual `6q` split has pooled `IdleKV - Random-K > 0` and
-  `IdleKV - Oldest-K > 0` at `K=128`.
+- every individual `6q` split has pooled `RepairKV - Random-K > 0` and
+  `RepairKV - Oldest-K > 0` at `K=128`.
 
 Post-run audit should also confirm the row-level restore-budget invariants:
 
@@ -218,7 +218,7 @@ Export prefix:
 
 Final pooled exact `6q` numbers:
 
-| K | B | B_match | IdleKV | Random-K | Oldest-K | Oracle-K |
+| K | B | B_match | RepairKV | Random-K | Oldest-K | Oracle-K |
 |---|---:|---:|---:|---:|---:|---:|
 | 8   | 0.413 | 0.411 | 0.432 | 0.413 | 0.426 | 0.501 |
 | 16  | 0.413 | 0.415 | 0.462 | 0.413 | 0.411 | 0.589 |
@@ -233,8 +233,8 @@ Final pooled exact `6q` numbers:
 Audit outcome:
 
 - all predeclared pooled and per-split 6q gates passed;
-- bootstrap gate passed: `IdleKV_lo@K=96 = 0.983 > B_match_hi@K=96 = 0.445`;
-- row-level restore count invariants passed for IdleKV, Random-K, Oldest-K,
+- bootstrap gate passed: `RepairKV_lo@K=96 = 0.983 > B_match_hi@K=96 = 0.445`;
+- row-level restore count invariants passed for RepairKV, Random-K, Oldest-K,
   and Oracle-K;
 - exact 6q runtime is quality-path only: total repair p50 is about `6.99 s`,
   dominated by exact evicted scoring at about `6.90 s`.

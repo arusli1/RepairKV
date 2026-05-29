@@ -1,6 +1,6 @@
 # Project Status
 
-IdleKV is now paper-first. Early phases established the KV-cache access,
+RepairKV is now paper-first. Early phases established the KV-cache access,
 eviction, and offloaded-store machinery; the current work centers on
 matched-budget repair evidence, paper figures, and robustness experiments for
 dynamic between-turn cache repair.
@@ -68,7 +68,7 @@ generalization.
 Phase 12 tested a second non-SnapKV policy because it earned the space. The
 sink-plus-recent `n=24` K-grid at `B_base=16384` passed the policy-curve gate:
 best gain `0.431` at `K=128`, three eligible adjacent positive points,
-controls near matched no-repair, and the SpanRef-K diagnostic covering IdleKV.
+controls near matched no-repair, and the SpanRef-K diagnostic covering RepairKV.
 The main figure now shows SnapKV, accumulated-attention, and sink-plus-recent
 policy rows as a robustness check rather than a broad canonical reproduction
 claim.
@@ -76,17 +76,17 @@ claim.
 Phase 13 makes the remaining work explicit rather than ad hoc. Each live idea
 must state a reviewer question, diagnose failures, pass unit tests, pass a
 minimal smoke, and then pass a written promotion gate before it can enter the
-main paper. The locked multi-turn run passed: non-initial IdleKV gain is
+main paper. The locked multi-turn run passed: non-initial RepairKV gain is
 `0.542` with paired interval `[0.458,0.620]`, and current-query-only repair
 beats stale-query-only repair by `0.307` with paired interval `[0.240,0.370]`.
 
 Phase 14 reframed the paper as test-time adaptation of active KV state and
 kept closure work promotion-gated. Phase 15 completed the bounded
-real-repository diagnostic: at `K=192`, event-only IdleKV improved exact
+real-repository diagnostic: at `K=192`, event-only RepairKV improved exact
 identifier accuracy from `0.188` for matched no-repair to `0.729` and beat
 random, oldest, stale-cue, wrong-event, and ToolFile controls with positive
 paired intervals. A bounded file-gated follow-up on the same frozen manifest
-reached `0.833` at `K=192`, improving over IdleKV while still trailing the
+reached `0.833` at `K=192`, improving over RepairKV while still trailing the
 label-assisted AnchorWindow reference at `0.896`. The result remains
 preliminary external-validity evidence rather than a broad real-code benchmark
 claim. It is now visible in Results prose because AdaptFM reviewers are not

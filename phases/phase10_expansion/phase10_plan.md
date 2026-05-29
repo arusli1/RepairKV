@@ -22,7 +22,7 @@ secondary but useful evidence to the appendix.
 
 ## Main claim boundary
 
-The current paper should not imply that IdleKV is already validated
+The current paper should not imply that RepairKV is already validated
 across all KV-cache systems. Its strongest present claim is:
 
 > In controlled two-turn MQ-NIAH diagnostics, a compressed cache can be
@@ -224,7 +224,7 @@ Conditions:
 - Full cache.
 - Matched no-repair with the same active evictable-context budget before
   each turn.
-- IdleKV rolling repair.
+- RepairKV rolling repair.
 - Random-K and Oldest-K rolling restores for promoted runs.
 - StaleQ-K, scored with the previous turn's query, if available; this is
   the strongest causal control for "new turn text matters."
@@ -245,21 +245,21 @@ Metrics:
 
 Promotion gates:
 
-- IdleKV beats matched no-repair on at least two non-initial turns.
-- IdleKV specifically helps on a revisit turn, not only on a single
+- RepairKV beats matched no-repair on at least two non-initial turns.
+- RepairKV specifically helps on a revisit turn, not only on a single
   first shift.
-- Random-K/Oldest-K do not match IdleKV after promotion.
+- Random-K/Oldest-K do not match RepairKV after promotion.
 - The result remains interpretable: no turn should fail because of
   answer-format brittleness or decode-budget truncation.
 
 Potential figures:
 
 - **Main candidate:** one-column trajectory plot. X-axis is turn index;
-  y-axis is score or score gain. Lines: Full, Matched, IdleKV, Gold-K;
+  y-axis is score or score gain. Lines: Full, Matched, RepairKV, Gold-K;
   add Random/Oldest only if visual space allows.
 - **Cool dense candidate:** cache-state heatmap. Rows are needle groups;
   columns are turns; cells mark whether the group is active before
-  answer under matched no-repair versus IdleKV. This directly visualizes
+  answer under matched no-repair versus RepairKV. This directly visualizes
   "repair follows shifting relevance."
 - **Appendix diagnostic:** churn plot, with bars for moved KV rows per
   turn and line for score gain.
@@ -299,7 +299,7 @@ Baselines:
   aware compression at Q2 time?"
 - `Refresh-buffered`: a bounded implemented form of `Refresh-K` that
   reselects the whole resumed context budget from active plus CPU-buffered
-  context KV rows using the same Q2 scoring rows as IdleKV. It does not
+  context KV rows using the same Q2 scoring rows as RepairKV. It does not
   recompute prefix KV and should be reported separately from a full-prefix
   recompute baseline.
 - `Refresh-recompute`: a stronger future comparator that recomputes or
@@ -326,33 +326,33 @@ Potential figure:
 
 - One-column specificity panel at a single operating point or over
   `K={48,96}`.
-- Bars or paired dots: Matched, StaleQ-K, WrongQ-K, Refresh-K, IdleKV,
+- Bars or paired dots: Matched, StaleQ-K, WrongQ-K, Refresh-K, RepairKV,
   Gold-K.
 - Caption should state which baselines use newly available Q2 and which
   require recomputation.
 
 Promotion gates:
 
-- IdleKV must beat stale/donor query controls by at least 0.10 at a
+- RepairKV must beat stale/donor query controls by at least 0.10 at a
   promoted operating point.
-- If Refresh-buffered beats IdleKV, the result is still valuable but
-  changes the claim: IdleKV is a low-recompute buffer repair primitive,
+- If Refresh-buffered beats RepairKV, the result is still valuable but
+  changes the claim: RepairKV is a low-recompute buffer repair primitive,
   not the absolute best Q2-time selector over all buffered rows.
 - If all Q2-time selectors saturate, move this panel to appendix and use
   latency/recompute cost as the differentiator.
 
 Immediate decision rules after the smoke:
 
-- If `K=48` separates Matched/Stale/Wrong from IdleKV and Gold-K still
+- If `K=48` separates Matched/Stale/Wrong from RepairKV and Gold-K still
   has headroom, run a larger locked specificity experiment at `K=48`.
 - If `K=96` saturates but `K=48` separates, use `K=48` for the promoted
   figure and keep `K=96` as a saturation diagnostic.
 - If both `K=48` and `K=96` saturate, rerun a smoke at lower `K`
   (`K={16,32,48}`) before spending on a full specificity run.
-- If StaleQ-K matches IdleKV, do not claim next-turn signal specificity;
+- If StaleQ-K matches RepairKV, do not claim next-turn signal specificity;
   demote the panel and revert to the narrower matched-budget repair
   story.
-- If donor WrongQ-K alone matches IdleKV, do not overinterpret it:
+- If donor WrongQ-K alone matches RepairKV, do not overinterpret it:
   MQ-NIAH queries are templatic, so the stale-query and Refresh-buffered
   comparisons are the stronger evidence.
 - If Refresh-buffered clearly wins, keep it as a main novelty-boundary
@@ -391,14 +391,14 @@ Potential figure:
 Goal: add method novelty if experiments show a persistent gap to
 Gold-K.
 
-Current IdleKV scores positions and expands local bursts. Phase 7/9
+Current RepairKV scores positions and expands local bursts. Phase 7/9
 results suggest some remaining gap may come from packing inefficiency:
 the selector can spend K on redundant neighboring rows or miss multiple
 answer spans.
 
 Candidate algorithm:
 
-- `CoverageIdleKV`: score candidate anchor positions with the Q2 scorer,
+- `CoverageRepairKV`: score candidate anchor positions with the Q2 scorer,
   then greedily choose intervals to maximize coverage of separated high
   score mass under the restore budget.
 - Penalize overlap with already selected intervals.
@@ -415,7 +415,7 @@ Unit tests:
 
 Promotion gate:
 
-- Only promote if it beats IdleKV by at least 0.05 at mid-budget without
+- Only promote if it beats RepairKV by at least 0.05 at mid-budget without
   hurting high-budget saturation or latency substantially.
 
 ## Query-count breadth
@@ -443,7 +443,7 @@ Smoke design:
 - Budgets: choose one operating budget per query count, not a full phase
   diagram.
 - Restore budgets: `K = 16, 48, 96, 128`.
-- Conditions: `A B B_match IdleKV Oracle-K` for smoke; add
+- Conditions: `A B B_match RepairKV Oracle-K` for smoke; add
   `Random-K Oldest-K` only for promoted final runs.
 - Samples: `n=2` for smoke, then `n=12` or `n=24` if the curve is
   monotone and the matched baseline remains meaningfully below full.
@@ -451,14 +451,14 @@ Smoke design:
 Smoke outcome on 2026-05-03:
 
 - 2Q is recoverable but quickly saturates. The clearest budget is
-  `B_base=12288`, where matched no-repair is `0.50` and IdleKV reaches
+  `B_base=12288`, where matched no-repair is `0.50` and RepairKV reaches
   `1.00` by `K=48`; `B_base=14336` is saturated and should not be used.
 - 3Q is recoverable with more K. The clearest budgets are
-  `B_base=14336`, where matched no-repair is `0.00` and IdleKV rises
+  `B_base=14336`, where matched no-repair is `0.00` and RepairKV rises
   from `0.25` at `K=48` to `0.75` at `K=96`, and `B_base=12288`, where
   the curve reaches `1.00` only at `K=128`.
 - 8Q is the highest-value breadth candidate. At `B_base=18432`, matched
-  no-repair is `0.60`; IdleKV is weak at `K=16`, modest at `K=48`,
+  no-repair is `0.60`; RepairKV is weak at `K=16`, modest at `K=48`,
   and nearly saturates by `K=96`. This gives a visually clean
   task-difficulty extension if it holds under a locked run.
 
@@ -467,7 +467,7 @@ Minimal locked follow-up if breadth becomes a priority:
 - Tasks/budgets: 2Q at `B_base=8192`, 3Q at `B_base=14336`, 8Q at
   `B_base=18432`, plus the already-final 4Q/6Q curves for context.
 - Restore budgets: `K={16,48,96,128}`.
-- Conditions: `A`, `B`, matched no-repair, Random-K, Oldest-K, IdleKV,
+- Conditions: `A`, `B`, matched no-repair, Random-K, Oldest-K, RepairKV,
   Gold-K.
 - Samples: `n=12` for an appendix figure; `n=24` only if the figure is
   likely to replace an existing main-text figure.
@@ -475,13 +475,13 @@ Minimal locked follow-up if breadth becomes a priority:
   count on x-axis and score gain over matched no-repair on y-axis,
   using one line for `K=48` and one for `K=96`, with Gold-K headroom
   markers. Promote to main only if all query counts show positive
-  IdleKV gain and content-agnostic controls stay near matched.
+  RepairKV gain and content-agnostic controls stay near matched.
 
 Promotion gates:
 
 - Matched no-repair is below full by at least 0.20 at the chosen budget.
-- IdleKV beats matched by at least 0.15 at `K=48` or `K=96`.
-- Gold-K remains at or above IdleKV, or the gap is explainable by
+- RepairKV beats matched by at least 0.15 at `K=48` or `K=96`.
+- Gold-K remains at or above RepairKV, or the gap is explainable by
   saturation.
 - Random-K/Oldest-K stay near matched in promoted runs.
 
@@ -507,7 +507,7 @@ attention-score retention to sink-plus-recent structural retention.
 
 Sink-plus-recent retention smoke outcome on 2026-05-03:
 
-- The `n=1` smoke is not paper-grade. IdleKV does not improve over
+- The `n=1` smoke is not paper-grade. RepairKV does not improve over
   matched no-repair at `B_base=8192`; at `B_base=12288` and `16384`, it
   improves only from `0.333` to `0.500` at `K=96`, while Gold-K remains
   `1.000`.
@@ -584,9 +584,9 @@ Minimum smoke:
 
 - Qwen2.5-7B-Instruct, 4Q only, one locked operating budget after a
   tiny calibration sweep.
-- Conditions: `A B B_match IdleKV Random-K Oldest-K Oracle-K`.
+- Conditions: `A B B_match RepairKV Random-K Oldest-K Oracle-K`.
 - `K={48,96}`, `n=2` for smoke, then `n=24` if the matched baseline is
-  non-saturated and IdleKV beats random/oldest.
+  non-saturated and RepairKV beats random/oldest.
 - Promotion gate: the non-SnapKV effect should be positive at both K
   values, and the paper must say the compressor changes only the
   first-stage retained rows; the idle repair operation is unchanged.
@@ -638,7 +638,7 @@ Engineering work before model runs:
 Model smoke design:
 
 - Use only 4Q at first, `B=16384`, `K={48, 96}`, `n=2`.
-- Conditions: `A B B_match IdleKV Oracle-K`.
+- Conditions: `A B B_match RepairKV Oracle-K`.
 - Promote a model only if full-cache Q2 is high and matched no-repair is
   meaningfully lower.
 - Promoted model panels need paired uncertainty and model-specific
@@ -650,7 +650,7 @@ Potential figure:
 - One-column "model transfer" dot plot.
 - X-axis: model.
 - Y-axis: score gain over matched at `K=96`.
-- Dot: IdleKV; hollow dot: Gold-K headroom or full-cache reference.
+- Dot: RepairKV; hollow dot: Gold-K headroom or full-cache reference.
 - This is compact, reviewer-friendly, and avoids multi-page tables.
 - If only one new model is promoted, use three points: Qwen2.5-7B anchor,
   same-family scale check if cheap, and one cross-family model if
@@ -689,9 +689,9 @@ Why this is interesting:
   mixed-precision layer-wise KV quantization; MiKV is especially close
   because it keeps less-important KV in low precision while preserving
   important KV at higher precision. MixKVQ is an even sharper boundary:
-  it is query-aware mixed-precision KV quantization, so IdleKV should not
+  it is query-aware mixed-precision KV quantization, so RepairKV should not
   claim novelty for query-aware precision assignment in general.
-- The possible IdleKV angle is temporal rather than static: after the
+- The possible RepairKV angle is temporal rather than static: after the
   future turn arrives, the system can decide which low-precision rows
   deserve high-precision replacement under a fixed byte budget.
 - This supports the broader thesis that idle windows can repair
@@ -736,7 +736,7 @@ Cheap smoke before any custom row-replacement cache:
   - `LowBit-all`: all evictable rows quantized/dequantized.
   - `StaticMixed`: sinks/recent or SnapKV-selected rows high precision,
     the rest low precision.
-  - `IdleKV-Precision`: low-bit base plus Q2-selected high-precision
+  - `RepairKV-Precision`: low-bit base plus Q2-selected high-precision
     row replacement.
   - `Random-Precision`, `Oldest-Precision`, and `Gold-Precision`
     controls if the smoke passes.
@@ -749,9 +749,9 @@ Cheap smoke before any custom row-replacement cache:
     Reuse row-eviction budgets only after the precision-only smoke shows
     a measurable degradation/repair gap.
   - Conditions: `Full-fp16`, `LowBit-all`, `StaticMixed`,
-    `Random-Precision`, `Oldest-Precision`, `IdleKV-Precision`,
+    `Random-Precision`, `Oldest-Precision`, `RepairKV-Precision`,
     `Gold-Precision`.
-  - Selection: use the same Q2 scorer as IdleKV for `IdleKV-Precision`;
+  - Selection: use the same Q2 scorer as RepairKV for `RepairKV-Precision`;
     use sink/recent or Q1/SnapKV importance for `StaticMixed`.
   - Samples: `n=2` smoke, then `n=12` appendix candidate only if the
     gate below passes on the smoke.
@@ -771,7 +771,7 @@ Potential figure:
 - One-column quality/byte Pareto.
 - X-axis: active KV byte budget or high-precision-equivalent bytes.
 - Y-axis: Q2 score.
-- Points: LowBit-all, StaticMixed, Random-Precision, IdleKV-Precision,
+- Points: LowBit-all, StaticMixed, Random-Precision, RepairKV-Precision,
   Gold-Precision, Full-fp16.
 - This could be visually strong, but it should enter the paper only if
   it is clean and clearly distinct from existing mixed-precision work.
@@ -780,7 +780,7 @@ Promotion gates:
 
 - `LowBit-all` must meaningfully degrade at `int2` or aggressive `int4`;
   otherwise there is no room to repair.
-- `IdleKV-Precision` should beat `LowBit-all` by at least `0.10` and
+- `RepairKV-Precision` should beat `LowBit-all` by at least `0.10` and
   beat `StaticMixed`, `Random-Precision`, and `Oldest-Precision` by at
   least `0.10` at the same active byte budget.
 - `Gold-Precision` should show headroom or validate that the selected
@@ -918,7 +918,7 @@ now:
   quality/byte smokes but not real low-bit attention latency claims.
 - Added a tested precision-promotion promotion gate and
   `recommend_precision_promotion.py`. It requires meaningful low-bit
-  degradation, IdleKV promotion beating static/random/oldest precision
+  degradation, RepairKV promotion beating static/random/oldest precision
   controls at the same active byte budget, Gold-Precision consistency,
   and explicit byte accounting. Row-store rows are automatically
   appendix/future-work evidence unless a real quantized-cache path is
@@ -941,7 +941,7 @@ now:
   evidence only unless reimplemented with a systems-fair buffered
   materialization path.
 - Specificity smoke and locked follow-up completed. The locked result is
-  integrated as a main specificity contrast: IdleKV beats matched by
+  integrated as a main specificity contrast: RepairKV beats matched by
   `+0.326` with positive paired-gain CI, stale/donor controls stay near
   matched, and Refresh-buffered/Gold-K expose remaining algorithmic
   headroom.
@@ -961,7 +961,7 @@ now:
   the compact 4Q/6Q main result.
 - HQQ row-store precision promotion completed as a negative branch. It
   validates that the implementation can round-trip when all rows are
-  promoted, but it does not show selective IdleKV repair under low-bit
+  promoted, but it does not show selective RepairKV repair under low-bit
   storage. Keep it out of the main paper.
 
 ## Red flags to avoid
@@ -978,7 +978,7 @@ now:
   one axis at a time, then choose the highest-signal compact figure.
 - Do not compare against query-aware within-turn systems as if they solve
   the same problem. If included, frame them as related retrieval-time
-  mechanisms, while IdleKV is post-compression pre-resume repair.
+  mechanisms, while RepairKV is post-compression pre-resume repair.
 - Do not claim the quantized-cache branch as a real memory or latency
   result if it uses the low-bit row-store materialization path. That
   smoke tests whether precision promotion has a quality signal and
@@ -1019,12 +1019,12 @@ Minimal model-transfer run:
 - Task: MQ-NIAH-4Q only.
 - Budget: `B_base=16384`.
 - Restore budgets: `K={48,96,128}`.
-- Conditions: `A`, `B`, matched no-repair, Random-K, Oldest-K, IdleKV,
+- Conditions: `A`, `B`, matched no-repair, Random-K, Oldest-K, RepairKV,
   Gold-K.
 - Samples: `n=12` for promotion to appendix; `n=24` only if it is a
   main-text candidate.
 - Promotion gate: full-cache score `A>=0.90`, matched below full by
-  `>=0.20`, IdleKV gain `>=0.15`, and Random/Oldest within `0.05` of
+  `>=0.20`, RepairKV gain `>=0.15`, and Random/Oldest within `0.05` of
   matched.
 
 Do not run more tiny-model transfer until the model can solve the
@@ -1044,7 +1044,7 @@ Do next:
 3. Run a small calibration smoke over base budgets before any locked
    result.
 4. Lock one budget and compare matched no-repair, Random-K, Oldest-K,
-   IdleKV, and Gold-K.
+   RepairKV, and Gold-K.
 
 Preferred policy order:
 
@@ -1067,7 +1067,7 @@ Minimal H2O run:
 - Base-budget calibration: try three budgets around the SnapKV operating
   point and keep the one with matched below full by `0.20--0.60`.
 - Restore budgets: `K={48,96,128}`.
-- Conditions: `A`, `B`, matched no-repair, Random-K, Oldest-K, IdleKV,
+- Conditions: `A`, `B`, matched no-repair, Random-K, Oldest-K, RepairKV,
   Gold-K.
 - Samples: `n=12` for appendix; `n=24` only if it can become a compact
   main robustness panel.
@@ -1090,6 +1090,6 @@ Candidate selectors:
 
 Smoke first on CPU/toy selectors, then run only the best candidate on
 MQ-NIAH-4Q at `B=16384`, `K={24,48,96}`, `n=12`.
-Promotion gate: beat IdleKV by at least `0.05` at a mid restore budget
+Promotion gate: beat RepairKV by at least `0.05` at a mid restore budget
 without reducing high-K saturation or making the method too complex for
 the workshop paper.

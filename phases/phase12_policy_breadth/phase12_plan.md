@@ -45,15 +45,15 @@ and the same active-cache accounting used by the main paper.
 - Budgets: `B_base in {12288, 16384}`.
 - Restore grid: `K in {8,16,24,32,48,64,80,96,128}`.
 - Samples: `n=2` for the smoke.
-- Conditions: `A`, `B`, matched no-repair, Random-K, Oldest-K, IdleKV, Gold-K.
+- Conditions: `A`, `B`, matched no-repair, Random-K, Oldest-K, RepairKV, Gold-K.
 
 Promotion gate:
 
 - Full-cache score should remain high enough to show task solvability.
 - Matched no-repair should leave at least `0.20` absolute score gap.
-- IdleKV should gain at least `0.15` at one or more non-saturated K values.
+- RepairKV should gain at least `0.15` at one or more non-saturated K values.
 - Random-K and Oldest-K should not explain the gain.
-- Gold-K should cover IdleKV, showing the benchmark metadata still bounds the
+- Gold-K should cover RepairKV, showing the benchmark metadata still bounds the
   selector.
 
 ## Full Run Result
@@ -73,12 +73,12 @@ The main paper now renders a compact policy-robustness figure:
 - X-axis: restore budget K.
 - Y-axis: score gain over matched no-repair.
 - Rows: SnapKV, accumulated-attention retention, sink-plus-recent retention.
-- Blue line: IdleKV gain.
+- Blue line: RepairKV gain.
 - Orange dashed line: Gold-K benchmark-metadata reference gain.
 - Gray band: Random-K/Oldest-K control-gain range.
 
 Main-paper promotion required a clean curve, not just a positive endpoint:
-The sink-plus-recent branch must pass the Phase 11 gate, show positive IdleKV
+The sink-plus-recent branch must pass the Phase 11 gate, show positive RepairKV
 gain at two or more adjacent K values, keep Random-K/Oldest-K near matched
 no-repair, and remain bounded by Gold-K. The completed run satisfies this
 gate, but the paper still describes both non-SnapKV branches as
@@ -89,5 +89,5 @@ protocol-matched retention variants rather than canonical reproductions.
 The calibrated smoke finished on 2026-05-03. `B_base=12288` failed because
 Random-K explained part of the gain. `B_base=16384` passed: best gain `+0.250`
 at `K=128`, full-vs-matched gap `0.667`, control lift `0.000`, and Gold-K
-covers IdleKV. The full `n=24` follow-up then passed and was integrated into
+covers RepairKV. The full `n=24` follow-up then passed and was integrated into
 the main paper.

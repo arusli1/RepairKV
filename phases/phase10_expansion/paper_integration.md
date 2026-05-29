@@ -46,7 +46,7 @@ is `phase10_high_signal_map.md`.
 2. **Matched-budget frontier:** faceted 2Q/4Q/6Q/8Q raw score versus
    restored rows. Show matched no-repair, Random-K, and Oldest-K controls
    in each facet.
-3. **Specificity contrast:** stale-query, donor-query, IdleKV,
+3. **Specificity contrast:** stale-query, donor-query, RepairKV,
    Refresh-buffered, and Gold-K. Plot mean score gain over matched
    no-repair with uncertainty plus paired win/tie/loss rates.
 4. **Multi-turn trajectory or cache-state heatmap:** relevance shifts
@@ -91,10 +91,10 @@ Use 4-6 sentences. Do not mention "Phase 10."
 
 1. Long-context workflows increasingly shift relevance across turns, so
    a KV cache compressed after one turn may be stale for the next.
-2. We introduce IdleKV, an idle-window repair primitive that keeps
+2. We introduce RepairKV, an idle-window repair primitive that keeps
    evicted KV rows in a CPU buffer and restores selected rows before the
    next turn under a matched active GPU KV budget.
-3. On controlled multi-query retrieval diagnostics, IdleKV recovers a
+3. On controlled multi-query retrieval diagnostics, RepairKV recovers a
    large fraction of future-turn answer quality lost to compression.
 4. Specificity controls show that repair follows newly revealed
    relevance rather than merely adding arbitrary buffered rows.
@@ -135,8 +135,8 @@ mockup in the paper.
 - The specificity smoke is design evidence only. It selected `K=48`
   because `K=96` failed stale-query separation. Main text can use the
   specificity panel only after the locked `n=24`, `K=48` follow-up passes.
-- If the locked specificity result keeps `Refresh-buffered` above IdleKV,
-  the caption and prose must say that IdleKV is an incremental buffered
+- If the locked specificity result keeps `Refresh-buffered` above RepairKV,
+  the caption and prose must say that RepairKV is an incremental buffered
   repair primitive relative to a stronger Q2-time buffered reselection
   comparator.
 - If a result uses fake quantization, label it as quality-only.
@@ -150,15 +150,15 @@ mockup in the paper.
 When `specificity_locked_n24_k48.csv` lands, run
 `recommend_specificity_next.py` and promote only if:
 
-- IdleKV gain over matched no-repair is at least `0.15`.
-- IdleKV gain CI lower bound is positive.
-- IdleKV beats `StaleQ-K` by at least `0.10`.
-- IdleKV beats `WrongQ-K` by at least `0.10`, or the donor-query caveat
+- RepairKV gain over matched no-repair is at least `0.15`.
+- RepairKV gain CI lower bound is positive.
+- RepairKV beats `StaleQ-K` by at least `0.10`.
+- RepairKV beats `WrongQ-K` by at least `0.10`, or the donor-query caveat
   is explicitly stated.
-- IdleKV paired win rate over matched is at least `0.55`.
+- RepairKV paired win rate over matched is at least `0.55`.
 
-If those pass but `Refresh-buffered` beats IdleKV by more than `0.05`,
+If those pass but `Refresh-buffered` beats RepairKV by more than `0.05`,
 the result can still enter the main paper as a novelty-boundary panel,
-but the claim becomes: IdleKV is an incremental paused-cache repair
+but the claim becomes: RepairKV is an incremental paused-cache repair
 primitive; full-budget buffered reselection is a stronger comparator
 with different algorithmic behavior and a different systems point.

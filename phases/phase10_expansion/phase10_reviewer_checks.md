@@ -17,7 +17,7 @@ operational guidance for Phase 10 decisions, not paper-facing prose.
 - The novelty is not query-aware KV selection in general. The narrower claim
   is post-compression, post-query, pre-resume repair from a buffered evicted
   cache without full-prefix recomputation.
-- If Refresh-buffered reaches the ceiling, frame IdleKV as an incremental
+- If Refresh-buffered reaches the ceiling, frame RepairKV as an incremental
   low-recompute repair primitive, not the strongest possible Q2-time
   reselection policy.
 
@@ -25,7 +25,7 @@ operational guidance for Phase 10 decisions, not paper-facing prose.
 
 1. Method schematic showing compression, evicted CPU buffer, idle window,
    query-time scoring, restore, and resumed generation.
-2. 4Q/6Q matched-active-budget frontier with matched no-repair, IdleKV,
+2. 4Q/6Q matched-active-budget frontier with matched no-repair, RepairKV,
    Random-K, Oldest-K, and Gold-K.
 3. Locked specificity contrast showing stale-query and donor-query controls.
 4. Multi-turn relevance-shift trajectory only if the smoke and locked run pass.
@@ -44,9 +44,9 @@ Promotion checks:
 
 - Full-cache score `A >= 0.90`.
 - Full-cache versus matched no-repair gap `A - B_match >= 0.20`.
-- IdleKV gain over matched no-repair `>= 0.15`.
-- IdleKV beats `max(Random-K, Oldest-K)` by a meaningful margin.
-- Gold-K is at least as high as IdleKV.
+- RepairKV gain over matched no-repair `>= 0.15`.
+- RepairKV beats `max(Random-K, Oldest-K)` by a meaningful margin.
+- Gold-K is at least as high as RepairKV.
 - No severe split heterogeneity or negative split-level lift.
 
 2Q is a sanity endpoint even when positive because it saturates easily. 8Q is
@@ -65,7 +65,7 @@ the only query-count endpoint with realistic main-text upside.
 
 ## Failure Handling
 
-- Do not salvage a run into the main paper if Random-K/Oldest-K catch IdleKV.
+- Do not salvage a run into the main paper if Random-K/Oldest-K catch RepairKV.
 - Do not promote a task where full-cache accuracy is weak.
 - Do not expand query-count into a full sweep unless 8Q endpoint evidence is
   clean and visually useful.

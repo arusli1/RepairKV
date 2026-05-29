@@ -559,7 +559,7 @@ K≥64" framing.
 
 ## ADDENDUM (2026-05-06 20:36 UTC): GPU verify lands
 
-n=36 (n=12 × 3 partitions), K=96, conditions {A, B, B_match, IdleKV}, with
+n=36 (n=12 × 3 partitions), K=96, conditions {A, B, B_match, RepairKV}, with
 PHASE18_SCORE_ON_GPU=1 (matmul + softmax in score_evicted_positions
 stay on the model's GPU instead of round-tripping to CPU FP32).
 

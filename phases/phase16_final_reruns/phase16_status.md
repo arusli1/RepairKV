@@ -29,7 +29,7 @@ Smoke results completed in this pass:
 
 - Scissorhands-style MQ-NIAH-6Q smoke passed the locked-run gate. At
   `B=18432`, `n=2`, and `K={48,96,128}`, full-cache ability was `0.958`,
-  IdleKV exceeded matched no-repair by `+0.333/+0.667/+0.667`, and it
+  RepairKV exceeded matched no-repair by `+0.333/+0.667/+0.667`, and it
   exceeded the best content-agnostic control by `+0.292/+0.667/+0.625`.
   Artifact:
   `phases/phase16_final_reruns/results/scissorhands_smoke_n2_b18432.csv`.
@@ -41,7 +41,7 @@ Smoke results completed in this pass:
   Audit artifact:
   `phases/phase16_final_reruns/results/mistral_smoke_n2_b16384_audit.json`.
 - Mistral `n=4` re-smoke repeated the same outcome. Full-cache ability was
-  `0.896`, still below the predeclared `0.90` gate, while IdleKV remained well
+  `0.896`, still below the predeclared `0.90` gate, while RepairKV remained well
   separated from matched no-repair and content-agnostic controls. This is close
   enough to justify one larger same-protocol smoke, but it is not yet paper
   evidence. Artifacts:
@@ -49,7 +49,7 @@ Smoke results completed in this pass:
   `phases/phase16_final_reruns/results/mistral_smoke_n4_b16384_audit.json`.
 - Mistral `n=8` same-protocol smoke confirmed the near miss rather than
   clearing the gate. Full-cache ability was again `0.896`; matched no-repair
-  was `0.135`; and IdleKV reached `0.396/0.833/0.865` at
+  was `0.135`; and RepairKV reached `0.396/0.833/0.865` at
   `K=24/48/96`, with positive paired intervals over matched no-repair and
   content-agnostic controls. Decision: do not launch a locked Mistral run,
   because the task/model ability gate is not met under the frozen protocol.
@@ -65,7 +65,7 @@ Smoke results completed in this pass:
   `phases/phase16_final_reruns/results/scissorhands_smoke_n2_b18432_audit.json`.
 - Scissorhands-style MQ-NIAH-6Q locked run passed the promotion gate. At
   `B=18432`, `n=24`, and `K={48,64,80,96,128}`, full-cache ability was
-  `0.990`; IdleKV gains over matched no-repair were
+  `0.990`; RepairKV gains over matched no-repair were
   `+0.347/+0.431/+0.556/+0.618/+0.622`; and paired bootstrap lower bounds
   against matched no-repair were all positive. Recommendation:
   `main_reference_plus_appendix`. Artifacts:

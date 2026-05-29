@@ -2,7 +2,7 @@
 
 ## Environment
 
-- Model dir: `/home/ubuntu/IdleKV/models/Qwen2.5-7B-Instruct`
+- Model dir: `/home/ubuntu/RepairKV/models/Qwen2.5-7B-Instruct`
 - Layers: `28`
 - KV heads: `4`
 - Cache runtime type: `DynamicCache`

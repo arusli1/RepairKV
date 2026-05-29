@@ -10,7 +10,7 @@ repository cue rather than synthetic MQ-NIAH question text?
 
 The target evidence is not SWE-bench, WebArena, patch generation, or tool-use
 success. The target is a controlled mechanism diagnostic: after a repository cue
-shifts relevance to a different region of an already-seen context, can IdleKV
+shifts relevance to a different region of an already-seen context, can RepairKV
 restore the needed evicted rows better than matched no-repair and
 content-agnostic restore controls?
 

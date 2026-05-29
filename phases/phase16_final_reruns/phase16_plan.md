@@ -24,7 +24,7 @@ runs from this directory without a fresh confirmation.
 3. **Scissorhands smoke.** Test the Scissorhands-style first-stage compressor
    with `n=2`, `B=18432`, and `K={48,96,128}` on MQ-NIAH-6Q.
 4. **Refresh boundary smoke.** Confirm full-budget reselection still dominates
-   or bounds IdleKV under exact-Q scoring before any final wording change.
+   or bounds RepairKV under exact-Q scoring before any final wording change.
 5. **Optional Llama retry smoke.** Only run if Mistral fails for a mechanical
    model-family reason, not just because the result is less pretty.
 6. **Locked full runs.** Launch only the branches whose smoke result is clean
@@ -36,19 +36,19 @@ A portability or Scissorhands result can enter the main paper only if:
 
 - full-cache ability is at least `0.90`;
 - `A - B_match >= 0.20` on at least two K points;
-- `IdleKV - B_match >= 0.10` on at least two K points;
-- `IdleKV` beats the best content-agnostic control by at least `0.05` on at
+- `RepairKV - B_match >= 0.10` on at least two K points;
+- `RepairKV` beats the best content-agnostic control by at least `0.05` on at
   least two K points;
 - the result is not fully saturated across all K points.
 
 If a run fails because full-cache ability is weak, redesign the task/budget.
 If it passes but saturates, keep it appendix-only. If Scissorhands weakens the
 base cache too much, treat it as a stress-test failure rather than a negative
-result against the IdleKV mechanism.
+result against the RepairKV mechanism.
 
 Locked artifacts must also pass `audit_phase16_locked.py`, which adds paired
-bootstrap intervals for `IdleKV - B_match`, `IdleKV - Random-K`,
-`IdleKV - Oldest-K`, and `IdleKV - max(Random-K, Oldest-K)` at each K. A
+bootstrap intervals for `RepairKV - B_match`, `RepairKV - Random-K`,
+`RepairKV - Oldest-K`, and `RepairKV - max(Random-K, Oldest-K)` at each K. A
 Phase 16 result is eligible for a main-text reference only when at least two K
 points clear the mean gates and have positive paired intervals against both
 matched no-repair and content-agnostic controls. If the mean gates pass but

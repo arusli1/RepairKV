@@ -36,7 +36,7 @@ Last updated: 2026-05-04 17:41 UTC.
 - Added pre-specified locked-run wrappers for calibrated Llama and selector
   variants, used only after their smoke gates pass.
 - Patched the shared Phase 9 artifact summarizer to export
-  `IdleKV-Coverage` and `IdleKV-MMR`, because selector-variant smokes were not
+  `RepairKV-Coverage` and `RepairKV-MMR`, because selector-variant smokes were not
   auditable without those columns.
 - Incorporated completed expert-agent critiques: keep main text compact,
   foreground tiered-KV promotion, treat Refresh-K as a boundary comparator, and
@@ -317,7 +317,7 @@ The reviewer holes that remain material are:
 - Broader generality: current Llama and retention-rule evidence are targeted
   breadth checks, not enough for a broad model-family or named-policy claim.
 - Algorithmic selection gap: Refresh-buffered and the Coverage selector show that
-  IdleKV is a useful promotion primitive, not the final selector. SpanRef-K is a
+  RepairKV is a useful promotion primitive, not the final selector. SpanRef-K is a
   benchmark-metadata span-group diagnostic, so it should support interpretation
   but not be described as a universal upper bound.
 - Off-device retention policy: the paper now states the two-level retention
@@ -354,8 +354,8 @@ Result:
 - `6q_proxy`: needs controlled proxy smoke or locked run. Existing n=100 proxy
   has large speedup but narrowly misses the strict retained-gain gate and also
   lacks controls.
-- `specificity`: boundary result. IdleKV beats stale/donor controls, but
-  Refresh-K exceeds IdleKV by `+0.458`, so the paper must frame Refresh-K
+- `specificity`: boundary result. RepairKV beats stale/donor controls, but
+  Refresh-K exceeds RepairKV by `+0.458`, so the paper must frame Refresh-K
   explicitly as full-budget reselection diagnostic evidence.
 - `llama`: current readiness now prefers the Phase 11 Llama-3.1-8B 4Q
   full-grid artifact (`n=24`, nine K values), which passes the
@@ -382,9 +382,9 @@ Evaluator:
 
 Result:
 
-- 4Q controlled proxy smoke passed. At K=96, proxy IdleKV gain is `+0.833`;
+- 4Q controlled proxy smoke passed. At K=96, proxy RepairKV gain is `+0.833`;
   max Random-K/Oldest-K control lift is `+0.042`.
-- 6Q controlled proxy smoke passed. At K=96, proxy IdleKV gain is `+0.500`;
+- 6Q controlled proxy smoke passed. At K=96, proxy RepairKV gain is `+0.500`;
   max Random-K/Oldest-K control lift is `+0.042`.
 
 Decision:
@@ -402,7 +402,7 @@ Command:
 
 ```bash
 tmux new-session -d -s phase14_proxy_locked \
-  'cd /home/ubuntu/IdleKV && bash phases/phase14_critical_flaw_closure/scripts/run_proxy_controlled_locked.sh'
+  'cd /home/ubuntu/RepairKV && bash phases/phase14_critical_flaw_closure/scripts/run_proxy_controlled_locked.sh'
 ```
 
 Purpose:
@@ -410,7 +410,7 @@ Purpose:
 - Produce controlled, locked proxy-scorer evidence for the scalable repair
   path.
 - Settings: 4Q and 6Q, `K={48,64,80,96,128}`, `n=100`, proxy scorer,
-  `A/B/B_match/Random-K/Oldest-K/IdleKV/Oracle-K`.
+  `A/B/B_match/Random-K/Oldest-K/RepairKV/Oracle-K`.
 Output:
 
 - `phases/phase14_critical_flaw_closure/results/proxy_controlled_locked_n100.csv`
@@ -445,9 +445,9 @@ Evaluator:
 Result:
 
 - Status: `refresh_boundary_confirmed`.
-- IdleKV improves over matched at every tested K, but Refresh-K dominates
-  IdleKV across the frontier.
-- At high K, stale/donor controls get close or equal to IdleKV, so this smoke
-  should not become a new main figure. It supports text framing: IdleKV is an
+- RepairKV improves over matched at every tested K, but Refresh-K dominates
+  RepairKV across the frontier.
+- At high K, stale/donor controls get close or equal to RepairKV, so this smoke
+  should not become a new main figure. It supports text framing: RepairKV is an
   incremental pre-resume promotion primitive, while Refresh-K is full-budget
   Q2-time reselection diagnostic evidence.

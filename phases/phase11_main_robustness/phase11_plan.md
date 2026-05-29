@@ -25,8 +25,8 @@ the existing Qwen2.5-7B 2Q/4Q/6Q/8Q matched-budget frontier.
    - Budget: `B_base=16384`.
    - Samples: `n=24`.
    - Restore budgets: `K={8,16,24,32,48,64,80,96,128}`.
-   - Main gate: IdleKV must beat matched no-repair and Random/Oldest over the
-     curve, with no broad negative split and Gold-K covering IdleKV.
+   - Main gate: RepairKV must beat matched no-repair and Random/Oldest over the
+     curve, with no broad negative split and Gold-K covering RepairKV.
 
 2. **Llama-3.1-8B 4Q K-grid.**
    - Task: `clean_suite` (same 4Q protocol as the Qwen 4Q main panel).
@@ -38,7 +38,7 @@ the existing Qwen2.5-7B 2Q/4Q/6Q/8Q matched-budget frontier.
    - Restore budgets: `K={8,16,24,32,48,64,80,96,128}`.
    - Main gate: enough curve shape to show cross-family portability without
      claiming broad multi-model robustness. At least one planned point must be
-     non-saturated; if IdleKV and Gold-K are flat at 1.0 across the useful
+     non-saturated; if RepairKV and Gold-K are flat at 1.0 across the useful
      region, the result remains appendix-only even if positive.
 
 ## Current Run Status
